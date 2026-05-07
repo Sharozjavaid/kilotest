@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PlateMath — AI meal plans for college students on a $50/week budget</title>
+<script>
+!function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+posthog.init('phx_WYdqZcALGX4mxzCdD2WPzaxEskp4pEPqVdsvFnebyJcidoLg', {api_host:'https://us.i.posthog.com'})
+</script>
+<style>
+  :root{
+    --tomato:#FF5A3C;
+    --tomato-dark:#E64321;
+    --navy:#0F2A3F;
+    --cream:#FFF4E6;
+    --paper:#FFFBF4;
+    --ink:#0F2A3F;
+    --muted:#5A6B7B;
+    --line:#E9DEC9;
+    --shadow:0 12px 32px rgba(15,42,63,.10);
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color:var(--ink);
+    background:var(--paper);
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--tomato-dark);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .container{max-width:1120px;margin:0 auto;padding:0 24px}
+
+  /* Nav */
+  nav{
+    position:sticky;top:0;z-index:50;
+    background:rgba(255,251,244,.85);
+    backdrop-filter:saturate(140%) blur(8px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav-row{display:flex;align-items:center;justify-content:space-between;height:68px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;color:var(--navy)}
+  .logo-mark{
+    width:32px;height:32px;border-radius:9px;
+    background:var(--tomato);color:#fff;display:grid;place-items:center;
+    font-weight:900;font-size:16px;box-shadow:inset 0 -4px 0 rgba(0,0,0,.12);
+  }
+  .nav-links{display:flex;gap:28px;align-items:center}
+  .nav-links a{color:var(--navy);font-weight:500;font-size:15px}
+  .nav-links a:hover{color:var(--tomato-dark);text-decoration:none}
+  .btn{
+    display:inline-block;padding:11px 18px;border-radius:10px;
+    font-weight:700;font-size:15px;cursor:pointer;border:none;
+    transition:transform .08s ease, box-shadow .15s ease, background .15s ease;
+  }
+  .btn-primary{background:var(--tomato);color:#fff;box-shadow:0 6px 14px rgba(255,90,60,.35)}
+  .btn-primary:hover{background:var(--tomato-dark);text-decoration:none;transform:translateY(-1px)}
+  .btn-ghost{background:transparent;color:var(--navy);border:1.5px solid var(--navy)}
+  .btn-ghost:hover{background:var(--navy);color:#fff;text-decoration:none}
+  @media (max-width:720px){ .nav-links a:not(.btn){display:none} }
+
+  /* Hero */
+  .hero{padding:72px 0 56px;position:relative;overflow:hidden}
+  .hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;
+    background:var(--cream);color:var(--navy);
+    padding:7px 12px;border-radius:999px;font-weight:600;font-size:13px;
+    border:1px solid var(--line);
+  }
+  .eyebrow .dot{width:8px;height:8px;background:var(--tomato);border-radius:50%}
+  h1{
+    font-size:56px;line-height:1.05;letter-spacing:-.02em;
+    color:var(--navy);font-weight:800;margin:18px 0 18px;
+  }
+  h1 .hl{background:linear-gradient(180deg, transparent 60%, rgba(255,90,60,.30) 60%);padding:0 4px}
+  .lede{font-size:19px;color:var(--muted);max-width:560px}
+  .hero-cta{display:flex;gap:12px;margin-top:28px;flex-wrap:wrap}
+  .trust-row{display:flex;gap:24px;align-items:center;margin-top:28px;color:var(--muted);font-size:14px;flex-wrap:wrap}
+  .trust-row strong{color:var(--navy)}
+  .trust-row .check{color:var(--tomato)}
+
+  /* Hero card (mock plan) */
+  .plan-card{
+    background:#fff;border-radius:18px;padding:22px;border:1px solid var(--line);
+    box-shadow:var(--shadow);position:relative;
+  }
+  .plan-card::before{
+    content:"";position:absolute;inset:-18px -18px auto auto;width:120px;height:120px;
+    background:radial-gradient(closest-side, rgba(255,90,60,.18), transparent);z-index:0;
+  }
+  .plan-head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px;position:relative}
+  .plan-head h3{font-size:18px;color:var(--navy)}
+  .plan-head .week{font-size:13px;color:var(--muted)}
+  .budget-bar{background:var(--cream);border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border:1px solid var(--line)}
+  .budget-bar b{color:var(--navy)}
+  .budget-bar .spent{color:var(--tomato-dark);font-weight:700}
+  .meals{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  .meal{
+    background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+    display:flex;justify-content:space-between;align-items:center;font-size:14px;
+  }
+  .meal .name{font-weight:600;color:var(--navy)}
+  .meal .price{color:var(--tomato-dark);font-weight:700}
+  .meal .day{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .plan-foot{margin-top:14px;display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted)}
+  .pill{background:var(--navy);color:#fff;padding:4px 9px;border-radius:999px;font-size:12px;font-weight:600}
+
+  @media (max-width:880px){
+    .hero{padding:48px 0 32px}
+    .hero-grid{grid-template-columns:1fr;gap:36px}
+    h1{font-size:40px}
+    .lede{font-size:17px}
+  }
+
+  /* Sections */
+  section{padding:80px 0}
+  .section-head{text-align:center;max-width:680px;margin:0 auto 48px}
+  .section-head h2{font-size:38px;letter-spacing:-.01em;color:var(--navy);margin-bottom:12px;line-height:1.15}
+  .section-head p{color:var(--muted);font-size:18px}
+  .kicker{
+    display:inline-block;text-transform:uppercase;letter-spacing:.12em;font-size:12px;
+    font-weight:700;color:var(--tomato-dark);margin-bottom:10px;
+  }
+
+  /* Pain section */
+  .pains{background:var(--cream)}
+  .pain-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  .pain{
+    background:#fff;padding:24px;border-radius:14px;border:1px solid var(--line);
+  }
+  .pain h4{color:var(--navy);font-size:17px;margin-bottom:8px}
+  .pain p{color:var(--muted);font-size:15px}
+  .pain .icn{
+    width:40px;height:40px;border-radius:10px;background:var(--cream);
+    display:grid;place-items:center;margin-bottom:14px;font-size:20px;
+  }
+  @media (max-width:760px){ .pain-grid{grid-template-columns:1fr} }
+
+  /* How it works */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+  .step{
+    background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:28px;position:relative;
+  }
+  .step-num{
+    position:absolute;top:-14px;left:24px;
+    background:var(--tomato);color:#fff;width:34px;height:34px;border-radius:50%;
+    display:grid;place-items:center;font-weight:800;box-shadow:var(--shadow);
+  }
+  .step h4{color:var(--navy);margin:8px 0 8px;font-size:18px}
+  .step p{color:var(--muted)}
+  @media (max-width:760px){ .steps{grid-template-columns:1fr} }
+
+  /* Sample week */
+  .sample{background:linear-gradient(180deg, var(--paper) 0%, var(--cream) 100%)}
+  .week-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:10px}
+  .day-card{
+    background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;
+    display:flex;flex-direction:column;gap:8px;font-size:13px;
+  }
+  .day-card .label{font-weight:800;color:var(--tomato-dark);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+  .day-card .item{color:var(--navy);line-height:1.35}
+  .day-card .item small{color:var(--muted);display:block;font-size:11px;margin-top:1px}
+  .day-card .total{margin-top:auto;padding-top:8px;border-top:1px dashed var(--line);font-size:12px;color:var(--muted)}
+  .day-card .total b{color:var(--navy)}
+  @media (max-width:980px){ .week-grid{grid-template-columns:repeat(3,1fr)} }
+  @media (max-width:520px){ .week-grid{grid-template-columns:repeat(2,1fr)} }
+
+  .receipt{
+    margin-top:28px;background:#fff;border:1px dashed var(--navy);border-radius:14px;
+    padding:24px;display:grid;grid-template-columns:1.4fr 1fr;gap:24px;align-items:center;
+  }
+  .receipt h4{color:var(--navy);font-size:18px;margin-bottom:6px}
+  .receipt p{color:var(--muted);font-size:15px}
+  .receipt-stats{display:flex;gap:18px;flex-wrap:wrap}
+  .stat{background:var(--cream);border-radius:10px;padding:14px 18px;border:1px solid var(--line);min-width:130px}
+  .stat .num{font-size:24px;font-weight:800;color:var(--navy)}
+  .stat .lbl{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
+  @media (max-width:760px){ .receipt{grid-template-columns:1fr} }
+
+  /* Features */
+  .feat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+  .feat{background:#fff;border:1px solid var(--line);border-radius:14px;padding:26px;display:flex;gap:16px}
+  .feat .ic{
+    flex:0 0 44px;width:44px;height:44px;border-radius:10px;
+    background:var(--cream);color:var(--tomato-dark);
+    display:grid;place-items:center;font-weight:800;
+  }
+  .feat h4{color:var(--navy);margin-bottom:6px;font-size:17px}
+  .feat p{color:var(--muted);font-size:15px}
+  @media (max-width:760px){ .feat-grid{grid-template-columns:1fr} }
+
+  /* Pricing */
+  .pricing{background:var(--navy);color:#fff}
+  .pricing .section-head h2{color:#fff}
+  .pricing .section-head p{color:#B8C7D4}
+  .price-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:22px;max-width:820px;margin:0 auto}
+  .plan{
+    background:#0B2030;border:1px solid #1F3A52;border-radius:16px;padding:30px;position:relative;
+  }
+  .plan.featured{background:linear-gradient(180deg,#13334C 0%, #0B2030 100%);border:1px solid var(--tomato)}
+  .plan-tag{
+    position:absolute;top:-12px;right:24px;background:var(--tomato);color:#fff;
+    padding:5px 10px;border-radius:999px;font-size:12px;font-weight:700;
+  }
+  .plan h3{font-size:18px;margin-bottom:6px}
+  .plan .amt{font-size:40px;font-weight:800;margin:6px 0}
+  .plan .amt span{font-size:15px;font-weight:500;color:#B8C7D4}
+  .plan ul{list-style:none;margin:18px 0 22px}
+  .plan li{padding:7px 0;color:#D5E0EB;font-size:15px;display:flex;gap:10px;align-items:flex-start}
+  .plan li::before{content:"✓";color:var(--tomato);font-weight:800}
+  .plan .btn{width:100%;text-align:center}
+  .plan-light{background:#fff;color:var(--navy);border:none}
+  .plan-light:hover{background:var(--cream)}
+  @media (max-width:760px){ .price-grid{grid-template-columns:1fr} }
+
+  /* Testimonials */
+  .quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  .quote{background:#fff;border:1px solid var(--line);border-radius:14px;padding:24px}
+  .quote p{color:var(--navy);font-size:15px;line-height:1.55}
+  .who{display:flex;align-items:center;gap:12px;margin-top:16px}
+  .avatar{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:14px}
+  .who .name{font-weight:700;color:var(--navy);font-size:14px}
+  .who .role{color:var(--muted);font-size:13px}
+  @media (max-width:880px){ .quotes{grid-template-columns:1fr} }
+
+  /* FAQ */
+  .faq{max-width:780px;margin:0 auto}
+  details{
+    background:#fff;border:1px solid var(--line);border-radius:12px;
+    padding:18px 20px;margin-bottom:12px;cursor:pointer;
+  }
+  details[open]{border-color:var(--tomato)}
+  summary{font-weight:700;color:var(--navy);list-style:none;display:flex;justify-content:space-between;align-items:center}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";font-size:22px;color:var(--tomato);font-weight:300;transition:transform .15s ease}
+  details[open] summary::after{content:"–"}
+  details p{color:var(--muted);margin-top:10px;font-size:15px}
+
+  /* CTA */
+  .cta-band{
+    background:var(--tomato);color:#fff;border-radius:20px;padding:48px;
+    display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap;
+    box-shadow:var(--shadow);
+  }
+  .cta-band h3{font-size:28px;line-height:1.2;max-width:580px}
+  .cta-band p{margin-top:6px;color:#FFE6DD}
+  .cta-band .btn{background:#fff;color:var(--navy)}
+  .cta-band .btn:hover{background:var(--navy);color:#fff}
+
+  /* Footer */
+  footer{background:#0B2030;color:#B8C7D4;padding:48px 0 28px;margin-top:0}
+  .foot-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:32px}
+  footer h5{color:#fff;font-size:14px;margin-bottom:12px;text-transform:uppercase;letter-spacing:.08em}
+  footer ul{list-style:none}
+  footer li{padding:5px 0;font-size:14px}
+  footer a{color:#B8C7D4}
+  footer a:hover{color:#fff;text-decoration:none}
+  .foot-bot{margin-top:36px;padding-top:18px;border-top:1px solid #1F3A52;font-size:13px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+  @media (max-width:760px){ .foot-grid{grid-template-columns:1fr 1fr} }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-row">
+    <a href="#top" class="logo" data-cta="nav-logo">
+      <span class="logo-mark">P</span> PlateMath
+    </a>
+    <div class="nav-links">
+      <a href="#how" data-cta="nav-how">How it works</a>
+      <a href="#sample" data-cta="nav-sample">Sample week</a>
+      <a href="#pricing" data-cta="nav-pricing">Pricing</a>
+      <a href="#faq" data-cta="nav-faq">FAQ</a>
+      <a href="#signup" class="btn btn-primary" data-cta="nav-signup">Start free week</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="container hero-grid">
+    <div>
+      <span class="eyebrow"><span class="dot"></span> Built for dorm kitchens & first apartments</span>
+      <h1>Eat 21 meals a week on <span class="hl">$47 or less</span> — without canned soup for dinner.</h1>
+      <p class="lede">PlateMath is an AI meal planner that turns your weekly grocery budget, your campus store's prices, and the one pot in your kitchen into a real 7-day plan. Built specifically for college students who don't want to live on ramen.</p>
+      <div class="hero-cta">
+        <a href="#signup" class="btn btn-primary" data-cta="hero-start-free">Plan my first week — free</a>
+        <a href="#sample" class="btn btn-ghost" data-cta="hero-see-sample">See a real $47 week</a>
+      </div>
+      <div class="trust-row">
+        <span><span class="check">✓</span> No credit card</span>
+        <span><span class="check">✓</span> Works with Aldi, Trader Joe's, Walmart, Kroger</span>
+        <span><strong>4,300+</strong> students cooking</span>
+      </div>
+    </div>
+
+    <div class="plan-card" aria-hidden="true">
+      <div class="plan-head">
+        <div>
+          <h3>Maya's Week 6 plan</h3>
+          <span class="week">UT Austin • Aldi run, Sunday 3pm</span>
+        </div>
+        <span class="pill">$46.82</span>
+      </div>
+      <div class="budget-bar">
+        <span><b>Weekly budget</b> $50.00</span>
+        <span class="spent">Spent $46.82 · $3.18 left</span>
+      </div>
+      <div class="meals">
+        <div class="meal"><div><span class="day">Mon</span><span class="name">Black bean tacos</span></div><span class="price">$1.84</span></div>
+        <div class="meal"><div><span class="day">Tue</span><span class="name">Peanut noodle bowl</span></div><span class="price">$2.10</span></div>
+        <div class="meal"><div><span class="day">Wed</span><span class="name">One-pan chicken rice</span></div><span class="price">$2.65</span></div>
+        <div class="meal"><div><span class="day">Thu</span><span class="name">Egg fried rice (leftovers)</span></div><span class="price">$1.40</span></div>
+        <div class="meal"><div><span class="day">Fri</span><span class="name">Tomato lentil soup</span></div><span class="price">$1.55</span></div>
+        <div class="meal"><div><span class="day">Sat</span><span class="name">Pesto pasta + salad</span></div><span class="price">$2.30</span></div>
+      </div>
+      <div class="plan-foot">
+        <span>21 meals · 1,950 kcal/day · 18g protein avg</span>
+        <span>↓ Grocery list ready</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="pains">
+  <div class="container">
+    <div class="section-head">
+      <span class="kicker">The 3 a.m. grocery cart problem</span>
+      <h2>Why your grocery budget keeps disappearing</h2>
+      <p>You're not bad at money. You're trying to plan dinner with 14 tabs open at midnight. We get it.</p>
+    </div>
+    <div class="pain-grid">
+      <div class="pain">
+        <div class="icn">🛒</div>
+        <h4>Recipes that pretend $50 is a lot</h4>
+        <p>Most "budget" meal planners assume you own truffle oil and a working spice rack. They don't tell you that miso paste costs $7 for one recipe.</p>
+      </div>
+      <div class="pain">
+        <div class="icn">🧊</div>
+        <h4>Half a cabbage rotting in the mini-fridge</h4>
+        <p>You bought it for one stir-fry. Now it's science. PlateMath plans every ingredient into 2-3 meals so nothing dies in a drawer.</p>
+      </div>
+      <div class="pain">
+        <div class="icn">🍜</div>
+        <h4>Cup-noodle Tuesday (and Wednesday)</h4>
+        <p>By midweek you're tired and the dining hall is closed. Our plans front-load prep so Wednesday you reheat — not improvise.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="container">
+    <div class="section-head">
+      <span class="kicker">How it works</span>
+      <h2>Three questions, one grocery list, seven days fed.</h2>
+      <p>Setup takes about 90 seconds. You'll have a plan and a shoppable list before your laundry's done.</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h4>Tell us your kitchen</h4>
+        <p>Pick your store (Aldi, Walmart, Kroger, Trader Joe's, Target), your weekly cap ($30, $40, $50), and what you actually own — microwave only? One pan? Mini-fridge? It matters.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h4>AI builds your week</h4>
+        <p>PlateMath cross-checks 1,200+ student-tested recipes against this week's prices at your store, then picks 7 days of overlapping ingredients so nothing's wasted.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h4>Shop, cook, eat</h4>
+        <p>One grocery list sorted by aisle. Recipes capped at 4 ingredients on weekdays. Sunday prep tells you exactly what to chop now so Wednesday-you doesn't quit.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sample" id="sample">
+  <div class="container">
+    <div class="section-head">
+      <span class="kicker">A real week</span>
+      <h2>Here's what $46.82 looks like at Aldi this week.</h2>
+      <p>Generated for Maya, a sophomore at UT Austin. Vegetarian-flexible, has a microwave and one skillet, hates cilantro.</p>
+    </div>
+    <div class="week-grid">
+      <div class="day-card">
+        <span class="label">Mon</span>
+        <div class="item">Overnight oats <small>Bfast · $0.62</small></div>
+        <div class="item">PB banana wrap <small>Lunch · $0.95</small></div>
+        <div class="item">Black bean tacos <small>Dinner · $1.84</small></div>
+        <div class="total"><b>$3.41</b> · 1,940 kcal</div>
+      </div>
+      <div class="day-card">
+        <span class="label">Tue</span>
+        <div class="item">Overnight oats <small>Bfast · $0.62</small></div>
+        <div class="item">Bean taco leftovers <small>Lunch · $1.20</small></div>
+        <div class="item">Peanut noodle bowl <small>Dinner · $2.10</small></div>
+        <div class="total"><b>$3.92</b> · 2,010 kcal</div>
+      </div>
+      <div class="day-card">
+        <span class="label">Wed</span>
+        <div class="item">Yogurt + granola <small>Bfast · $0.85</small></div>
+        <div class="item">Peanut noodle leftovers <small>Lunch · $1.30</small></div>
+        <div class="item">One-pan chicken rice <small>Dinner · $2.65</small></div>
+        <div class="total"><b>$4.80</b> · 2,100 kcal</div>
+      </div>
+      <div class="day-card">
+        <span class="label">Thu</span>
+        <div class="item">Egg + toast <small>Bfast · $0.55</small></div>
+        <div class="item">Chicken rice bowl <small>Lunch · $1.45</small></div>
+        <div class="item">Egg fried rice <small>Dinner · $1.40</small></div>
+        <div class="total"><b>$3.40</b> · 1,890 kcal</div>
+      </div>
+      <div class="day-card">
+        <span class="label">Fri</span>
+        <div class="item">Overnight oats <small>Bfast · $0.62</small></div>
+        <div class="item">Cheese quesadilla <small>Lunch · $1.10</small></div>
+        <div class="item">Tomato lentil soup <small>Dinner · $1.55</small></div>
+        <div class="total"><b>$3.27</b> · 1,820 kcal</div>
+      </div>
+      <div class="day-card">
+        <span class="label">Sat</span>
+        <div class="item">Egg + toast <small>Bfast · $0.55</small></div>
+        <div class="item">Lentil soup leftovers <small>Lunch · $1.10</small></div>
+        <div class="item">Pesto pasta + salad <small>Dinner · $2.30</small></div>
+        <div class="total"><b>$3.95</b> · 1,990 kcal</div>
+      </div>
+      <div class="day-card">
+        <span class="label">Sun</span>
+        <div class="item">Yogurt + granola <small>Bfast · $0.85</small></div>
+        <div class="item">Pesto pasta leftovers <small>Lunch · $1.40</small></div>
+        <div class="item">Stir-fry use-it-up <small>Dinner · $2.10</small></div>
+        <div class="total"><b>$4.35</b> · 1,950 kcal</div>
+      </div>
+    </div>
+
+    <div class="receipt">
+      <div>
+        <h4>Sunday's Aldi run, broken down</h4>
+        <p>One trip. One list. 14 ingredients reused across 21 meals. Maya didn't open DoorDash once this week.</p>
+      </div>
+      <div class="receipt-stats">
+        <div class="stat"><div class="num">$46.82</div><div class="lbl">Total spent</div></div>
+        <div class="stat"><div class="num">$2.23</div><div class="lbl">Avg per meal</div></div>
+        <div class="stat"><div class="num">21</div><div class="lbl">Meals planned</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="container">
+    <div class="section-head">
+      <span class="kicker">What you actually get</span>
+      <h2>It's not a recipe app. It's a plan that stays under $50.</h2>
+    </div>
+    <div class="feat-grid">
+      <div class="feat">
+        <div class="ic">$</div>
+        <div>
+          <h4>Real prices from your store</h4>
+          <p>We pull this week's prices for Aldi, Walmart, Kroger, Trader Joe's, and Target. If pasta jumped 40¢, your plan adjusts before you check out.</p>
+        </div>
+      </div>
+      <div class="feat">
+        <div class="ic">♻</div>
+        <div>
+          <h4>Ingredient overlap, by design</h4>
+          <p>Buy a head of broccoli once. It shows up in 3 meals. We don't ask you to buy fennel for one tablespoon of fronds.</p>
+        </div>
+      </div>
+      <div class="feat">
+        <div class="ic">🔥</div>
+        <div>
+          <h4>"What you actually have" mode</h4>
+          <p>Microwave + mini-fridge only? Communal kitchen with one cutting board? Tell us. Plans match your reality, not a Pinterest kitchen.</p>
+        </div>
+      </div>
+      <div class="feat">
+        <div class="ic">⚡</div>
+        <div>
+          <h4>15-minute weekday cap</h4>
+          <p>Mon–Fri recipes max out at 15 minutes and 4 ingredients. The weekend is when we actually cook. Weekdays are reheat-and-go.</p>
+        </div>
+      </div>
+      <div class="feat">
+        <div class="ic">🥗</div>
+        <div>
+          <h4>Hits 1,800–2,200 kcal a day</h4>
+          <p>With 70g+ protein, even on the $30/week plan. Built with a registered dietitian who actually used to feed dorm freshmen.</p>
+        </div>
+      </div>
+      <div class="feat">
+        <div class="ic">📱</div>
+        <div>
+          <h4>Sends to Instacart or your Notes app</h4>
+          <p>One-tap export to Instacart, Walmart pickup, or a plain checklist. Bring it to the store, check things off, done.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="pricing" id="pricing">
+  <div class="container">
+    <div class="section-head">
+      <span class="kicker">Pricing</span>
+      <h2>Cheaper than one DoorDash order.</h2>
+      <p>If PlateMath doesn't save you at least $20 in your first month, we refund you. Email and you're done.</p>
+    </div>
+    <div class="price-grid">
+      <div class="plan">
+        <h3>Free week</h3>
+        <div class="amt">$0<span> / try it once</span></div>
+        <ul>
+          <li>One full 7-day plan</li>
+          <li>Grocery list for your store</li>
+          <li>10 student-tested recipes</li>
+          <li>No credit card needed</li>
+        </ul>
+        <a href="#signup" class="btn plan-light" data-cta="pricing-free">Start free week</a>
+      </div>
+      <div class="plan featured">
+        <span class="plan-tag">Most students pick this</span>
+        <h3>Semester pass</h3>
+        <div class="amt">$4<span> / month, billed $16/semester</span></div>
+        <ul>
+          <li>New plan every Sunday</li>
+          <li>All 5 supported stores</li>
+          <li>Pantry-aware re-planning</li>
+          <li>Roommate split mode (cook for 2)</li>
+          <li>Cancel any time, keep the plans</li>
+        </ul>
+        <a href="#signup" class="btn btn-primary" data-cta="pricing-semester">Get the semester pass</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <div class="section-head">
+      <span class="kicker">Students using it</span>
+      <h2>Real people who stopped paying $14 for a sad burrito.</h2>
+    </div>
+    <div class="quotes">
+      <div class="quote">
+        <p>"I was spending $90/week on DoorDash and still hungry. PlateMath got me to $43 this week and I made an actual stir-fry. I cried at the receipt."</p>
+        <div class="who">
+          <div class="avatar" style="background:#FF5A3C">JR</div>
+          <div><div class="name">Jordan R.</div><div class="role">Junior · Ohio State</div></div>
+        </div>
+      </div>
+      <div class="quote">
+        <p>"My kitchen is a microwave and a kettle. I told it that and it gave me a plan that actually works. The overnight oats hack is unreal."</p>
+        <div class="who">
+          <div class="avatar" style="background:#0F2A3F">PS</div>
+          <div><div class="name">Priya S.</div><div class="role">Freshman · NYU dorms</div></div>
+        </div>
+      </div>
+      <div class="quote">
+        <p>"I split groceries with my roommate Diego now. PlateMath does the math for two, splits the list, we Venmo each other. Saved $180 last month."</p>
+        <div class="who">
+          <div class="avatar" style="background:#E64321">MA</div>
+          <div><div class="name">Marcus A.</div><div class="role">Sophomore · UNC Chapel Hill</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq" style="background:var(--cream)">
+  <div class="container">
+    <div class="section-head">
+      <span class="kicker">Honest questions</span>
+      <h2>Stuff students ask before signing up</h2>
+    </div>
+    <div class="faq">
+      <details open>
+        <summary>Is $50/week actually realistic where I live?</summary>
+        <p>In most college towns, yes — we've validated it across 47 ZIP codes near major US universities using current Aldi/Walmart pricing. In high-cost cities (NYC, SF, Boston) you'll usually land between $52–$58 with the same plan. The app shows you the live total before you commit so there are no surprises.</p>
+      </details>
+      <details>
+        <summary>What if I can barely cook?</summary>
+        <p>The default difficulty assumes you've boiled water and that's it. Recipes are 4 ingredients or fewer on weekdays, with a "show me what each step looks like" photo mode. About 60% of our users said they couldn't cook before signing up.</p>
+      </details>
+      <details>
+        <summary>I have allergies / I'm vegetarian / I keep halal. Can it handle that?</summary>
+        <p>Yes. During setup you flag allergies, dietary rules (vegetarian, vegan, halal, kosher, pescatarian), and ingredients you flat-out hate (looking at you, cilantro). We never plan around them.</p>
+      </details>
+      <details>
+        <summary>Does it work with EBT / SNAP?</summary>
+        <p>Yes. You can mark your store as EBT-eligible and PlateMath will only suggest items SNAP covers (no hot prepared foods, no vitamins). Walmart and Aldi both accept EBT online — we link to their portals from the grocery list.</p>
+      </details>
+      <details>
+        <summary>I share a kitchen with 4 strangers. Is that going to work?</summary>
+        <p>That's basically our default user. Every plan ships with a "fridge-real-estate" estimate (in shoebox units, seriously) and recipes that don't require leaving things to simmer for an hour. You can also flag "no oven access" and it'll route around it.</p>
+      </details>
+      <details>
+        <summary>Who built this?</summary>
+        <p>PlateMath is made by two former RAs and a registered dietitian (Anna, who ran a dining program at a Midwest state school for 9 years). We started it after watching freshmen eat Pop-Tarts for dinner three nights in a row.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section id="signup">
+  <div class="container">
+    <div class="cta-band">
+      <div>
+        <h3>Get a real meal plan for next week. Free, in 90 seconds.</h3>
+        <p>One 7-day plan, one grocery list, zero credit card. If you don't love it, just close the tab.</p>
+      </div>
+      <a href="#" class="btn" data-cta="footer-signup">Plan my free week</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div class="foot-grid">
+      <div>
+        <div class="logo" style="color:#fff;margin-bottom:10px"><span class="logo-mark">P</span> PlateMath</div>
+        <p style="font-size:14px;max-width:300px">AI meal planning for students who can't spend $50/week on a single Trader Joe's run. Made in Austin, TX.</p>
+      </div>
+      <div>
+        <h5>Product</h5>
+        <ul>
+          <li><a href="#how" data-cta="footer-how">How it works</a></li>
+          <li><a href="#sample" data-cta="footer-sample">Sample week</a></li>
+          <li><a href="#pricing" data-cta="footer-pricing">Pricing</a></li>
+          <li><a href="#" data-cta="footer-stores">Supported stores</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Company</h5>
+        <ul>
+          <li><a href="#" data-cta="footer-about">About</a></li>
+          <li><a href="#" data-cta="footer-blog">Student blog</a></li>
+          <li><a href="#" data-cta="footer-campus">Campus reps</a></li>
+          <li><a href="#" data-cta="footer-contact">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Legal</h5>
+        <ul>
+          <li><a href="#" data-cta="footer-privacy">Privacy</a></li>
+          <li><a href="#" data-cta="footer-terms">Terms</a></li>
+          <li><a href="#" data-cta="footer-refund">Refund policy</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-bot">
+      <div>© 2025 PlateMath, Inc. Not affiliated with any university.</div>
+      <div>hello@platemath.app</div>
+    </div>
+  </div>
+</footer>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  if (window.posthog) posthog.capture('page_loaded', {path: window.location.pathname});
+});
+document.addEventListener('click', function(e) {
+  var el = e.target.closest('[data-cta]');
+  if (el && window.posthog) posthog.capture('cta_clicked', {cta: el.getAttribute('data-cta')});
+});
+</script>
+</body>
+</html>
