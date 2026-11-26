@@ -1,11 +1,12 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Transcript } from '@kilo/edl';
 import {
-  deepgramTranscriber, fixtureTranscriber, openaiTranscriber, restorePunctuation, selectTranscriber, type FetchLike,
+  deepgramTranscriber, fixtureTranscriber, openaiTranscriber, restorePunctuation, selectTranscriber, splitWavOnSilences, type FetchLike,
 } from '../src/transcribe.js';
+import { readPcm16 } from '../src/silence.js';
 import { flagFillers } from '../src/text.js';
 
 function tinyWav(dir: string): string {
@@ -189,5 +190,117 @@ describe('fixture transcriber and selection', () => {
     const w = (text: string, i: number) => ({ text, start: i, end: i + 0.5, filler: false });
     const flagged = flagFillers(['I', 'like', 'it,', 'and', 'it,', 'like,', 'works.', 'Um', 'yes.'].map(w));
     expect(flagged.filter((x) => x.filler).map((x) => x.text)).toEqual(['like,', 'Um']);
+  });
+});
+
+describe('openai transcriber on long audio', () => {
+  const RATE = 16000;
+  /** "Words": 0.3 s tone bursts with 0.12 s gaps, grouped into sentences with 0.7 s pauses. */
+  function speechWav(dir: string, sentences: number): { path: string; words: Array<{ start: number; end: number; text: string }>; bytes: number } {
+    const words: Array<{ start: number; end: number; text: string }> = [];
+    let t = 0.5;
+    for (let s = 0; s < sentences; s++) {
+      for (let w = 0; w < 6; w++) {
+        words.push({ start: t, end: t + 0.3, text: `w${s}_${w}` });
+        t += 0.42;
+      }
+      t += 0.7;
+    }
+    const total = Math.ceil((t + 0.5) * RATE);
+    const samples = new Int16Array(total);
+    let seed = 7;
+    for (let i = 0; i < total; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      samples[i] = ((seed % 200) - 100); // quiet room noise
+    }
+    for (const w of words) {
+      for (let i = Math.floor(w.start * RATE); i < Math.floor(w.end * RATE); i++) samples[i] = Math.round(9000 * Math.sin((2 * Math.PI * 220 * i) / RATE));
+    }
+    const buf = Buffer.alloc(44 + total * 2);
+    buf.write('RIFF', 0, 'ascii');
+    buf.writeUInt32LE(36 + total * 2, 4);
+    buf.write('WAVE', 8, 'ascii');
+    buf.write('fmt ', 12, 'ascii');
+    buf.writeUInt32LE(16, 16);
+    buf.writeUInt16LE(1, 20);
+    buf.writeUInt16LE(1, 22);
+    buf.writeUInt32LE(RATE, 24);
+    buf.writeUInt32LE(RATE * 2, 28);
+    buf.writeUInt16LE(2, 32);
+    buf.writeUInt16LE(16, 34);
+    buf.write('data', 36, 'ascii');
+    buf.writeUInt32LE(total * 2, 40);
+    for (let i = 0; i < total; i++) buf.writeInt16LE(samples[i]!, 44 + i * 2);
+    const path = join(dir, 'long.wav');
+    writeFileSync(path, buf);
+    return { path, words, bytes: buf.length };
+  }
+
+  /** Answers like the real endpoint: words heard in the uploaded piece, times relative to it. */
+  function hearingFetch(truth: Array<{ start: number; end: number; text: string }>) {
+    const uploads: Array<{ bytes: number; start: number; end: number }> = [];
+    let offset = 0;
+    const fetch: FetchLike = async (_url, init) => {
+      const form = init.body as FormData;
+      const file = form.get('file') as Blob;
+      const buf = Buffer.from(await file.arrayBuffer());
+      const pcm = readPcm16(buf);
+      const len = pcm.samples.length / pcm.sampleRate;
+      uploads.push({ bytes: buf.length, start: offset, end: offset + len });
+      // Every burst with any sound inside this piece is "heard", clipped to the piece.
+      const heard = truth
+        .filter((w) => w.end > offset && w.start < offset + len)
+        .map((w) => ({ word: w.text, start: Math.max(0, w.start - offset), end: Math.min(len, w.end - offset) }));
+      offset += len;
+      const body = { text: heard.map((w) => w.word).join(' '), language: 'english', duration: len, words: heard };
+      return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+    };
+    return { fetch, uploads };
+  }
+
+  it('cuts audio over the upload cap on pauses and stitches the word times back together', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kilo-long-'));
+    const { path, words, bytes } = speechWav(dir, 30); // about 110 s, 3.5 MB
+    const maxUploadBytes = 1_000_000; // about 31 s per piece
+    const { fetch, uploads } = hearingFetch(words);
+    const t = openaiTranscriber({ apiKey: 'sk', fetch, maxUploadBytes });
+    const out = await t.transcribe({ clipId: 'long', audioPath: path, durationSec: (bytes - 44) / 2 / RATE });
+    // Pieces end on a pause a little before the cap, so there may be one more than the minimum.
+    expect(uploads.length).toBeGreaterThanOrEqual(Math.ceil(bytes / maxUploadBytes));
+    expect(uploads.length).toBeLessThanOrEqual(Math.ceil(bytes / maxUploadBytes) + 1);
+    for (const u of uploads) expect(u.bytes).toBeLessThanOrEqual(maxUploadBytes);
+    // Every cut falls in a pause: no word is heard in two pieces or cut short.
+    for (const u of uploads.slice(0, -1)) {
+      for (const w of words) expect(u.end <= w.start || u.end >= w.end, `cut at ${u.end} inside ${w.text}`).toBe(true);
+    }
+    expect(out.words.map((w) => w.text)).toEqual(words.map((w) => w.text));
+    out.words.forEach((w, i) => {
+      expect(w.start).toBeCloseTo(words[i]!.start, 3);
+      expect(w.end).toBeCloseTo(words[i]!.end, 3);
+    });
+    expect(out.language).toBe('en');
+  });
+
+  it('sends short audio in one request, unchanged', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kilo-short-'));
+    const { path, words, bytes } = speechWav(dir, 2);
+    const { fetch, uploads } = hearingFetch(words);
+    const out = await openaiTranscriber({ apiKey: 'sk', fetch }).transcribe({ clipId: 's', audioPath: path, durationSec: 5 });
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]!.bytes).toBe(bytes);
+    expect(out.words).toHaveLength(words.length);
+  });
+
+  it('splitWavOnSilences keeps every sample exactly once', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kilo-split-'));
+    const { path, bytes } = speechWav(dir, 12);
+    const wav = readFileSync(path);
+    const pieces = splitWavOnSilences(wav, 400_000);
+    expect(pieces.length).toBeGreaterThan(1);
+    const total = pieces.reduce((n, p) => n + (p.wav.length - 44) / 2, 0);
+    expect(total).toBe((bytes - 44) / 2);
+    for (let i = 1; i < pieces.length; i++) expect(pieces[i]!.start).toBeCloseTo(pieces[i - 1]!.end, 9);
+    const joined = Buffer.concat(pieces.map((p) => p.wav.subarray(44)));
+    expect(joined.equals(wav.subarray(44))).toBe(true);
   });
 });

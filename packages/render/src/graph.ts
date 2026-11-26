@@ -189,8 +189,11 @@ function overlayChain(p: OverlayPiece, fmt: OutputFormat, inputs: Inputs, graph:
     const at = p.offsetFrames / F;
     const args = at > 0 ? ['-ss', num(at)] : [];
     const k = inputs.add(['-threads', '1', ...args, '-t', num(p.frames / F + 0.5), '-i', ov.path]);
+    // Templates animate their own entrance and exit; only a graphic cut short gets a fade to hide the cut.
+    const cutShort = p.fadeOut && (ov.renderedFrames ?? ov.frames) > ov.frames;
+    const out = cutShort ? `,fade=t=out:st=${num((p.frames - OVERLAY_FADE_FRAMES) / F)}:d=${fd}:alpha=1` : '';
     graph.push(
-      `[${k}:v]setpts=PTS-STARTPTS,fps=${F},scale=${W}:${H},format=yuva420p,${framesTail(p.frames, F)},${shift}[${label}]`,
+      `[${k}:v]setpts=PTS-STARTPTS,fps=${F},scale=${W}:${H}:flags=bicubic,format=yuva444p,${framesTail(p.frames, F)}${out},${shift}[${label}]`,
     );
     return label;
   }

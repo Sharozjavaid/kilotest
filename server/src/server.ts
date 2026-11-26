@@ -1,6 +1,6 @@
 import { serve, type ServerType } from '@hono/node-server';
 import { createApp } from './api/app.js';
-import { devAuth, supabaseAuth, type Authenticator } from './auth.js';
+import { combinedSupabaseAuth, devAuth, type Authenticator } from './auth.js';
 import { assertConfig, type Config } from './config.js';
 import { connect, type Sql } from './db/index.js';
 import { migrate } from './db/migrate.js';
@@ -36,8 +36,14 @@ export interface StartOptions {
   now?: () => Date;
 }
 
-export function authenticatorFor(config: Config): Authenticator {
-  if (config.auth === 'supabase') return supabaseAuth(config.supabaseJwtSecret!);
+export function authenticatorFor(config: Config, log?: Logger): Authenticator {
+  if (config.auth === 'supabase') {
+    return combinedSupabaseAuth({
+      secret: config.supabaseJwtSecret,
+      supabaseUrl: config.supabaseUrl,
+      onError: (err) => log?.warn('Supabase JWKS fetch failed', { err: err instanceof Error ? err.message : String(err) }),
+    });
+  }
   if (config.nodeEnv === 'production') throw new Error('KILO_AUTH=dev is not allowed when NODE_ENV=production');
   return devAuth;
 }
@@ -83,10 +89,11 @@ export async function startServer(options: StartOptions): Promise<RunningServer>
       db: sql,
       storage,
       queue,
-      authenticate: options.authenticate ?? authenticatorFor(config),
+      authenticate: options.authenticate ?? authenticatorFor(config, log),
       log,
       pipeline,
       now: options.now,
+      maxUploadBytes: config.maxUploadBytes,
     });
     http = serve({ fetch: app.fetch, port: config.port });
     log.info('api listening', { port: config.port, storage: storage.kind, auth: config.auth });

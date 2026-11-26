@@ -142,8 +142,9 @@ function runPasses(edl: Edl, input: DecideInput, passes: readonly ReplanPass[], 
         lines,
         totalSec,
         occupied: overlayIntervals(edl, keep),
-        // A hook variant may add a title over its opening: leave room for it in the budget.
-        budget: settings.hookVariations > 1 ? Math.max(1, overlayBudget(totalSec) - 1) : overlayBudget(totalSec),
+        // A hook variant's title sits over the first HOOK_PROTECT_SEC, where nothing else is placed,
+        // so it does not count against the budget.
+        budget: overlayBudget(totalSec),
         idPrefix: 'o',
         usedIds,
       })
@@ -160,6 +161,28 @@ function runPasses(edl: Edl, input: DecideInput, passes: readonly ReplanPass[], 
     (a, b) => (order.get(a.anchorSegmentId) ?? 0) + a.offsetSec - ((order.get(b.anchorSegmentId) ?? 0) + b.offsetSec),
   );
   return next;
+}
+
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * The same input in one canonical order, so the EDL never depends on the order the
+ * caller listed clips, transcripts, words, silences or B-roll in (the server reads
+ * rows from the database; their order is not part of the meaning). Clips play in
+ * `order`; B-roll is taken by id.
+ */
+export function canonicalInput(input: DecideInput): DecideInput {
+  const clips = [...input.clips].sort((a, b) => a.order - b.order || cmp(a.id, b.id));
+  const rank = new Map(clips.map((c, i) => [c.id, i]));
+  const clipRank = (id: string) => rank.get(id) ?? Number.MAX_SAFE_INTEGER;
+  const transcripts = [...input.transcripts]
+    .sort((a, b) => clipRank(a.clipId) - clipRank(b.clipId) || cmp(a.clipId, b.clipId))
+    .map((t) => ({ ...t, words: [...t.words].sort((a, b) => a.start - b.start || a.end - b.end) }));
+  const silences = [...input.silences].sort(
+    (a, b) => clipRank(a.clipId) - clipRank(b.clipId) || cmp(a.clipId, b.clipId) || a.start - b.start || a.end - b.end,
+  );
+  const broll = [...input.broll].sort((a, b) => cmp(a.id, b.id));
+  return { ...input, clips, transcripts, silences, broll };
 }
 
 function finish(edl: Edl, clips: DecideInput['clips']): Edl {
@@ -204,8 +227,9 @@ export function createAnalyze(opts: AnalyzeOptions = {}): Analyze {
     return key ? pexelsProvider({ apiKey: key, fetch: opts.fetch }) : null;
   };
 
-  async function decideEdit(input: DecideInput): Promise<Edl> {
-    if (!input.clips.length) throw new Error('decideEdit needs at least one clip');
+  async function decideEdit(raw: DecideInput): Promise<Edl> {
+    if (!raw.clips.length) throw new Error('decideEdit needs at least one clip');
+    const input = canonicalInput(raw);
     const settings = input.settings;
     const clipWords = prepareClipWords(input.clips, input.transcripts);
     const chunks = buildChunks(clipWords);
@@ -259,7 +283,8 @@ export function createAnalyze(opts: AnalyzeOptions = {}): Analyze {
     return finish(runPasses(base, input, ['broll', 'graphics', 'variants'], passPlan), input.clips);
   }
 
-  async function replan(input: DecideInput & { edl: Edl; passes: ReplanPass[] }): Promise<Edl> {
+  async function replan(raw: DecideInput & { edl: Edl; passes: ReplanPass[] }): Promise<Edl> {
+    const input = { ...canonicalInput(raw), edl: raw.edl, passes: raw.passes };
     const edl = Edl.parse(input.edl);
     const passes = [...new Set(input.passes)];
     let passPlan: PassPlan | null = null;

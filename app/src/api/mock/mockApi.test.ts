@@ -182,6 +182,84 @@ describe('MockKiloApi', () => {
     api.dispose();
   });
 
+  it('reports progress while queued and analysing, and null otherwise', async () => {
+    const api = new MockKiloApi({ media, seed: false });
+    const res = await api.createBatch({ settings: DEFAULT_SETTINGS, videos: [{ title: 'p', source: 'upload', clips: [{ filename: 'a.mov', contentType: 'video/quicktime', sizeBytes: 1 }, { filename: 'b.mov', contentType: 'video/quicktime', sizeBytes: 1 }] }] });
+    const id = res.videos[0]!.videoId;
+    const summary = async () => strictParse(VideoSummary, (await api.listVideos()).videos.find((v) => v.id === id));
+    expect(await summary()).toMatchObject({ status: 'uploading', progress: null, clipCount: 2 });
+    await api.completeUploads({ clipIds: res.videos[0]!.clips.map((c) => c.clipId) });
+    const queued = await summary();
+    expect(queued.status).toBe('queued');
+    expect(queued.progress).toBeGreaterThan(0);
+    await jest.advanceTimersByTimeAsync(MOCK_TIMINGS.queuedToAnalyzing + MOCK_TIMINGS.analyzing / 2);
+    const mid = await summary();
+    expect(mid.status).toBe('analyzing');
+    expect(mid.progress!).toBeGreaterThan(queued.progress!);
+    expect(mid.progress!).toBeLessThan(1);
+    await jest.advanceTimersByTimeAsync(MOCK_TIMINGS.analyzing);
+    expect(await summary()).toMatchObject({ status: 'ready_for_review', progress: null });
+    api.dispose();
+  });
+
+  it('reports new B-roll with no size, duration or description until it is ready', async () => {
+    const api = new MockKiloApi({ media });
+    const id = (await api.home()).readyToReview.find((v) => v.title === 'Morning routine')!.id;
+    const added = await api.addBroll(id, { assets: [{ filename: 'shelf.mov', contentType: 'video/quicktime', sizeBytes: 9, kind: 'video' }] });
+    const assetId = added.broll[0]!.assetId;
+    const fresh = (await api.getVideo(id)).broll.find((b) => b.id === assetId)!;
+    expect(fresh).toMatchObject({ status: 'uploading', width: null, height: null, durationSec: null, description: '', filename: 'shelf.mov' });
+    await api.completeUploads({ assetIds: [assetId] });
+    expect((await api.getVideo(id)).broll.find((b) => b.id === assetId)!.status).toBe('processing');
+    await jest.advanceTimersByTimeAsync(MOCK_TIMINGS.brollProcessing);
+    const ready = (await api.getVideo(id)).broll.find((b) => b.id === assetId)!;
+    expect(ready.status).toBe('ready');
+    expect(ready.durationSec).toBeGreaterThan(0);
+    expect(ready.description.length).toBeGreaterThan(0);
+    checkVideo(await api.getVideo(id));
+    api.dispose();
+  });
+
+  it('replans only the passes asked for, keeping cuts and following the status machine', async () => {
+    const api = new MockKiloApi({ media });
+    const id = (await api.home()).readyToReview.find((v) => v.title === 'Morning routine')!.id;
+    const before = await api.getVideo(id);
+    const edited = await api.saveEdl(id, { edl: toggleSegment(before.edl!, 's5'), baseRevision: before.edl!.revision });
+    const added = await api.addBroll(id, { assets: [{ filename: 'product.jpg', contentType: 'image/jpeg', sizeBytes: 9, kind: 'image' }] });
+    await api.completeUploads({ assetIds: [added.broll[0]!.assetId] });
+    await jest.advanceTimersByTimeAsync(MOCK_TIMINGS.brollProcessing);
+
+    const s = await api.replan(id, { passes: ['broll'] });
+    expect(s.status).toBe('analyzing');
+    await expect(api.saveEdl(id, { edl: edited.edl, baseRevision: edited.edl.revision })).rejects.toMatchObject({ code: 'invalid_state' });
+    await expect(api.deleteBroll(id, added.broll[0]!.assetId)).rejects.toMatchObject({ status: 409 });
+    await jest.advanceTimersByTimeAsync(MOCK_TIMINGS.replan);
+    const after = await api.getVideo(id);
+    expect(after.status).toBe('ready_for_review');
+    expect(after.edl!.revision).toBe(edited.edl.revision + 1);
+    expect(after.edl!.segments.find((x) => x.id === 's5')!.keep).toBe(true);
+    // The graphics are untouched; the new photo is placed on a free line.
+    expect(after.edl!.overlays.filter((o) => o.type === 'graphic')).toEqual(edited.edl.overlays.filter((o) => o.type === 'graphic'));
+    expect(after.edl!.overlays.filter((o) => o.type === 'broll').length).toBeGreaterThanOrEqual(2);
+    checkVideo(after);
+    // A client holding the old revision now conflicts.
+    await expect(api.saveEdl(id, { edl: edited.edl, baseRevision: edited.edl.revision })).rejects.toMatchObject({ code: 'revision_conflict' });
+
+    await api.replan(id, { passes: ['graphics'] });
+    await jest.advanceTimersByTimeAsync(MOCK_TIMINGS.replan);
+    checkVideo(await api.getVideo(id));
+    api.dispose();
+  });
+
+  it('rejects graphic overlays whose props do not fit the template', async () => {
+    const api = new MockKiloApi({ media });
+    const id = (await api.home()).readyToReview[0]!.id;
+    const d = await api.getVideo(id);
+    const bad = { ...d.edl!, overlays: [{ id: 'g', type: 'graphic' as const, anchorSegmentId: 's6', offsetSec: 0, durationSec: 1, template: 'bold-title' as const, props: { text: '' } }] };
+    await expect(api.saveEdl(id, { edl: bad, baseRevision: d.edl!.revision })).rejects.toMatchObject({ status: 400 });
+    api.dispose();
+  });
+
   it('starts empty for a first-time user and loads mode presets into batches', async () => {
     const api = new MockKiloApi({ media, seed: false });
     const home = await api.home();

@@ -9,6 +9,7 @@ import type { Pipeline } from '../pipeline/types.js';
 import type { JobQueue } from '../queue.js';
 import type { StorageDriver } from '../storage/types.js';
 import { LocalStorage } from '../storage/local.js';
+import { DEFAULT_MAX_UPLOAD_BYTES } from '../uploads.js';
 import { batchRoutes } from './batches.js';
 import { localRoutes } from './local.js';
 import { userRoutes } from './user.js';
@@ -26,6 +27,8 @@ export interface AppDeps {
    */
   pipeline?: Pipeline;
   now?: () => Date;
+  /** Largest file one upload may carry (default 2 GiB). */
+  maxUploadBytes?: number;
 }
 
 export type Env = { Variables: { userId: string } };
@@ -76,7 +79,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.get('/v1/health', (c) => c.json({ ok: true as const }));
 
-  if (deps.storage instanceof LocalStorage) app.route('/v1/local', localRoutes(deps.storage));
+  if (deps.storage instanceof LocalStorage) app.route('/v1/local', localRoutes(deps.storage, deps.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES));
 
   const authed = new Hono<Env>();
   authed.use('*', async (c, next) => {

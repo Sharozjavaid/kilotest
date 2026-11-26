@@ -39,7 +39,7 @@ describe('B-roll added after analysis', () => {
     }, 'late B-roll to be ingested');
     expect(ingested.status).toBe('ready_for_review');
     expect(ingested.broll.map((b) => b.kind).sort()).toEqual(['image', 'video']);
-    expect(ingested.broll.every((b) => b.width > 1 && b.height > 1 && b.url && b.thumbnailUrl)).toBe(true);
+    expect(ingested.broll.every((b) => (b.width ?? 0) > 1 && (b.height ?? 0) > 1 && b.url && b.thumbnailUrl)).toBe(true);
     // Placement waits for a replan.
     expect(ingested.edl!.revision).toBe(0);
     expect(ingested.edl!.overlays.filter((o) => o.type === 'broll')).toEqual([]);

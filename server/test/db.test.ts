@@ -29,7 +29,7 @@ describe('migrations and row-level security', () => {
 
   it('skips the RLS migration on plain Postgres and applies it once an auth schema exists', async () => {
     const first = await migrate(sql);
-    expect(first).toEqual({ applied: ['001_init.sql'], skipped: ['002_rls.sql'] });
+    expect(first).toEqual({ applied: ['001_init.sql', '003_progress.sql'], skipped: ['002_rls.sql'] });
     expect(await migrate(sql)).toEqual({ applied: [], skipped: ['002_rls.sql'] });
 
     // Imitate Supabase: an auth schema with auth.uid() and the authenticated role.

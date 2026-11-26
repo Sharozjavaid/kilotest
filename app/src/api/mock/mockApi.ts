@@ -2,7 +2,9 @@ import {
   DEFAULT_SETTINGS,
   Edl as EdlSchema,
   MODE_PRESETS,
+  TemplatePropsSchemas,
   edlStats,
+  getTemplate,
   validateEdl,
   type BatchDetail,
   type BatchSummary,
@@ -11,6 +13,7 @@ import {
   type Edl,
   type EditSettings,
   type GoalView,
+  type ReplanPass,
   type RenderView,
   type Style,
   type Transcript,
@@ -22,6 +25,7 @@ import {
 import { KiloApiError } from '../errors';
 import type { KiloApi } from '../types';
 import { buildMockAnalysis } from './build';
+import { placeOverlay, spokenLines } from '@/broll/overlays';
 
 /** URLs of the media the mock serves. Resolved from bundled assets in src/api/mock/media.ts. */
 export interface MockMedia {
@@ -50,6 +54,7 @@ export const MOCK_TIMINGS = {
   renderStep: 0.12,
   brollProcessing: 1000,
   replan: 2000,
+  progressTick: 250,
 };
 
 interface MockVideo {
@@ -66,6 +71,11 @@ interface MockVideo {
   renders: RenderView[];
   /** Fail the next analysis with this message. */
   failWith?: string;
+  /** What the recorder said about each clip (script line, take), carried into ClipInfo. */
+  clipMeta?: Record<string, { scriptLineIndex?: number; takeNumber?: number }>;
+  /** While analysing: when the progress clock started and how long it runs (ms). */
+  progressFrom?: number;
+  progressFor?: number;
 }
 
 interface MockBatch {
@@ -154,7 +164,7 @@ export class MockKiloApi implements KiloApi {
       const clips = nv.clips.map(() => ({ clipId: this.id('clip') }));
       const broll = (nv.broll ?? []).map((b) => ({ assetId: this.id('asset'), b }));
       const video: MockVideo = {
-        summary: this.newSummary(videoId, batch.id, nv.title, 'uploading'),
+        summary: this.newSummary(videoId, batch.id, nv.title, 'uploading', nv.clips.length),
         script: nv.script ?? null,
         clipIds: clips.map((c) => c.clipId),
         pendingClipIds: new Set(clips.map((c) => c.clipId)),
@@ -165,6 +175,12 @@ export class MockKiloApi implements KiloApi {
         edl: null,
         broll: broll.map(({ assetId, b }) => this.newBroll(assetId, b.kind, b.filename)),
         renders: [],
+        clipMeta: Object.fromEntries(
+          clips.map(({ clipId }, i) => {
+            const c = nv.clips[i]!;
+            return [clipId, { ...(c.scriptLineIndex !== undefined ? { scriptLineIndex: c.scriptLineIndex } : {}), ...(c.takeNumber !== undefined ? { takeNumber: c.takeNumber } : {}) }];
+          }),
+        ),
       };
       this.videos.set(videoId, video);
       batch.videoIds.push(videoId);
@@ -197,8 +213,7 @@ export class MockKiloApi implements KiloApi {
           if (asset) {
             asset.status = 'processing';
             this.later(MOCK_TIMINGS.brollProcessing, () => {
-              asset.status = 'ready';
-              asset.url = asset.thumbnailUrl;
+              if (asset.status === 'processing') markReady(asset);
               v.summary.updatedAt = this.iso();
             });
           }
@@ -265,8 +280,19 @@ export class MockKiloApi implements KiloApi {
     }
     const parsed = EdlSchema.safeParse(body.edl);
     if (!parsed.success) throw new KiloApiError(400, 'invalid_request', parsed.error.message);
+    if (v.summary.status !== 'ready_for_review' && v.summary.status !== 'done') {
+      throw new KiloApiError(409, 'invalid_state', 'This video is being edited. Try again in a moment.');
+    }
     const issues = validateEdl(parsed.data, v.clips);
     if (issues.length) throw new KiloApiError(400, 'invalid_edl', issues[0]!.message);
+    for (const o of [...parsed.data.overlays, ...parsed.data.variants.flatMap((x) => x.overlays)]) {
+      if (o.type === 'graphic' && !TemplatePropsSchemas[o.template].safeParse(o.props).success) {
+        throw new KiloApiError(400, 'invalid_edl', `Overlay ${o.id} does not fit the ${getTemplate(o.template).name} template`);
+      }
+      if (o.type === 'broll' && !v.broll.some((b) => b.id === o.assetId)) {
+        throw new KiloApiError(400, 'invalid_edl', `Overlay ${o.id} uses an unknown B-roll asset`);
+      }
+    }
     v.edl = { ...parsed.data, videoId, revision: v.edl.revision + 1 };
     this.applyStats(v);
     if (v.summary.status === 'done') this.setStatus(v, 'ready_for_review');
@@ -277,6 +303,7 @@ export class MockKiloApi implements KiloApi {
   async addBroll(videoId: string, body: Parameters<KiloApi['addBroll']>[1]) {
     await this.delay();
     const v = this.mustVideo(videoId);
+    if (v.summary.status === 'failed') throw new KiloApiError(409, 'invalid_state', 'B-roll cannot be added to a video that failed');
     const out = body.assets.map((a) => {
       const assetId = this.id('asset');
       v.broll.push(this.newBroll(assetId, a.kind, a.filename));
@@ -289,6 +316,10 @@ export class MockKiloApi implements KiloApi {
   async deleteBroll(videoId: string, assetId: string) {
     await this.delay();
     const v = this.mustVideo(videoId);
+    if (v.summary.status === 'analyzing' || v.summary.status === 'rendering') {
+      throw new KiloApiError(409, 'invalid_state', 'B-roll cannot be removed while the video is being edited or exported');
+    }
+    if (!v.broll.some((b) => b.id === assetId)) throw notFound('B-roll asset');
     v.broll = v.broll.filter((b) => b.id !== assetId);
     v.pendingAssetIds.delete(assetId);
     if (v.edl) {
@@ -301,24 +332,46 @@ export class MockKiloApi implements KiloApi {
     }
   }
 
-  async replan(videoId: string) {
+  async replan(videoId: string, body: { passes: ReplanPass[] }) {
     await this.delay();
     const v = this.mustVideo(videoId);
     if (!v.edl) throw new KiloApiError(409, 'invalid_state', 'This video has not been analysed yet');
-    this.setStatus(v, 'analyzing');
+    if (v.summary.status !== 'ready_for_review' && v.summary.status !== 'done') {
+      throw new KiloApiError(409, 'invalid_state', 'This video is busy. Try again in a moment.');
+    }
+    const passes = new Set(body.passes);
+    this.setStatus(v, 'analyzing', MOCK_TIMINGS.replan);
     this.later(MOCK_TIMINGS.replan, () => {
-      const fresh = buildMockAnalysis({ videoId, clipIds: v.clipIds, settings: v.edl!.settings, broll: v.broll });
-      // Placement passes never change keep: carry the user's cuts over.
-      const keepById = new Map(v.edl!.segments.map((s) => [s.id, s]));
-      v.edl = {
-        ...fresh.edl,
-        revision: v.edl!.revision + 1,
-        segments: fresh.edl.segments.map((s) => {
-          const old = keepById.get(s.id);
-          return old ? { ...s, keep: old.keep, userOverride: old.userOverride } : s;
-        }),
-        variants: v.edl!.variants,
-      };
+      const current = v.edl!;
+      const fresh = buildMockAnalysis({ videoId, clipIds: v.clipIds, settings: { ...current.settings, broll: false }, broll: [] });
+      let edl: Edl = { ...current, revision: current.revision + 1 };
+      // Placement passes never change cuts: only overlays and variants are redone.
+      if (passes.has('graphics')) {
+        edl = { ...edl, overlays: edl.overlays.filter((o) => o.type !== 'graphic') };
+        for (const g of fresh.edl.overlays) {
+          if (g.type !== 'graphic') continue;
+          const r = placeOverlay(edl, g.anchorSegmentId, { type: 'graphic', template: g.template, props: g.props }, { id: g.id, offsetSec: g.offsetSec, durationSec: g.durationSec });
+          if (r.ok) edl = r.edl;
+        }
+      }
+      if (passes.has('broll')) {
+        edl = { ...edl, overlays: edl.overlays.filter((o) => o.type !== 'broll') };
+        const ready = v.broll.filter((b) => b.status === 'ready');
+        let n = 0;
+        for (const asset of ready) {
+          const free = spokenLines(edl).filter((l) => l.overlays.length === 0);
+          for (const line of free) {
+            n += 1;
+            const r = placeOverlay(edl, line.segment.id, { type: 'broll', asset }, { id: `o-broll-r${edl.revision}-${n}`, offsetSec: 0.3 });
+            if (r.ok) {
+              edl = r.edl;
+              break;
+            }
+          }
+        }
+      }
+      if (passes.has('variants')) edl = { ...edl, variants: fresh.edl.variants };
+      v.edl = edl;
       this.applyStats(v);
       this.setStatus(v, 'ready_for_review');
     });
@@ -421,7 +474,7 @@ export class MockKiloApi implements KiloApi {
   private scheduleAnalysis(v: MockVideo): void {
     this.later(MOCK_TIMINGS.queuedToAnalyzing, () => {
       if (v.summary.status !== 'queued') return;
-      this.setStatus(v, 'analyzing');
+      this.setStatus(v, 'analyzing', MOCK_TIMINGS.analyzing);
       this.later(MOCK_TIMINGS.analyzing, () => {
         if (v.summary.status !== 'analyzing') return;
         if (v.failWith) {
@@ -439,13 +492,10 @@ export class MockKiloApi implements KiloApi {
     const batch = this.batches.get(v.summary.batchId);
     const settings = batch?.settings ?? DEFAULT_SETTINGS;
     for (const b of v.broll) {
-      if (b.status !== 'failed') {
-        b.status = 'ready';
-        b.url = b.thumbnailUrl;
-      }
+      if (b.status !== 'failed' && b.status !== 'ready') markReady(b);
     }
     const a = buildMockAnalysis({ videoId: v.summary.id, clipIds: v.clipIds, settings, broll: v.broll });
-    v.clips = a.clips;
+    v.clips = a.clips.map((c) => ({ ...c, ...(v.clipMeta?.[c.id] ?? {}) }));
     v.transcripts = a.transcripts;
     v.clipOffsets = a.clipOffsets;
     v.edl = a.edl;
@@ -484,9 +534,33 @@ export class MockKiloApi implements KiloApi {
     v.summary.variantCount = v.edl.variants.length;
   }
 
-  private setStatus(v: MockVideo, status: VideoStatus): void {
+  /**
+   * Moves a video to `status`. `progress` follows the contract: 0..1 while queued or
+   * analysing (a clock that runs for `analyzingMs`), null otherwise.
+   */
+  private setStatus(v: MockVideo, status: VideoStatus, analyzingMs?: number): void {
     v.summary.status = status;
     v.summary.updatedAt = this.iso();
+    if (status === 'queued') {
+      v.summary.progress = 0.05;
+    } else if (status === 'analyzing') {
+      v.summary.progress = 0.1;
+      v.progressFrom = this.now();
+      v.progressFor = analyzingMs ?? MOCK_TIMINGS.analyzing;
+      this.tickProgress(v);
+    } else {
+      v.summary.progress = null;
+    }
+  }
+
+  private tickProgress(v: MockVideo): void {
+    this.later(MOCK_TIMINGS.progressTick, () => {
+      if (v.summary.status !== 'analyzing' || v.progressFrom === undefined) return;
+      const span = Math.max(1, (v.progressFor ?? 1) * this.speed);
+      const done = Math.min(1, (this.now() - v.progressFrom) / span);
+      v.summary.progress = Math.round((0.1 + 0.85 * done) * 100) / 100;
+      this.tickProgress(v);
+    });
   }
 
   // ---- Helpers ----------------------------------------------------------------
@@ -523,7 +597,7 @@ export class MockKiloApi implements KiloApi {
     return { kind: 'put', url: `mock://upload/${objectKey}`, headers: { 'Content-Type': 'application/octet-stream' }, objectKey, bucket: 'kilo' };
   }
 
-  private newSummary(id: string, batchId: string, title: string, status: VideoStatus, createdAt = this.iso()): VideoSummary {
+  private newSummary(id: string, batchId: string, title: string, status: VideoStatus, clipCount: number, createdAt = this.iso()): VideoSummary {
     return {
       id,
       batchId,
@@ -531,6 +605,8 @@ export class MockKiloApi implements KiloApi {
       status,
       createdAt,
       updatedAt: createdAt,
+      clipCount,
+      progress: status === 'queued' ? 0.05 : status === 'analyzing' ? 0.1 : null,
       thumbnailUrl: null,
       keptSec: null,
       totalSec: null,
@@ -541,17 +617,19 @@ export class MockKiloApi implements KiloApi {
     };
   }
 
-  private newBroll(id: string, kind: 'video' | 'image', filename: string): BrollAssetView {
+  /** A new asset as the server reports it before ingest: no size, duration or description yet. */
+  private newBroll(id: string, kind: 'video' | 'image', filename: string, source: 'user' | 'stock' = 'user'): BrollAssetView {
     const urls = this.media.brollImageUrls;
     const thumb = urls.length ? urls[this.seq % urls.length]! : null;
     return {
       id,
       kind,
-      ...(kind === 'video' ? { durationSec: 4 } : {}),
-      width: 1080,
-      height: 1920,
-      description: describeFile(filename),
-      source: 'user',
+      durationSec: null,
+      width: null,
+      height: null,
+      filename,
+      description: '',
+      source,
       status: 'uploading',
       url: null,
       thumbnailUrl: thumb,
@@ -574,7 +652,7 @@ export class MockKiloApi implements KiloApi {
       const id = this.id('video');
       const clipIds = Array.from({ length: opts.clips ?? 1 }, () => this.id('clip'));
       const v: MockVideo = {
-        summary: this.newSummary(id, batch.id, title, status, this.iso(-opts.ageMs)),
+        summary: this.newSummary(id, batch.id, title, status, clipIds.length, this.iso(-opts.ageMs)),
         script: null,
         clipIds,
         pendingClipIds: new Set(),
@@ -583,7 +661,7 @@ export class MockKiloApi implements KiloApi {
         transcripts: [],
         clipOffsets: null,
         edl: null,
-        broll: Array.from({ length: opts.broll ?? 0 }, (_, i) => this.newBroll(this.id('asset'), 'image', i ? 'stopwatch.jpg' : 'product.jpg')),
+        broll: Array.from({ length: opts.broll ?? 0 }, (_, i) => this.newBroll(this.id('asset'), 'image', i ? 'stopwatch.jpg' : 'bathroom-shelf.jpg', i ? 'stock' : 'user')),
         renders: [],
       };
       this.videos.set(id, v);
@@ -615,6 +693,7 @@ export class MockKiloApi implements KiloApi {
       if (opts.error) v.summary.error = opts.error;
       if (status === 'queued') this.scheduleAnalysis(v);
       if (status === 'analyzing') {
+        this.setStatus(v, 'analyzing', MOCK_TIMINGS.analyzing * 2);
         this.later(MOCK_TIMINGS.analyzing * 2, () => {
           this.analyse(v);
           this.setStatus(v, 'ready_for_review');
@@ -663,9 +742,29 @@ function ext(filename: string, fallback: string): string {
   return m ? m[1]!.toLowerCase() : fallback;
 }
 
+/** What the describer would say, made up from the file name. */
 function describeFile(filename: string): string {
-  const base = filename.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
-  return base ? `Your clip: ${base}` : 'Your clip';
+  const known: Record<string, string> = {
+    'bathroom-shelf': 'Bathroom shelf, close-up',
+    product: 'Product on a white table',
+    stopwatch: 'Stopwatch on a counter',
+    shelf: 'Shelf with the product, slow pan',
+  };
+  const base = filename.replace(/\.[^.]+$/, '');
+  if (known[base]) return known[base]!;
+  const words = base.replace(/[-_]+/g, ' ').trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'A clip';
+}
+
+/** Ingest finished: the asset gets its size, duration and description. */
+function markReady(asset: BrollAssetView): void {
+  asset.status = 'ready';
+  asset.url = asset.thumbnailUrl;
+  asset.width = 1080;
+  asset.height = asset.kind === 'image' ? 1350 : 1920;
+  asset.durationSec = asset.kind === 'video' ? 4 : null;
+  asset.description = describeFile(asset.filename);
+  if (asset.source === 'stock' && !asset.attribution) asset.attribution = 'Photo from Pexels, free to use';
 }
 
 function mondayOf(d: Date): string {

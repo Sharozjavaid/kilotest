@@ -69,6 +69,17 @@ describe('ingestClip', () => {
     expect(existsSync(r.thumbnailPath)).toBe(true);
   }, 60_000);
 
+  it('puts a keyframe at least every second, at every nominal rate', async () => {
+    for (const [name, src] of [['kf50', 'tagged.mp4'], ['kf24', 'bursts.mp4'], ['kfvfr', 'vfr.mp4']] as const) {
+      const r = await analyze.ingestClip({ clipId: name, order: 0, inputPath: join(WORK, src), workDir: join(WORK, name) });
+      const out = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'packet=pts_time,flags', '-of', 'csv=p=0', r.normalizedPath]).toString();
+      const keys = out.split('\n').filter((l) => l.includes('K')).map((l) => Number(l.split(',')[0]));
+      expect(keys[0]).toBeCloseTo(0, 3);
+      const times = [...keys, r.info.durationSec];
+      for (let i = 1; i < times.length; i++) expect(times[i]! - times[i - 1]!, `${name} keyframe gap at ${times[i - 1]}`).toBeLessThanOrEqual(1 + 1 / r.info.fps + 1e-3);
+    }
+  }, 120_000);
+
   it('turns variable frame rate into constant 30 and adds a silent stereo track', async () => {
     const r = await analyze.ingestClip({ clipId: 'vfr', order: 1, inputPath: join(WORK, 'vfr.mp4'), workDir: join(WORK, 'vfr'), scriptLineIndex: 2, takeNumber: 3 });
     expect(r.info).toMatchObject({ fps: 30, scriptLineIndex: 2, takeNumber: 3 });

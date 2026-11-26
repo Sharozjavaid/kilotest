@@ -116,12 +116,31 @@ export interface AssOptions {
   style: CaptionStyle;
   width: number;
   height: number;
-  /** Accent colour for karaoke, #RRGGBB. */
-  accent: string;
+  /** Colour of the word being spoken in karaoke, #RRGGBB (CAPTION_HIGHLIGHT). */
+  highlight: string;
   /** Output ranges [start, end) where a `lower` graphic is on screen (captions move up). */
   lowerGraphics: Array<[number, number]>;
   /** Ranges with an `upper` graphic, which also block the raised position. */
   upperGraphics: Array<[number, number]>;
+  /** Ranges with a `fullscreen` graphic: no caption shows there; it comes back when the graphic ends. */
+  fullscreenGraphics?: Array<[number, number]>;
+}
+
+/** [start, end) minus every range in `holes`, as the pieces that remain. */
+export function subtractRanges(start: number, end: number, holes: Array<[number, number]>): Array<[number, number]> {
+  let pieces: Array<[number, number]> = [[start, end]];
+  for (const [h0, h1] of [...holes].sort((a, b) => a[0] - b[0])) {
+    const next: Array<[number, number]> = [];
+    for (const [a, b] of pieces) {
+      if (h1 <= a || h0 >= b) next.push([a, b]);
+      else {
+        if (h0 > a) next.push([a, h0]);
+        if (h1 < b) next.push([h1, b]);
+      }
+    }
+    pieces = next;
+  }
+  return pieces;
 }
 
 /** #RRGGBB to ASS &HAABBGGRR. alpha 0 is opaque. */
@@ -140,6 +159,16 @@ export function assTime(sec: number): string {
   const c = cs % 100;
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(c).padStart(2, '0')}`;
 }
+
+function assClock(cs: number): string {
+  const h = Math.floor(cs / 360000);
+  const m = Math.floor((cs % 360000) / 6000);
+  const sec = Math.floor((cs % 6000) / 100);
+  const c = cs % 100;
+  return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}.${String(c).padStart(2, '0')}`;
+}
+const assTimeCeil = (sec: number) => assClock(Math.max(0, Math.ceil(sec * 100 - 1e-6)));
+const assTimeFloor = (sec: number) => assClock(Math.max(0, Math.floor(sec * 100 + 1e-6)));
 
 function sanitize(text: string): string {
   return text.replace(/[{}\\]/g, '').replace(/\s+/g, ' ');
@@ -261,13 +290,18 @@ export function buildAss(cues: Cue[], o: AssOptions, shift = 0, length = Infinit
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
-  const accent = assColor(o.accent);
+  const accent = assColor(o.highlight);
+  // Widened by a centisecond each side so ASS rounding never lets a caption touch a full-screen graphic.
+  const holes = (o.fullscreenGraphics ?? []).map(([a, b]) => [a - 0.01, b + 0.01] as [number, number]);
   const event = (start: number, end: number, text: string, raised: boolean) => {
-    const a = Math.max(0, start - shift);
-    const b = Math.min(length, end - shift);
-    if (b - a < 0.01) return;
-    const pos = raised ? `{\\an2\\pos(${Math.round(o.width / 2)},${Math.round(o.height * CAPTION_RAISED_BASELINE)})}` : '';
-    lines.push(`Dialogue: 0,${assTime(a)},${assTime(b)},${s.name},,0,0,0,,${pos}${s.prefix}${text}`);
+    for (const [s0, s1] of subtractRanges(start, end, holes)) {
+      const a = Math.max(0, s0 - shift);
+      const b = Math.min(length, s1 - shift);
+      if (b - a < 0.01) continue;
+      const pos = raised ? `{\\an2\\pos(${Math.round(o.width / 2)},${Math.round(o.height * CAPTION_RAISED_BASELINE)})}` : '';
+      // Starts round up and ends round down to the centisecond, so a piece stays inside its range.
+      lines.push(`Dialogue: 0,${assTimeCeil(a)},${assTimeFloor(b)},${s.name},,0,0,0,,${pos}${s.prefix}${text}`);
+    }
   };
   for (const cue of cues) {
     if (cue.end - shift <= 0 || cue.start - shift >= length) continue;
@@ -301,7 +335,7 @@ export function buildAss(cues: Cue[], o: AssOptions, shift = 0, length = Infinit
 }
 
 /** Graphic ranges by placement, in output seconds. */
-export function graphicRanges(overlays: PlanOverlay[], fps: number, placement: 'lower' | 'upper'): Array<[number, number]> {
+export function graphicRanges(overlays: PlanOverlay[], fps: number, placement: 'lower' | 'upper' | 'fullscreen'): Array<[number, number]> {
   return overlays
     .filter((o) => o.kind === 'graphic' && o.placement === placement)
     .map((o) => [o.frameStart / fps, (o.frameStart + o.frames) / fps] as [number, number]);

@@ -19,6 +19,7 @@ import { isUuid } from '../auth.js';
 import type { Db } from '../db/index.js';
 import { HttpError, invalidRequest, invalidState, notFound } from '../errors.js';
 import { JOBS } from '../queue.js';
+import { DEFAULT_MAX_UPLOAD_BYTES, uploadLimit } from '../uploads.js';
 import { extensionFor, keys } from '../storage/types.js';
 import {
   currentEdl,
@@ -117,7 +118,7 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
     await db.begin(async (tx) => {
       const video = await own(tx, userId, id, true);
       if (video.status !== 'failed') throw invalidState(`Only a failed video can be retried (status is ${video.status})`);
-      await tx`update videos set status = 'queued', error = null, updated_at = now() where id = ${id}`;
+      await tx`update videos set status = 'queued', error = null, progress = 0, updated_at = now() where id = ${id}`;
       await queue.send(JOBS.analyze, { videoId: id }, tx);
     });
     return c.json(await summaryOf(userId, id));
@@ -155,7 +156,11 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
     const userId = c.get('userId');
     const id = pathId(c, 'id', 'Video');
     const req = await parseBody(c, AddBrollRequest);
-    const created: { id: string; key: string; type: string }[] = [];
+    const maxBytes = deps.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
+    for (const a of req.assets) {
+      if (a.sizeBytes > maxBytes) throw invalidRequest(`${a.filename} is larger than the ${maxBytes}-byte limit`);
+    }
+    const created: { id: string; key: string; type: string; size: number }[] = [];
     await db.begin(async (tx) => {
       const video = await own(tx, userId, id, true);
       if (video.status === 'failed') throw invalidState('Retry the video before adding B-roll');
@@ -165,11 +170,16 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
         await tx`
           insert into broll_assets (id, user_id, video_id, kind, filename, content_type, size_bytes, ext, initial)
           values (${assetId}, ${userId}, ${id}, ${asset.kind}, ${asset.filename}, ${asset.contentType}, ${asset.sizeBytes}, ${ext}, false)`;
-        created.push({ id: assetId, key: keys.brollSource(userId, id, assetId, ext), type: asset.contentType });
+        created.push({ id: assetId, key: keys.brollSource(userId, id, assetId, ext), type: asset.contentType, size: asset.sizeBytes });
       }
     });
     const body: AddBrollResponse = {
-      broll: await Promise.all(created.map(async (x) => ({ assetId: x.id, upload: await storage.createUploadTarget(x.key, x.type) }))),
+      broll: await Promise.all(
+        created.map(async (x) => ({
+          assetId: x.id,
+          upload: await storage.createUploadTarget(x.key, x.type, { maxBytes: uploadLimit(x.size, maxBytes) }),
+        })),
+      ),
     };
     return c.json(body, 201);
   });
@@ -215,7 +225,7 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
         throw invalidState(`A video that is ${video.status} cannot be replanned`);
       }
       if (!(await currentEdl(tx, id))) throw invalidState('The video has no edit yet');
-      await tx`update videos set status = 'analyzing', error = null, updated_at = now() where id = ${id}`;
+      await tx`update videos set status = 'analyzing', error = null, progress = 0, updated_at = now() where id = ${id}`;
       await queue.send(JOBS.replan, { videoId: id, passes: [...new Set(req.passes)] }, tx);
     });
     return c.json(await summaryOf(userId, id));

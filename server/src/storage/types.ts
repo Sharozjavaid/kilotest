@@ -4,11 +4,16 @@ import type { UploadTarget } from '@kilo/edl';
 export interface StorageDriver {
   readonly kind: 'local' | 'supabase';
   readonly bucket: string;
-  /** Where the app sends a new file's bytes. */
-  createUploadTarget(key: string, contentType: string): Promise<UploadTarget>;
+  /**
+   * Where the app sends a new file's bytes. `maxBytes` is the most the upload may
+   * carry; drivers that can enforce it while the bytes arrive do so.
+   */
+  createUploadTarget(key: string, contentType: string, opts?: { maxBytes?: number }): Promise<UploadTarget>;
   /** A URL anyone can GET for `ttlSec` seconds. */
   signedUrl(key: string, ttlSec?: number): Promise<string>;
   exists(key: string): Promise<boolean>;
+  /** Size in bytes of a stored object, or null when it does not exist (or the size is unknown). */
+  size(key: string): Promise<number | null>;
   /** Copies an object to a local file. */
   download(key: string, destPath: string): Promise<void>;
   /** Stores a local file under `key`, replacing any object there. */

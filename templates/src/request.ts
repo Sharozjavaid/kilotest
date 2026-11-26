@@ -7,10 +7,12 @@ export interface NormalizedRequest {
   spec: TemplateSpec;
   props: Record<string, unknown>;
   theme: GraphicTheme;
+  /** The requested duration clamped to the template's catalog min..max. */
   durationSec: number;
   fps: number;
   width: number;
   height: number;
+  /** round(durationSec * fps) after clamping. */
   frames: number;
 }
 
@@ -57,6 +59,10 @@ export function normalizeRequest(req: Omit<RenderGraphicRequest, 'outPath'>): No
   for (const [name, v] of [['width', width], ['height', height]] as const) {
     if (!(Number.isInteger(v) && v >= 16 && v <= 8192)) throw new TemplateRequestError(`Invalid ${name}: ${v} (an integer from 16 to 8192)`);
   }
-  const frames = Math.max(1, Math.round(durationSec * fps));
-  return { template, spec: getTemplate(template), props, theme: theme.data, durationSec, fps, width, height, frames };
+  // Outside the catalog range the timings would be squeezed or stretched past what the
+  // template was designed for: render at the nearest length it supports instead.
+  const spec = getTemplate(template);
+  const clamped = Math.min(spec.maxDurationSec, Math.max(spec.minDurationSec, durationSec));
+  const frames = Math.max(1, Math.round(clamped * fps));
+  return { template, spec, props, theme: theme.data, durationSec: clamped, fps, width, height, frames };
 }

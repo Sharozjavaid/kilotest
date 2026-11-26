@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { formatDuration } from '@/lib/format';
+import { Icon } from '@/ui/Icon';
 import { color, radius } from '@/ui/tokens';
 import { Text } from '@/ui/type';
 import type { TranscriptRow } from './rows';
@@ -14,9 +15,12 @@ export const TranscriptRowView = memo(function TranscriptRowView({
   active,
   onToggle,
   onSeek,
+  hasOverlay,
 }: {
   row: TranscriptRow;
   active: boolean;
+  /** The line carries B-roll or a motion graphic. */
+  hasOverlay?: boolean;
   onToggle: (segmentId: string) => void;
   onSeek: (row: TranscriptRow) => void;
 }) {
@@ -25,7 +29,7 @@ export const TranscriptRowView = memo(function TranscriptRowView({
     <Pressable
       onPress={() => onToggle(row.segmentId)}
       accessibilityRole="button"
-      accessibilityLabel={`${row.text}. ${row.keep ? 'Kept' : `Cut: ${row.reasonLabel ?? 'cut'}`}`}
+      accessibilityLabel={`${row.text}. ${row.keep ? 'Kept' : `Cut: ${row.reasonLabel ?? 'cut'}`}${hasOverlay ? '. Has B-roll or a graphic' : ''}`}
       accessibilityHint={row.keep ? 'Cuts this line' : 'Puts this line back'}
       accessibilityState={{ selected: row.keep }}
       aria-pressed={row.keep}
@@ -41,6 +45,11 @@ export const TranscriptRowView = memo(function TranscriptRowView({
       >
         {row.text}
       </Text>
+      {hasOverlay ? (
+        <View testID={`overlay-mark-${row.segmentId}`}>
+          <Icon name="broll" size={15} color={row.keep ? color.accent : color.muted} />
+        </View>
+      ) : null}
       {!row.keep && row.reasonLabel ? (
         <Text variant="label" weight={600} tone="cut">
           {row.reasonLabel}

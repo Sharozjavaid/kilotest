@@ -1,7 +1,7 @@
 import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { getGraphicTheme, type RenderApi, type RenderInput, type RenderOutput } from '@kilo/edl';
-import { buildAss, graphicRanges, groupCues, mapWords } from './captions.js';
+import { CAPTION_HIGHLIGHT, getGraphicTheme, getTemplate, type RenderApi, type RenderInput, type RenderOutput } from '@kilo/edl';
+import { buildAss, graphicRanges, groupCues, mapWords, subtractRanges } from './captions.js';
 import { probe, runFfmpeg } from './ffmpeg.js';
 import { audioChunkArgs, AUDIO_RATE, encoderArgs, sampleBounds, videoChunkArgs } from './graph.js';
 import { buildPlan, DEFAULT_LIMITS, RenderInputError, type ChunkLimits, type RenderPlan } from './plan.js';
@@ -152,11 +152,16 @@ async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Pr
     for (const g of graphics) {
       if (g.kind !== 'graphic') continue;
       const outPath = join(tmp, `graphic_${n}.mov`);
+      // Always ask within the template's range: a graphic cut short (by the end of the video or a
+      // reordered variant) plays its normal timing and is trimmed, never squeezed.
+      const spec = getTemplate(g.overlay.template);
+      const durationSec = Math.min(spec.maxDurationSec, Math.max(spec.minDurationSec, g.frames / F));
+      g.renderedFrames = Math.max(1, Math.round(durationSec * F));
       const res = await input.renderGraphic({
         template: g.overlay.template,
         props: g.overlay.props,
         theme,
-        durationSec: g.frames / F,
+        durationSec,
         fps: F,
         width: fmt.width,
         height: fmt.height,
@@ -179,13 +184,16 @@ async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Pr
     const words = mapWords(plan.items, input.transcripts ?? [], F);
     cues = groupCues(words, edl.captions.style, plan.items);
   }
+  const fullscreen = graphicRanges(plan.overlays, F, 'fullscreen');
+  if (edl.captions.enabled && fullscreen.length) cues = cues.filter((c) => subtractRanges(c.start, c.end, fullscreen).length > 0);
   const assOpts = {
     style: edl.captions.style,
     width: fmt.width,
     height: fmt.height,
-    accent: getGraphicTheme(edl.settings.graphicThemeId).accent,
+    highlight: CAPTION_HIGHLIGHT,
     lowerGraphics: graphicRanges(plan.overlays, F, 'lower'),
     upperGraphics: graphicRanges(plan.overlays, F, 'upper'),
+    fullscreenGraphics: fullscreen,
   };
 
   // 4. Picture, chunk by chunk, encoded once with the final settings.

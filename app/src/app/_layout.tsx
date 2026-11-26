@@ -56,9 +56,12 @@ function Navigator() {
           <Stack.Screen name="batch/[id]" />
           <Stack.Screen name="review/[id]" />
           <Stack.Screen name="export/[id]" />
-          <Stack.Screen name="record" />
+          <Stack.Screen name="record/index" />
+          <Stack.Screen name="record/camera" options={{ contentStyle: { backgroundColor: color.cameraScrim }, gestureEnabled: false }} />
+          <Stack.Screen name="record/finish" />
           <Stack.Screen name="broll/[id]" />
           <Stack.Screen name="goal" />
+          <Stack.Screen name="style/[id]" />
         </Stack.Protected>
         {/* In mock mode the welcome screen stays reachable for review and screenshots. */}
         <Stack.Protected guard={!signedIn || auth.mode === 'mock'}>

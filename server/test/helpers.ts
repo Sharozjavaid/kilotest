@@ -92,6 +92,8 @@ export interface TestEnv {
   log: ReturnType<typeof memoryLogger>;
   pipeline: Pipeline;
   clock: { now: Date | null };
+  /** The worker's scratch directory. */
+  workDir: string;
   as(userId: string): Client;
   stop(): Promise<void>;
 }
@@ -110,6 +112,7 @@ export interface EnvOptions {
   /** Start pg-boss workers (default true). */
   workers?: boolean;
   retryLimit?: number;
+  maxUploadBytes?: number;
 }
 
 /** A fresh database cloned from the run's template, local storage, the real queue and worker, the fake pipeline. */
@@ -152,7 +155,7 @@ export async function createEnv(options: EnvOptions = {}): Promise<TestEnv> {
   if (options.workers !== false) {
     await worker.start(queue, { analyzeConcurrency: 1, renderConcurrency: 1, pollingIntervalSeconds: 0.5, scheduleReminders: false });
   }
-  const app = createApp({ db: sql, storage, queue, authenticate: devAuth, log, pipeline, now });
+  const app = createApp({ db: sql, storage, queue, authenticate: devAuth, log, pipeline, now, maxUploadBytes: options.maxUploadBytes });
   handler = (req) => app.fetch(req);
 
   const as = (userId: string): Client => {
@@ -205,6 +208,7 @@ export async function createEnv(options: EnvOptions = {}): Promise<TestEnv> {
     log,
     pipeline,
     clock,
+    workDir: join(dir, 'jobs'),
     as,
     async stop() {
       await new Promise<void>((r) => http.close(() => r()));

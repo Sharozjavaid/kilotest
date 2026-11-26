@@ -14,6 +14,7 @@ import { TranscriptRowView } from '@/review/TranscriptRowView';
 import { activeRowId, transcriptRows, type TranscriptRow } from '@/review/rows';
 import type { ScrubTarget } from '@/review/scrub';
 import { VideoModal } from '@/components/VideoModal';
+import { CaptionsControl } from '@/review/CaptionsControl';
 import {
   Card,
   ErrorState,
@@ -83,7 +84,7 @@ function NotReady({ video, position }: { video: VideoDetail; position?: string }
           <PillButton variant="secondary" height={44} icon="refresh" label="Try again" loading={retry.isPending} onPress={() => retry.mutate(video.id)} />
         ) : (
           <View style={{ alignSelf: 'stretch' }}>
-            <ProgressBar value={video.status === 'analyzing' ? 0.6 : 0.2} accessibilityLabel={statusLabel(video.status)} />
+            <ProgressBar value={video.progress ?? 0} accessibilityLabel={statusLabel(video.status)} />
           </View>
         )}
         {retry.isError ? (
@@ -107,6 +108,11 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
   const ranges = useMemo(() => playbackRanges(edl, offsets, activeVariant), [edl, offsets, activeVariant]);
   const stats = useMemo(() => edlStats(edl, activeVariant), [edl, activeVariant]);
   const rows = useMemo(() => transcriptRows(edl, offsets), [edl, offsets]);
+  // Lines with B-roll or a graphic in the cut being watched get a marker.
+  const marked = useMemo(() => {
+    const variant = edl.variants.find((x) => x.id === activeVariant);
+    return new Set([...edl.overlays, ...(variant?.overlays ?? [])].map((o) => o.anchorSegmentId));
+  }, [edl, activeVariant]);
   const sp = useSkipPlayer(video.proxy.url, ranges);
   const activeId = activeRowId(edl, rows, sp.snapshot.segmentId);
 
@@ -269,7 +275,10 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
         totalSec={stats.totalSec}
         onScrub={onScrub}
         onScrubEnd={onScrubEnd}
+        marked={marked}
       />
+
+      <CaptionsControl captions={edl.captions} onChange={(captions) => saver?.edit({ type: 'captions', captions })} />
 
       <ScrollView
         ref={scrollRef}
@@ -282,7 +291,7 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
       >
         {rows.map((row) => (
           <View key={row.segmentId} onLayout={(e) => rowY.current.set(row.segmentId, e.nativeEvent.layout.y)}>
-            <TranscriptRowView row={row} active={row.segmentId === activeId} onToggle={onToggle} onSeek={onSeek} />
+            <TranscriptRowView row={row} active={row.segmentId === activeId} onToggle={onToggle} onSeek={onSeek} hasOverlay={marked.has(row.segmentId)} />
           </View>
         ))}
       </ScrollView>

@@ -18,8 +18,11 @@ export function ScrubStrip({
   totalSec,
   onScrub,
   onScrubEnd,
+  marked,
 }: {
   edl: Edl;
+  /** Segments that carry an overlay (B-roll or a graphic): a small marker sits on their block. */
+  marked?: ReadonlySet<string>;
   clipOffsets: Record<string, number>;
   proxyTime: number;
   segmentId: string | null;
@@ -75,6 +78,11 @@ export function ScrubStrip({
               style={[styles.block, { left: b.x, width: Math.max(1, b.width) }, b.keep ? styles.kept : styles.cut]}
             />
           ))}
+          {marked
+            ? layout.blocks
+                .filter((b) => marked.has(b.segmentId))
+                .map((b) => <View key={`m-${b.segmentId}`} style={[styles.marker, { left: b.x + Math.min(4, Math.max(0, b.width / 2 - 3)) }]} testID={`marker-${b.segmentId}`} />)
+            : null}
           {width ? <View style={[styles.playhead, { left: Math.max(0, Math.min(width - 3, playheadX - 1.5)) }]} /> : null}
         </View>
       </View>
@@ -98,6 +106,8 @@ const styles = StyleSheet.create({
   block: { position: 'absolute', top: 4, height: 28, borderRadius: 5 },
   kept: { backgroundColor: color.accent },
   cut: { backgroundColor: color.white, borderWidth: 1, borderColor: color.cut },
+  /** Overlay marker: a white dot with an ink ring on the block's top edge. */
+  marker: { position: 'absolute', top: 1, width: 7, height: 7, borderRadius: 4, backgroundColor: color.white, borderWidth: 1.5, borderColor: color.ink },
   playhead: { position: 'absolute', top: 0, width: 3, height: 36, borderRadius: 2, backgroundColor: color.ink },
   labels: { flexDirection: 'row', justifyContent: 'space-between' },
 });

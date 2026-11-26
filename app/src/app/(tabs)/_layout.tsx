@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router';
 import { KiloTabBar } from '@/components/KiloTabBar';
 
-/** Videos / Styles / You. Styles and You are placeholders for the next screens. */
+/** Videos / Styles / You. */
 export default function TabsLayout() {
   return (
     <Tabs screenOptions={{ headerShown: false }} tabBar={(props) => <KiloTabBar {...props} />}>

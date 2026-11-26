@@ -28,6 +28,8 @@ export function getApi(): KiloApi {
   if (env.mock) {
     mockInstance = new MockKiloApi({ media: bundledMockMedia(), latencyMs: 150, seed: !isFirstRunMock() });
     instance = mockInstance;
+    // Mock mode only: lets browser drives (app/.work/*.mjs) read what the app saved.
+    (globalThis as { __kiloMock?: MockKiloApi }).__kiloMock = mockInstance;
   } else {
     instance = createHttpApi({
       baseUrl: env.apiUrl,

@@ -1,7 +1,7 @@
 import { MODE_PRESETS, toggleSegment, type Edl } from '@kilo/edl';
 import { buildMockAnalysis } from '@/api/mock/build';
 import { KiloApiError } from '@/api/errors';
-import { EdlSaver, ackSaved, addToggle, applyPending, hasChanges } from './reconcile';
+import { EdlSaver, ackSaved, addToggle, applyEdits, applyPending, hasChanges } from './reconcile';
 
 const base = buildMockAnalysis({ videoId: 'v1', clipIds: ['c1'], settings: MODE_PRESETS.ugc_ad.settings }).edl;
 const keepOf = (edl: Edl, id: string) => edl.segments.find((s) => s.id === id)!.keep;
@@ -150,5 +150,61 @@ describe('EdlSaver', () => {
     await jest.advanceTimersByTimeAsync(10);
     expect(always409).toHaveBeenCalledTimes(3);
     expect(saver.getState().error).toBeInstanceOf(KiloApiError);
+  });
+});
+
+describe('overlay and caption edits', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  const title = { id: 'o-new', type: 'graphic' as const, anchorSegmentId: 's4', offsetSec: 2, durationSec: 1, template: 'bold-title' as const, props: { text: 'Two weeks' } };
+
+  it('apply in order and drop overlays whose anchor is gone', () => {
+    const edl = applyEdits(base, [
+      { edit: { type: 'upsertOverlay', overlay: title }, seq: 1 },
+      { edit: { type: 'removeOverlay', overlayId: 'o-broll-1' }, seq: 2 },
+      { edit: { type: 'captions', captions: { enabled: true, style: 'bold' } }, seq: 3 },
+      { edit: { type: 'upsertOverlay', overlay: { ...title, id: 'o-ghost', anchorSegmentId: 'nope' } }, seq: 4 },
+    ]);
+    expect(edl.overlays.map((o) => o.id)).toEqual(['o-graphic-1', 'o-graphic-2', 'o-new']);
+    expect(edl.captions).toEqual({ enabled: true, style: 'bold' });
+    expect(hasChanges(base, {}, [{ edit: { type: 'captions', captions: base.captions }, seq: 1 }])).toBe(false);
+  });
+
+  it('saves edits after the debounce and replays them over a conflicting save', async () => {
+    const server = fakeServer(base);
+    const saver = new EdlSaver(base, { save: server.save, fetchLatest: server.fetchLatest, debounceMs: 300 });
+    saver.edit({ type: 'upsertOverlay', overlay: title });
+    saver.edit({ type: 'captions', captions: { enabled: true, style: 'karaoke' } });
+    expect(saver.getState().local.overlays.some((o) => o.id === 'o-new')).toBe(true);
+    server.externalToggle('s13'); // another device cuts a line meanwhile
+    await jest.advanceTimersByTimeAsync(300);
+    expect(server.fetchLatest).toHaveBeenCalledTimes(1);
+    expect(server.current.overlays.some((o) => o.id === 'o-new')).toBe(true);
+    expect(server.current.captions).toEqual({ enabled: true, style: 'karaoke' });
+    expect(keepOf(server.current, 's13')).toBe(false);
+    expect(saver.getState().edits).toEqual([]);
+    expect(saver.getState().local).toEqual(server.current);
+  });
+
+  it('keeps an edit made while a save is in flight', async () => {
+    const server = fakeServer(base);
+    let release!: () => void;
+    const slowSave = jest.fn(async (edl: Edl, rev: number) => {
+      await new Promise<void>((r) => (release = r));
+      return server.save(edl, rev);
+    });
+    const saver = new EdlSaver(base, { save: slowSave, fetchLatest: server.fetchLatest, debounceMs: 100 });
+    saver.toggle('s5');
+    await jest.advanceTimersByTimeAsync(100);
+    saver.edit({ type: 'removeOverlay', overlayId: 'o-graphic-2' });
+    release();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(saver.getState().edits).toHaveLength(1);
+    await jest.advanceTimersByTimeAsync(100);
+    release();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(server.current.overlays.some((o) => o.id === 'o-graphic-2')).toBe(false);
+    expect(saver.getState().edits).toHaveLength(0);
   });
 });

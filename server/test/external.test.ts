@@ -1,14 +1,15 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, randomUUID, sign as cryptoSign, type KeyObject } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { UploadTarget } from '@kilo/edl';
-import { devAuth, signHs256, supabaseAuth } from '../src/auth.js';
+import { combinedSupabaseAuth, devAuth, jwksAuth, signHs256, supabaseAuth, supabaseJwks } from '../src/auth.js';
 import { assertConfig, loadConfig } from '../src/config.js';
 import { memoryLogger } from '../src/log.js';
 import { ExpoPush, LogPush } from '../src/push.js';
 import { authenticatorFor } from '../src/server.js';
 import { SupabaseStorage, TUS_CHUNK } from '../src/storage/supabase.js';
+import { createStorage, LocalStorage, stableSigningSecret } from '../src/storage/index.js';
 import { SERVER_DIR } from './helpers.js';
 
 /** An in-memory imitation of the Supabase Storage endpoints the driver uses. Records every request. */
@@ -38,7 +39,7 @@ function fakeSupabase(serviceKey: string) {
     if ((m = /^\/object\/authenticated\/kilo\/(.+)$/.exec(path))) {
       const obj = objects.get(decodeURIComponent(m[1]!).split('/').map(decodeURIComponent).join('/'));
       if (!obj) return new Response('{"error":"not found"}', { status: 400 });
-      return new Response(method === 'HEAD' ? null : new Uint8Array(obj), { status: 200 });
+      return new Response(method === 'HEAD' ? null : new Uint8Array(obj), { status: 200, headers: { 'content-length': String(obj.length) } });
     }
     if (path === '/object/list/kilo' && method === 'POST') {
       const { prefix } = json() as { prefix: string };
@@ -123,6 +124,8 @@ describe('Supabase storage driver (mocked HTTP; not run against a real project)'
     expect(await storage.exists(key)).toBe(false);
     await storage.upload(key, small, 'video/mp4');
     expect(await storage.exists(key)).toBe(true);
+    expect(await storage.size(key)).toBe(1000);
+    expect(await storage.size('users/u1/videos/v1/nothing.mp4')).toBeNull();
     const bigKey = 'users/u1/videos/v1/renders/r1.mp4';
     await storage.upload(bigKey, large, 'video/mp4');
     expect(fake.requests.filter((r) => r.method === 'PATCH')).toHaveLength(3);
@@ -136,6 +139,28 @@ describe('Supabase storage driver (mocked HTTP; not run against a real project)'
     expect([...fake.objects.keys()]).toEqual(['users/u2/videos/v9/proxy.mp4']);
     await expect(storage.download('users/u1/missing.mp4', back)).rejects.toThrow(/400/);
     await expect(storage.signedUrl('../etc/passwd')).rejects.toThrow(/Unsafe/);
+  });
+});
+
+describe('local signing secret', () => {
+  it('is derived from a file under the storage directory, stable across restarts and processes', async () => {
+    const root = await mkdtemp(join(SERVER_DIR, '.work', 'secret-'));
+    try {
+      const a = stableSigningSecret(root);
+      expect(a).toMatch(/^[0-9a-f]{64}$/);
+      expect(stableSigningSecret(root)).toBe(a);
+      expect((await readFile(join(root, '.local-signing-secret'), 'utf8')).trim()).toBe(a);
+      // A link signed before a "restart" still verifies after it.
+      const before = createStorage(loadConfig({ KILO_STORAGE_DIR: root }));
+      const after = createStorage(loadConfig({ KILO_STORAGE_DIR: root }));
+      const url = await before.signedUrl('users/u/videos/v/proxy.mp4');
+      expect((after as LocalStorage).verify(url.split('/').pop()!, 'get')).toBe('users/u/videos/v/proxy.mp4');
+      // An explicit secret wins and does not touch the file.
+      const explicit = createStorage(loadConfig({ KILO_STORAGE_DIR: root, KILO_LOCAL_SIGNING_SECRET: 'x'.repeat(40) })) as LocalStorage;
+      expect(explicit.verify(url.split('/').pop()!, 'get')).toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -169,12 +194,106 @@ describe('auth', () => {
     expect(await auth('garbage')).toBeNull();
   });
 
+  describe('Supabase signing keys via JWKS (locally generated keys, mocked endpoint; not run against real Supabase)', () => {
+    const url = 'https://proj.supabase.co';
+    const issuer = `${url}/auth/v1`;
+    const sign = (alg: 'ES256' | 'RS256' | 'EdDSA', key: KeyObject, kid: string | undefined, payload: Record<string, unknown>) => {
+      const h = Buffer.from(JSON.stringify({ alg, typ: 'JWT', ...(kid ? { kid } : {}) })).toString('base64url');
+      const p = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const data = Buffer.from(`${h}.${p}`);
+      const sig =
+        alg === 'ES256'
+          ? cryptoSign('sha256', data, { key, dsaEncoding: 'ieee-p1363' })
+          : alg === 'RS256'
+            ? cryptoSign('sha256', data, key)
+            : cryptoSign(null, data, key);
+      return `${h}.${p}.${sig.toString('base64url')}`;
+    };
+    const ec = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const ec2 = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const ed = generateKeyPairSync('ed25519');
+    const jwk = (k: KeyObject, kid: string, alg: string) => ({ ...k.export({ format: 'jwk' }), kid, alg, use: 'sig' });
+
+    function endpoint(initial: object[]) {
+      const state = { keys: initial, calls: 0, fail: false };
+      const fetchImpl = async (u: string) => {
+        state.calls++;
+        expect(u).toBe(`${url}/auth/v1/.well-known/jwks.json`);
+        if (state.fail) return { ok: false, status: 503, json: async () => ({}) };
+        return { ok: true, status: 200, json: async () => ({ keys: state.keys }) };
+      };
+      return { state, fetchImpl };
+    }
+
+    it('verifies ES256, RS256 and EdDSA tokens and checks the claims', async () => {
+      let t = now;
+      const ep = endpoint([jwk(ec.publicKey, 'k1', 'ES256'), jwk(rsa.publicKey, 'k2', 'RS256'), jwk(ed.publicKey, 'k3', 'EdDSA')]);
+      const auth = jwksAuth({ ...supabaseJwks(url), fetch: ep.fetchImpl, now: () => t });
+      const claims = { sub, exp, aud: 'authenticated', role: 'authenticated', iss: issuer };
+      expect(await auth(sign('ES256', ec.privateKey, 'k1', claims))).toBe(sub);
+      expect(await auth(sign('RS256', rsa.privateKey, 'k2', claims))).toBe(sub);
+      expect(await auth(sign('EdDSA', ed.privateKey, 'k3', claims))).toBe(sub);
+      // Cached: one fetch for all three.
+      expect(ep.state.calls).toBe(1);
+      // A key that is not in the set, a wrong issuer, an expired token, anon role, a tampered payload.
+      expect(await auth(sign('ES256', ec2.privateKey, 'k1', claims))).toBeNull();
+      expect(await auth(sign('ES256', ec.privateKey, 'k1', { ...claims, iss: 'https://evil.example/auth/v1' }))).toBeNull();
+      expect(await auth(sign('ES256', ec.privateKey, 'k1', { ...claims, exp: Math.floor(now / 1000) - 5 }))).toBeNull();
+      expect(await auth(sign('ES256', ec.privateKey, 'k1', { ...claims, role: 'anon' }))).toBeNull();
+      const good = sign('ES256', ec.privateKey, 'k1', claims).split('.');
+      expect(await auth(`${good[0]}.${Buffer.from(JSON.stringify({ ...claims, sub: randomUUID() })).toString('base64url')}.${good[2]}`)).toBeNull();
+      // An RSA key cannot be used to pass off an ES256 token, nor HS256 via the JWKS path.
+      expect(await auth(sign('RS256', rsa.privateKey, 'k1', claims))).toBeNull();
+      expect(await auth(signHs256(claims, 'x'))).toBeNull();
+      // After the cache expires the set is fetched again.
+      t += 11 * 60_000;
+      expect(await auth(sign('ES256', ec.privateKey, 'k1', { ...claims, exp: Math.floor(t / 1000) + 60 }))).toBe(sub);
+      expect(ep.state.calls).toBe(2);
+    });
+
+    it('refetches on an unknown kid (rotation), rate-limited, and survives a failing endpoint', async () => {
+      let t = now;
+      const errors: unknown[] = [];
+      const ep = endpoint([jwk(ec.publicKey, 'old', 'ES256')]);
+      const auth = jwksAuth({ ...supabaseJwks(url), fetch: ep.fetchImpl, now: () => t, onError: (e) => errors.push(e) });
+      const claims = { sub, exp, aud: 'authenticated' };
+      expect(await auth(sign('ES256', ec.privateKey, 'old', claims))).toBe(sub);
+      ep.state.keys = [jwk(ec.publicKey, 'old', 'ES256'), jwk(ec2.publicKey, 'new', 'ES256')];
+      // Within the refetch interval an unknown kid does not trigger a fetch.
+      expect(await auth(sign('ES256', ec2.privateKey, 'new', claims))).toBeNull();
+      expect(ep.state.calls).toBe(1);
+      t += 31_000;
+      expect(await auth(sign('ES256', ec2.privateKey, 'new', claims))).toBe(sub);
+      expect(ep.state.calls).toBe(2);
+      // Endpoint down after expiry: tokens with known keys fail closed, the error is reported.
+      ep.state.fail = true;
+      t += 11 * 60_000;
+      const later = { ...claims, exp: Math.floor(t / 1000) + 60 };
+      expect(await auth(sign('ES256', ec.privateKey, 'old', later))).toBe(sub); // old keys are kept on a failed refresh
+      expect(errors.length).toBe(1);
+      expect(String(errors[0])).toMatch(/503/);
+    });
+
+    it('the server accepts HS256 and JWKS tokens side by side when both are configured', async () => {
+      const ep = endpoint([jwk(ec.publicKey, 'k1', 'ES256')]);
+      const auth = combinedSupabaseAuth({ secret, supabaseUrl: url, fetch: ep.fetchImpl, now: () => now });
+      expect(await auth(signHs256({ sub, exp }, secret))).toBe(sub);
+      expect(await auth(sign('ES256', ec.privateKey, 'k1', { sub, exp }))).toBe(sub);
+      const hsOnly = combinedSupabaseAuth({ secret, now: () => now });
+      expect(await hsOnly(sign('ES256', ec.privateKey, 'k1', { sub, exp }))).toBeNull();
+      expect(ep.state.calls).toBe(1);
+    });
+  });
+
   it('dev auth refuses to start in production', () => {
     const prod = loadConfig({ NODE_ENV: 'production', DATABASE_URL: 'postgres://x/y', KILO_AUTH: 'dev' });
     expect(() => assertConfig(prod, { api: true, worker: false })).toThrow(/not allowed/);
     expect(() => authenticatorFor(prod)).toThrow(/not allowed/);
     const supa = loadConfig({ NODE_ENV: 'production', DATABASE_URL: 'postgres://x/y', KILO_AUTH: 'supabase' });
     expect(() => assertConfig(supa, { api: true, worker: false })).toThrow(/SUPABASE_JWT_SECRET/);
+    const jwksOnly = loadConfig({ NODE_ENV: 'production', DATABASE_URL: 'postgres://x/y', KILO_AUTH: 'supabase', SUPABASE_URL: 'https://p.supabase.co' });
+    expect(() => assertConfig(jwksOnly, { api: true, worker: false })).not.toThrow();
     const ok = loadConfig({ NODE_ENV: 'production', DATABASE_URL: 'postgres://x/y', KILO_AUTH: 'supabase', SUPABASE_JWT_SECRET: 's' });
     expect(() => assertConfig(ok, { api: true, worker: true })).not.toThrow();
     expect(() => loadConfig({ KILO_STORAGE: 'ftp' })).toThrow(/KILO_STORAGE/);

@@ -1,7 +1,8 @@
 import { Readable } from 'node:stream';
 import { Hono } from 'hono';
 import { HttpError } from '../errors.js';
-import type { LocalStorage } from '../storage/local.js';
+import { UploadTooLargeError, type LocalStorage } from '../storage/local.js';
+import { DEFAULT_MAX_UPLOAD_BYTES } from '../uploads.js';
 import { contentTypeFor } from '../storage/types.js';
 
 const badToken = () => new HttpError(401, 'unauthorized', 'This link is invalid or has expired');
@@ -29,15 +30,24 @@ export function parseRange(header: string | undefined, size: number): { start: n
 }
 
 /** Upload and download endpoints for the local storage driver's signed tokens. */
-export function localRoutes(storage: LocalStorage): Hono {
+export function localRoutes(storage: LocalStorage, maxUploadBytes = DEFAULT_MAX_UPLOAD_BYTES): Hono {
   const app = new Hono();
 
   app.put('/upload/:token', async (c) => {
-    const key = storage.verify(c.req.param('token'), 'put');
-    if (!key) throw badToken();
+    const token = storage.verifyToken(c.req.param('token'), 'put');
+    if (!token) throw badToken();
+    const limit = Math.min(token.max ?? maxUploadBytes, maxUploadBytes);
+    const tooLarge = () => new HttpError(413, 'file_too_large', `This file is larger than the ${limit} bytes declared for it`);
+    const declaredLength = Number(c.req.header('content-length'));
+    if (Number.isFinite(declaredLength) && declaredLength > limit) throw tooLarge();
     const body = c.req.raw.body;
     if (!body) throw new HttpError(400, 'invalid_request', 'Empty body');
-    await storage.writeStream(key, body);
+    try {
+      await storage.writeStream(token.key, body, limit);
+    } catch (err) {
+      if (err instanceof UploadTooLargeError) throw tooLarge();
+      throw err;
+    }
     return c.body(null, 204);
   });
 

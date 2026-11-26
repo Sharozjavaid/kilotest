@@ -52,7 +52,8 @@ export class SupabaseStorage implements StorageDriver {
     return res;
   }
 
-  async createUploadTarget(key: string, contentType: string): Promise<UploadTarget> {
+  /** Supabase cannot cap a signed tus upload; the size is checked when the upload is completed. */
+  async createUploadTarget(key: string, contentType: string, _opts?: { maxBytes?: number }): Promise<UploadTarget> {
     assertSafeKey(key);
     const res = await this.call(`/object/upload/sign/${this.bucket}/${encodeKey(key)}`, {
       method: 'POST',
@@ -92,6 +93,18 @@ export class SupabaseStorage implements StorageDriver {
       okStatuses: [400, 404],
     });
     return res.ok;
+  }
+
+  async size(key: string): Promise<number | null> {
+    assertSafeKey(key);
+    const res = await this.call(`/object/authenticated/${this.bucket}/${encodeKey(key)}`, {
+      method: 'HEAD',
+      headers: this.auth(),
+      okStatuses: [400, 404],
+    });
+    if (!res.ok) return null;
+    const n = Number(res.headers.get('content-length'));
+    return Number.isFinite(n) && res.headers.has('content-length') ? n : null;
   }
 
   async download(key: string, destPath: string): Promise<void> {

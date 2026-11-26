@@ -62,3 +62,13 @@ export function detailStill(): string {
 }
 
 export { DIR as MEDIA_DIR };
+
+/** 4 s, 1080x1920 at 30 fps with a moving test pattern and no audio stream at all. */
+export function silentClip(): string {
+  return cached('silent.mp4', (out) => {
+    ff([
+      '-f', 'lavfi', '-i', 'testsrc2=s=1080x1920:r=30:d=4',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-g', '30', '-threads', '2', '-an', out,
+    ]);
+  });
+}

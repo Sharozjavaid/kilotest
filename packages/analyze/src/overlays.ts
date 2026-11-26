@@ -14,7 +14,15 @@ import {
 /** Nothing full-screen or B-roll before this point: the hook stays on the speaker's face. */
 export const HOOK_PROTECT_SEC = 2.0;
 /** At most one overlay per this many seconds of output. */
-export const OVERLAY_SPACING_SEC = 5.5;
+export const OVERLAY_SPACING_SEC = 4.5;
+/**
+ * Candidates at or above these priorities are real matches (a spoken list, price or
+ * figure; B-roll whose description matches the line). When both kinds have one and
+ * there is room for two overlays, each kind gets its best one (the graphic first)
+ * before the rest are placed by priority, so B-roll never starves graphics or the
+ * other way round.
+ */
+export const STRONG_PRIORITY = { graphic: 60, broll: 72 } as const;
 export const BROLL_MIN_SEC = 1.5;
 export const BROLL_MAX_SEC = 3.5;
 /** Breathing room between consecutive overlays. */
@@ -57,7 +65,15 @@ export function schedule(input: {
   const taken: Interval[] = [...input.occupied];
   const dedupe = new Set<string>();
   let count = input.occupied.length;
-  const sorted = [...input.candidates].sort((a, b) => b.priority - a.priority || a.at - b.at);
+  const byPriority = [...input.candidates].sort((a, b) => b.priority - a.priority || a.at - b.at);
+  let sorted = byPriority;
+  if (input.budget - count >= 2) {
+    const firsts = (['graphic', 'broll'] as const)
+      .map((kind) => byPriority.find((c) => c.kind === kind && c.priority >= STRONG_PRIORITY[kind]))
+      .filter((c): c is Candidate => !!c);
+    // The graphic goes first: it is pinned to the words it shows, B-roll can move to another line.
+    if (firsts.length === 2) sorted = [...firsts, ...byPriority.filter((c) => !firsts.includes(c))];
+  }
   for (const c of sorted) {
     if (count >= input.budget) break;
     if (c.dedupe && dedupe.has(c.dedupe)) continue;

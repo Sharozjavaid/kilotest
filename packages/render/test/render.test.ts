@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -22,7 +23,7 @@ import {
   WORK,
   type Frames,
 } from './helpers.js';
-import { detailStill, magentaBroll, togglingClip } from './media.js';
+import { detailStill, magentaBroll, silentClip, togglingClip } from './media.js';
 
 const out = (name: string) => join(WORK, name);
 const workDir = join(WORK, 'jobs');
@@ -386,19 +387,22 @@ describe('captions', () => {
       }
       expect(shown).toBeGreaterThan((fr.list.length / 3) * 0.75);
       if (style === 'karaoke') {
-        // The current word is in the accent colour (pop theme: #F0442E).
+        // The current word is in CAPTION_HIGHLIGHT (#FFE94A), whatever the theme's accent (pop: #F0442E).
         const hi = decodeFrames(path, 270, 480);
         let accent = 0;
+        let themeAccent = 0;
         for (let f = 0; f < hi.list.length; f += 5) {
           for (let y = Math.floor(0.5 * hi.h); y < Math.floor(0.74 * hi.h); y++) {
             for (let x = 0; x < hi.w; x++) {
               const o = (y * hi.w + x) * 3;
               const [r, g, b] = [hi.list[f]![o]!, hi.list[f]![o + 1]!, hi.list[f]![o + 2]!];
-              if (r > 200 && g < 110 && b < 90) accent++;
+              if (r > 200 && g > 190 && b < 140) accent++;
+              if (r > 200 && g < 110 && b < 90) themeAccent++;
             }
           }
         }
         expect(accent).toBeGreaterThan(200);
+        expect(themeAccent).toBeLessThan(20);
       }
     });
   }
@@ -446,5 +450,108 @@ describe('errors', () => {
       /file for clip "clip1" does not exist/,
     );
     await expect(renderVideo(input(routine, routine.edl, { outPath: out('x.mp4'), variantId: 'missing' }))).rejects.toThrow(/Variant "missing"/);
+  });
+});
+
+describe('clips without sound', () => {
+  it('a clip with no audio stream renders with a silent track of the right length, next to one that has sound', async () => {
+    const silentInfo = { id: 'mute', order: 1, durationSec: 4, fps: 30, width: 1080, height: 1920 };
+    const clips = { ...routine.clips, mute: { path: silentClip(), info: silentInfo } };
+    const edl = baseEdl([seg('a', 'clip1', 4.157, 7.216), seg('m', 'mute', 0.5, 3.0), seg('b', 'clip1', 9.016, 11.162)], 60);
+    const path = out('no_audio.mp4');
+    const res = await renderVideo(input(routine, edl, { quality: 'final', outPath: path, clips }));
+    const p = probeOut(path);
+    const resolved = resolveTimeline(edl).durationSec;
+    expect(Math.abs(p.video.duration - resolved)).toBeLessThanOrEqual(1 / 60 + 1e-6);
+    expect(Math.abs(p.audio.duration - p.video.duration)).toBeLessThan(0.025);
+    expect(res.durationSec).toBeCloseTo(resolved, 1);
+    const audio = decodeAudio(path);
+    const a = 3.059;
+    // Speech before and after, digital silence in the muted stretch (apart from the cut fades at its edges).
+    expect(rmsDb(audio, 0.5, 2.5)).toBeGreaterThan(-40);
+    expect(rmsDb(audio, a + 0.05, a + 2.45)).toBeLessThan(-80);
+    expect(rmsDb(audio, a + 2.6, resolved - 0.2)).toBeGreaterThan(-40);
+    // The picture of the muted clip is there (the test pattern is colourful, the fixture ground is not).
+    const fr = decodeFrames(path);
+    const f = Math.round((a + 1.2) * 60);
+    const row = Array.from({ length: 10 }, (_, i) => pixel(fr, f, 0.05 + i * 0.1, 0.3));
+    const spread = Math.max(...row.map((p) => p[0] + p[1] + p[2])) - Math.min(...row.map((p) => p[0] + p[1] + p[2]));
+    expect(spread).toBeGreaterThan(100);
+  });
+});
+
+describe('everything at once', () => {
+  it('B-roll, an upper graphic, a full-screen graphic and captions share one video without colliding', async () => {
+    const magentaAsset: BrollAsset = { id: 'magenta', kind: 'video', durationSec: 3, width: 1080, height: 1920, description: 'magenta', source: 'user' };
+    const broll = { magenta: { path: magentaBroll(), asset: magentaAsset } };
+    // Output timeline: a 0..3.059, b 3.059..5.205, c 5.205..8.144 (seconds).
+    const segments = [seg('a', 'clip1', 4.157, 7.216), seg('b', 'clip1', 9.016, 11.162), seg('c', 'clip1', 14.844, 17.783)];
+    const overlays: Edl['overlays'] = [
+      { id: 'br', type: 'broll', anchorSegmentId: 'a', offsetSec: 0.5, durationSec: 1.5, assetId: 'magenta', sourceStartSec: 0 },
+      { id: 'up', type: 'graphic', anchorSegmentId: 'a', offsetSec: 1.2, durationSec: 1.6, template: 'stat-callout', props: { value: '2 weeks', label: 'every morning' } },
+      { id: 'fs', type: 'graphic', anchorSegmentId: 'b', offsetSec: 0.3, durationSec: 1.5, template: 'bold-title', props: { text: 'Nobody tells you' } },
+    ];
+    const edl = baseEdl(segments, 60, { overlays, captions: { enabled: true, style: 'clean' } });
+    const plain = baseEdl(segments, 60, { overlays, captions: { enabled: false, style: 'clean' } });
+    const calls: RenderGraphicRequest[] = [];
+    const rg = async (req: RenderGraphicRequest) => {
+      calls.push(req);
+      return standInRenderGraphic(req);
+    };
+    const path = out('everything.mp4');
+    const plainPath = out('everything_nocaptions.mp4');
+    await renderVideo(input(routine, edl, { outPath: path, broll, renderGraphic: rg }));
+    await renderVideo(input(routine, plain, { outPath: plainPath, broll, renderGraphic: rg }));
+    expect(calls.map((c) => c.template).sort()).toEqual(['bold-title', 'bold-title', 'stat-callout', 'stat-callout']);
+    // ProRes 4444 from the templates decodes as yuva444p12le even when written 10-bit: render takes it as it is.
+    const probeGraphic = join(WORK, 'standin.mov');
+    await standInRenderGraphic({ ...calls[0]!, outPath: probeGraphic });
+    const stream = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_streams', '-of', 'json', probeGraphic]).toString()).streams[0];
+    expect(stream.pix_fmt).toBe('yuva444p12le');
+    const fr = decodeFrames(path, 108, 192);
+    const base = decodeFrames(plainPath, 108, 192);
+    expect(fr.list.length).toBe(base.list.length);
+    const F = 30; // preview
+    const lowerDiff = (f: number) => {
+      let sum = 0;
+      let n = 0;
+      for (let y = Math.floor(0.5 * fr.h); y < Math.floor(0.74 * fr.h); y++) {
+        for (let x = 0; x < fr.w; x++) {
+          const o = (y * fr.w + x) * 3;
+          for (let c = 0; c < 3; c++) sum += Math.abs(fr.list[f]![o + c]! - base.list[f]![o + c]!);
+          n++;
+        }
+      }
+      return sum / n;
+    };
+    const at = (sec: number) => Math.round(sec * F);
+    // B-roll on screen, with captions on top of it.
+    const brollFrame = at(0.9);
+    expect(near(pixel(fr, brollFrame, 0.5, 0.3), [255, 0, 255], 40)).toBe(true);
+    expect(lowerDiff(brollFrame)).toBeGreaterThan(3);
+    // The upper graphic's card and the captions at the same time, apart.
+    const both = at(1.8);
+    expect(near(pixel(fr, both, 0.2, 0.2), [31, 94, 255], 40)).toBe(true);
+    expect(lowerDiff(both)).toBeGreaterThan(3);
+    // No caption anywhere while the full-screen graphic is up (3.359..4.859), captions again after it.
+    const fsStart = 3.059 + 0.3;
+    for (let f = at(fsStart) + 1; f < at(fsStart + 1.5) - 1; f++) expect(lowerDiff(f), `frame ${f}`).toBeLessThan(0.5);
+    let after = 0;
+    for (let f = at(fsStart + 1.5) + 2; f < at(6.5); f++) if (lowerDiff(f) > 3) after++;
+    expect(after).toBeGreaterThan(5);
+    // Never a cut frame.
+    expect(bands(base)).not.toContain('O');
+  });
+
+  it('a graphic cut short by the end of the video is still rendered at its catalog minimum, then trimmed', async () => {
+    const calls: RenderGraphicRequest[] = [];
+    const edl = baseEdl([seg('a', 'clip1', 4.157, 7.216)], 60, {
+      overlays: [{ id: 'g', type: 'graphic', anchorSegmentId: 'a', offsetSec: 2.6, durationSec: 2, template: 'stat-callout', props: { value: '9', label: 'x' } }],
+    });
+    const path = out('graphic_cut_short.mp4');
+    await renderVideo(input(routine, edl, { outPath: path, renderGraphic: async (r) => (calls.push(r), standInRenderGraphic(r)) }));
+    expect(calls[0]!.durationSec).toBe(1.2); // stat-callout minimum, though only ~0.46 s shows
+    const p = probeOut(path);
+    expect(Math.abs(p.video.duration - 3.059)).toBeLessThanOrEqual(1 / 30 + 1e-6);
   });
 });

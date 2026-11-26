@@ -78,6 +78,8 @@ export type PlanOverlay =
       placement: TemplatePlacement;
       /** Filled in once the graphic has been rendered. */
       path?: string;
+      /** Frames in the rendered file; more than `frames` when the graphic is cut short (it then fades out). */
+      renderedFrames?: number;
       frameStart: number;
       frames: number;
     };

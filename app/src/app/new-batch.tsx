@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { MODE_PRESETS, type EditSettings, type Mode } from '@kilo/edl';
+import { MODE_PRESETS, type EditSettings } from '@kilo/edl';
 import { getApi, getMockApi } from '@/api/client';
 import { errorMessage } from '@/api/errors';
 import { keys } from '@/api/queries';
@@ -20,9 +20,9 @@ import { pickFromLibrary, sampleFiles } from '@/newBatch/picker';
 import { VideosEditor } from '@/components/VideosEditor';
 import { ChooseVideoSheet } from '@/components/ChooseVideoSheet';
 import { plural } from '@/lib/format';
-import { Card, Header, Icon, PillButton, Row, Screen, SegmentedControl, Stepper, Text, Toggle, color, radius } from '@/ui';
-
-const MODES = (Object.keys(MODE_PRESETS) as Mode[]).map((m) => ({ value: m, label: MODE_PRESETS[m].label }));
+import { EditSwitches, HookVariations, ModeControl } from '@/components/SettingsControls';
+import { StyleChooser, useStartingSettings } from '@/styles/StyleChooser';
+import { Header, Icon, PillButton, Screen, Text, color, radius } from '@/ui';
 
 function notify(title: string, message: string) {
   if (Platform.OS === 'web') (globalThis as { alert?: (m: string) => void }).alert?.(`${title}\n\n${message}`);
@@ -34,6 +34,8 @@ export default function NewBatchScreen() {
   const qc = useQueryClient();
   const [videos, setVideos] = useState<DraftVideo[]>([]);
   const [settings, setSettings] = useState<EditSettings>(MODE_PRESETS.general.settings);
+  // Start from the default style once styles load (until the creator changes something).
+  const touched = useStartingSettings(setSettings);
   const [editorOpen, setEditorOpen] = useState(false);
   const [chooserOpen, setChooserOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -67,8 +69,11 @@ export default function NewBatchScreen() {
     setChooserOpen(true);
   };
 
-  const setMode = (mode: Mode) => setSettings(MODE_PRESETS[mode].settings);
-  const set = <K extends keyof EditSettings>(k: K, v: EditSettings[K]) => setSettings((s) => ({ ...s, [k]: v }));
+  const change = (next: EditSettings) => {
+    touched();
+    setSettings(next);
+  };
+  const set = <K extends keyof EditSettings>(k: K, v: EditSettings[K]) => change({ ...settings, [k]: v });
 
   const submit = async () => {
     setSubmitting(true);
@@ -107,19 +112,11 @@ export default function NewBatchScreen() {
 
       <VideoStrip videos={videos} onPick={pickClips} onOpen={() => setEditorOpen(true)} onSample={mock ? () => setVideos((v) => groupPicked(sampleFiles('videos', 3), v)) : undefined} />
 
-      <View style={styles.block}>
-        <Text variant="secondary" tone="muted">
-          Kind of video
-        </Text>
-        <SegmentedControl segments={MODES} value={settings.mode} onChange={setMode} accessibilityLabel="Kind of video" />
-      </View>
+      <StyleChooser settings={settings} onPick={change} />
 
-      <Card padding={0} paddingHorizontal={16}>
-        <Row minHeight={52} title="Cut dead air" right={<Toggle value={settings.cutDeadAir} onValueChange={(v) => set('cutDeadAir', v)} accessibilityLabel="Cut dead air" />} />
-        <Row divider title="Remove retakes" subtitle="Keeps the last good take of each line" right={<Toggle value={settings.removeRetakes} onValueChange={(v) => set('removeRetakes', v)} accessibilityLabel="Remove retakes" />} />
-        <Row divider title="Zooms and transitions" subtitle="Punch in on cuts, slow pan on photos" right={<Toggle value={settings.zoomAndTransitions} onValueChange={(v) => set('zoomAndTransitions', v)} accessibilityLabel="Zooms and transitions" />} />
-        <Row divider title="Burn in captions" subtitle="Off: add them in TikTok or Instagram" right={<Toggle value={settings.captions} onValueChange={(v) => set('captions', v)} accessibilityLabel="Burn in captions" />} />
-      </Card>
+      <ModeControl settings={settings} onChange={change} />
+
+      <EditSwitches settings={settings} set={set} />
 
       <View style={styles.drop}>
         <View style={{ flex: 1, gap: 2 }}>
@@ -133,14 +130,7 @@ export default function NewBatchScreen() {
         <PillButton variant="secondary" label="Add clips" height={44} onPress={onAddBroll} accessibilityLabel="Add B-roll clips" style={styles.dropButton} />
       </View>
 
-      <Card padding={0} paddingHorizontal={16} flat>
-        <Row
-          minHeight={60}
-          title="Hook variations"
-          subtitle={settings.hookVariations === 1 ? 'One opening per video' : `Each video ships with ${settings.hookVariations} openings`}
-          right={<Stepper value={settings.hookVariations} min={1} max={5} onChange={(n) => set('hookVariations', n)} noun="variations" />}
-        />
-      </Card>
+      <HookVariations settings={settings} set={set} />
 
       <VideosEditor visible={editorOpen} videos={videos} onChange={setVideos} onClose={() => setEditorOpen(false)} onAddClips={pickClips} onAddBroll={pickBrollFor} />
       <ChooseVideoSheet visible={chooserOpen} videos={videos} onChoose={(k) => void pickBrollFor(k)} onClose={() => setChooserOpen(false)} />
@@ -199,7 +189,6 @@ function VideoStrip({ videos, onPick, onOpen, onSample }: { videos: DraftVideo[]
 }
 
 const styles = StyleSheet.create({
-  block: { gap: 6 },
   drop: {
     borderWidth: 1.5,
     borderStyle: 'dashed',

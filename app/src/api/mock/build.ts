@@ -117,8 +117,9 @@ export function buildMockAnalysis(opts: {
     overlays.push({
       id: 'o-broll-1',
       type: 'broll',
-      anchorSegmentId: 's6',
-      offsetSec: 0.4,
+      // On the last line, clear of the graphics: overlays never overlap.
+      anchorSegmentId: 's13',
+      offsetSec: 0.3,
       durationSec: 1.6,
       assetId: b.id,
       sourceStartSec: 0,

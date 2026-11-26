@@ -6,10 +6,30 @@
 export const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 export const lerp = (a: number, b: number, p: number): number => a + (b - a) * p;
 
+let recording: number[] | null = null;
+
+/**
+ * Runs `fn` and returns every value `progress()` produced during it, in call order.
+ * Every template reads time only through `progress()`, so two frames with the same
+ * values draw the same pixels; the renderer uses this to capture a held frame once.
+ */
+export function recordProgress(fn: () => void): number[] {
+  const prev = recording;
+  const values: number[] = [];
+  recording = values;
+  try {
+    fn();
+  } finally {
+    recording = prev;
+  }
+  return values;
+}
+
 /** Linear progress of `t` through the window [start, start + dur]. */
 export function progress(t: number, start: number, dur: number): number {
-  if (dur <= 0) return t >= start ? 1 : 0;
-  return clamp01((t - start) / dur);
+  const p = dur <= 0 ? (t >= start ? 1 : 0) : clamp01((t - start) / dur);
+  if (recording) recording.push(p);
+  return p;
 }
 
 export const ease = {

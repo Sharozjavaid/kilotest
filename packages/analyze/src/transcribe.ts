@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { Transcript, type Word } from '@kilo/edl';
 import { sidecarPathFor } from './ingest.js';
+import { readPcm16 } from './silence.js';
 import { flagFillers, norm } from './text.js';
 
 export interface TranscribeInput {
@@ -168,38 +169,148 @@ export function restorePunctuation(words: OpenAiWord[], text: string): string[] 
   return out;
 }
 
-export function openaiTranscriber(opts: { apiKey: string; fetch?: FetchLike; baseUrl?: string; model?: string }): Transcriber {
+/**
+ * OpenAI-compatible endpoints refuse uploads over about 25 MB (13 minutes of the
+ * 16 kHz mono WAV ingest writes). Stay a little under it.
+ */
+export const OPENAI_MAX_UPLOAD_BYTES = 24 * 1024 * 1024;
+
+export interface AudioPiece {
+  /** Position of the piece in the whole file, seconds. */
+  start: number;
+  end: number;
+  /** A complete WAV file holding just this piece. */
+  wav: Buffer;
+}
+
+function wavFile(samples: Int16Array, sampleRate: number): Buffer {
+  const data = samples.length * 2;
+  const buf = Buffer.alloc(44 + data);
+  buf.write('RIFF', 0, 'ascii');
+  buf.writeUInt32LE(36 + data, 4);
+  buf.write('WAVE', 8, 'ascii');
+  buf.write('fmt ', 12, 'ascii');
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE(sampleRate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write('data', 36, 'ascii');
+  buf.writeUInt32LE(data, 40);
+  for (let i = 0; i < samples.length; i++) buf.writeInt16LE(samples[i]!, 44 + i * 2);
+  return buf;
+}
+
+/**
+ * Splits a 16-bit PCM WAV into pieces of at most `maxBytes` each, cutting in the
+ * quietest stretch near the end of each allowed span (a pause between words), so no
+ * word is split in two. A file that already fits comes back whole and unchanged.
+ */
+export function splitWavOnSilences(wav: Buffer, maxBytes: number): AudioPiece[] {
+  const pcm = readPcm16(wav);
+  const { sampleRate, samples } = pcm;
+  const total = samples.length;
+  const durationSec = total / sampleRate;
+  if (wav.length <= maxBytes) return [{ start: 0, end: durationSec, wav }];
+  const maxSamples = Math.floor((maxBytes - 44) / 2);
+  if (maxSamples < sampleRate) throw new Error(`maxBytes ${maxBytes} is too small to hold a second of audio`);
+  // RMS energy of 20 ms windows, then a 300 ms moving sum: the quietest 300 ms is the cut.
+  const win = Math.max(1, Math.round(sampleRate * 0.02));
+  const energy = new Float64Array(Math.ceil(total / win));
+  for (let w = 0; w < energy.length; w++) {
+    let e = 0;
+    const end = Math.min(total, (w + 1) * win);
+    for (let i = w * win; i < end; i++) e += samples[i]! * samples[i]!;
+    energy[w] = e;
+  }
+  const span = 15; // windows in 300 ms
+  const pieces: AudioPiece[] = [];
+  let start = 0;
+  while (total - start > maxSamples) {
+    // Look for the pause in the last 40% of what may go into this piece.
+    const lo = Math.floor((start + maxSamples * 0.6) / win);
+    const hi = Math.floor((start + maxSamples) / win) - span;
+    let best = hi;
+    let bestE = Infinity;
+    let run = 0;
+    for (let w = lo; w < lo + span; w++) run += energy[w] ?? 0;
+    for (let w = lo; w <= hi; w++) {
+      // Later windows win ties so pieces are as long as allowed.
+      if (run <= bestE) {
+        bestE = run;
+        best = w;
+      }
+      run += (energy[w + span] ?? 0) - (energy[w] ?? 0);
+    }
+    const cut = Math.min(start + maxSamples, (best + Math.floor(span / 2)) * win);
+    pieces.push({ start: start / sampleRate, end: cut / sampleRate, wav: wavFile(samples.subarray(start, cut), sampleRate) });
+    start = cut;
+  }
+  pieces.push({ start: start / sampleRate, end: durationSec, wav: wavFile(samples.subarray(start), sampleRate) });
+  return pieces;
+}
+
+export function openaiTranscriber(opts: {
+  apiKey: string;
+  fetch?: FetchLike;
+  baseUrl?: string;
+  model?: string;
+  /** Largest upload the endpoint accepts; longer audio is sent in pieces cut on pauses. */
+  maxUploadBytes?: number;
+}): Transcriber {
   const doFetch = opts.fetch ?? (globalThis.fetch as unknown as FetchLike);
   const base = (opts.baseUrl ?? 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const maxBytes = opts.maxUploadBytes ?? OPENAI_MAX_UPLOAD_BYTES;
+  const send = (audio: Buffer, name: string) =>
+    withRetry(async () => {
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array(audio)], { type: 'audio/wav' }), name);
+      form.append('model', opts.model ?? 'whisper-1');
+      form.append('response_format', 'verbose_json');
+      form.append('timestamp_granularities[]', 'word');
+      form.append('language', 'en');
+      // A disfluent prompt keeps the model from dropping filler words.
+      form.append('prompt', 'Umm, so, uh, I was like, hmm... Okay. Um, here is what I, uh, think.');
+      return checked(
+        await doFetch(`${base}/audio/transcriptions`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${opts.apiKey}` },
+          body: form,
+        }),
+        'Transcription endpoint',
+      );
+    }) as Promise<OpenAiVerbose>;
   return {
     name: 'openai',
     async transcribe(input) {
       const audio = await readFile(input.audioPath);
-      const json = (await withRetry(async () => {
-        const form = new FormData();
-        form.append('file', new Blob([audio], { type: 'audio/wav' }), basename(input.audioPath));
-        form.append('model', opts.model ?? 'whisper-1');
-        form.append('response_format', 'verbose_json');
-        form.append('timestamp_granularities[]', 'word');
-        form.append('language', 'en');
-        // A disfluent prompt keeps the model from dropping filler words.
-        form.append('prompt', 'Umm, so, uh, I was like, hmm... Okay. Um, here is what I, uh, think.');
-        return checked(
-          await doFetch(`${base}/audio/transcriptions`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${opts.apiKey}` },
-            body: form,
-          }),
-          'Transcription endpoint',
-        );
-      })) as OpenAiVerbose;
-      const raw = json.words ?? [];
-      const texts = restorePunctuation(raw, json.text ?? '');
-      const words: Word[] = raw.map((w, i) => ({ text: texts[i] ?? w.word, start: w.start, end: w.end, filler: false }));
-      const lang = (json.language ?? 'en').toLowerCase();
+      const pieces = splitWavOnSilences(audio, maxBytes);
+      const words: Word[] = [];
+      let language = 'en';
+      for (const [k, piece] of pieces.entries()) {
+        const name = pieces.length === 1 ? basename(input.audioPath) : basename(input.audioPath).replace(/(\.wav)?$/i, `.part${k + 1}.wav`);
+        const json = await send(piece.wav, name);
+        if (k === 0) language = (json.language ?? 'en').toLowerCase();
+        const raw = json.words ?? [];
+        const texts = restorePunctuation(raw, json.text ?? '');
+        const len = piece.end - piece.start;
+        raw.forEach((w, i) => {
+          // Times come back relative to the piece; a word whose middle lies outside it is an echo of a neighbour.
+          const mid = (w.start + w.end) / 2;
+          if (pieces.length > 1 && (mid < -0.05 || mid > len + 0.05)) return;
+          words.push({
+            text: texts[i] ?? w.word,
+            start: piece.start + Math.max(0, Math.min(len, w.start)),
+            end: piece.start + Math.max(0, Math.min(len, w.end)),
+            filler: false,
+          });
+        });
+      }
       return Transcript.parse({
         clipId: input.clipId,
-        language: LANGUAGE_CODES[lang] ?? lang.slice(0, 2),
+        language: LANGUAGE_CODES[language] ?? language.slice(0, 2),
         durationSec: input.durationSec,
         words: cleanWords(words, input.durationSec),
       });
@@ -235,7 +346,14 @@ export function selectTranscriber(env: NodeJS.ProcessEnv = process.env, fetchImp
   }
   if (choice === 'openai') {
     if (!env.OPENAI_API_KEY) throw new Error('KILO_TRANSCRIBER=openai needs OPENAI_API_KEY');
-    return openaiTranscriber({ apiKey: env.OPENAI_API_KEY, fetch: fetchImpl, baseUrl: env.OPENAI_BASE_URL, model: env.KILO_OPENAI_TRANSCRIBE_MODEL });
+    const max = Number(env.KILO_OPENAI_MAX_UPLOAD_BYTES);
+    return openaiTranscriber({
+      apiKey: env.OPENAI_API_KEY,
+      fetch: fetchImpl,
+      baseUrl: env.OPENAI_BASE_URL,
+      model: env.KILO_OPENAI_TRANSCRIBE_MODEL,
+      ...(Number.isFinite(max) && max > 0 ? { maxUploadBytes: max } : {}),
+    });
   }
   if (choice === 'fixture') return fixtureTranscriber();
   throw new Error(`Unknown KILO_TRANSCRIBER: ${choice}`);

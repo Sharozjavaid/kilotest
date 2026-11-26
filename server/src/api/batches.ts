@@ -10,6 +10,7 @@ import {
 import { isUuid } from '../auth.js';
 import { invalidRequest, notFound } from '../errors.js';
 import { JOBS } from '../queue.js';
+import { DEFAULT_MAX_UPLOAD_BYTES, sizeProblem, uploadLimit } from '../uploads.js';
 import { extensionFor, keys } from '../storage/types.js';
 import { batchSummaries, videoSummaries, type BrollRow, type ClipRow } from '../views.js';
 import { pathId, parseBody, type AppDeps, type Env } from './app.js';
@@ -21,8 +22,15 @@ export function batchRoutes(deps: AppDeps): Hono<Env> {
   app.post('/batches', async (c) => {
     const userId = c.get('userId');
     const req = await parseBody(c, CreateBatchRequest);
+    const maxBytes = deps.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
+    for (const [i, v] of req.videos.entries()) {
+      for (const f of [...v.clips, ...v.broll]) {
+        if (f.sizeBytes > maxBytes) throw invalidRequest(`videos.${i}: ${f.filename} is larger than the ${maxBytes}-byte limit`);
+      }
+    }
     const batchId = randomUUID();
-    type Planned = { videoId: string; clips: { id: string; key: string; type: string }[]; broll: { id: string; key: string; type: string }[] };
+    type File = { id: string; key: string; type: string; size: number };
+    type Planned = { videoId: string; clips: File[]; broll: File[] };
     const planned: Planned[] = [];
     await db.begin(async (tx) => {
       await tx`insert into batches (id, user_id, settings) values (${batchId}, ${userId}, ${tx.json(req.settings as never)})`;
@@ -41,7 +49,7 @@ export function batchRoutes(deps: AppDeps): Hono<Env> {
             insert into clips (id, user_id, video_id, ord, filename, content_type, size_bytes, ext, script_line_index, take_number)
             values (${id}, ${userId}, ${videoId}, ${ord}, ${clip.filename}, ${clip.contentType}, ${clip.sizeBytes}, ${ext},
                     ${clip.scriptLineIndex ?? null}, ${clip.takeNumber ?? null})`;
-          plan.clips.push({ id, key: keys.clipSource(userId, videoId, id, ext), type: clip.contentType });
+          plan.clips.push({ id, key: keys.clipSource(userId, videoId, id, ext), type: clip.contentType, size: clip.sizeBytes });
         }
         for (const asset of v.broll) {
           const id = randomUUID();
@@ -49,19 +57,20 @@ export function batchRoutes(deps: AppDeps): Hono<Env> {
           await tx`
             insert into broll_assets (id, user_id, video_id, kind, filename, content_type, size_bytes, ext, initial)
             values (${id}, ${userId}, ${videoId}, ${asset.kind}, ${asset.filename}, ${asset.contentType}, ${asset.sizeBytes}, ${ext}, true)`;
-          plan.broll.push({ id, key: keys.brollSource(userId, videoId, id, ext), type: asset.contentType });
+          plan.broll.push({ id, key: keys.brollSource(userId, videoId, id, ext), type: asset.contentType, size: asset.sizeBytes });
         }
         planned.push(plan);
       }
     });
     const [batch] = await batchSummaries(db, userId, [batchId]);
+    const target = (x: File) => storage.createUploadTarget(x.key, x.type, { maxBytes: uploadLimit(x.size, maxBytes) });
     const body: CreateBatchResponse = {
       batch: batch!,
       videos: await Promise.all(
         planned.map(async (p) => ({
           videoId: p.videoId,
-          clips: await Promise.all(p.clips.map(async (x) => ({ clipId: x.id, upload: await storage.createUploadTarget(x.key, x.type) }))),
-          broll: await Promise.all(p.broll.map(async (x) => ({ assetId: x.id, upload: await storage.createUploadTarget(x.key, x.type) }))),
+          clips: await Promise.all(p.clips.map(async (x) => ({ clipId: x.id, upload: await target(x) }))),
+          broll: await Promise.all(p.broll.map(async (x) => ({ assetId: x.id, upload: await target(x) }))),
         })),
       ),
     };
@@ -95,21 +104,29 @@ export function batchRoutes(deps: AppDeps): Hono<Env> {
       : [];
     if (clips.length !== clipIds.length || assets.length !== assetIds.length) throw notFound('Upload');
 
-    // The bytes must really be there before anything is queued.
+    // The bytes must really be there, at the declared size, before anything is queued.
+    const maxBytes = deps.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
     const missing: string[] = [];
+    const wrongSize: { id: string; key: string; problem: string }[] = [];
+    const check = async (id: string, key: string, declared: number) => {
+      const size = await storage.size(key);
+      if (size === null) {
+        if (!(await storage.exists(key))) missing.push(id);
+        return;
+      }
+      const problem = sizeProblem(size, declared, maxBytes);
+      if (problem) wrongSize.push({ id, key, problem });
+    };
     await Promise.all([
-      ...clips
-        .filter((x) => !x.uploaded_at)
-        .map(async (x) => {
-          if (!(await storage.exists(keys.clipSource(userId, x.video_id, x.id, x.ext)))) missing.push(x.id);
-        }),
-      ...assets
-        .filter((x) => !x.uploaded_at)
-        .map(async (x) => {
-          if (!(await storage.exists(keys.brollSource(userId, x.video_id, x.id, x.ext)))) missing.push(x.id);
-        }),
+      ...clips.filter((x) => !x.uploaded_at).map((x) => check(x.id, keys.clipSource(userId, x.video_id, x.id, x.ext), Number(x.size_bytes))),
+      ...assets.filter((x) => !x.uploaded_at).map((x) => check(x.id, keys.brollSource(userId, x.video_id, x.id, x.ext), Number(x.size_bytes))),
     ]);
     if (missing.length) throw invalidRequest(`No file has been uploaded for ${missing.join(', ')}`);
+    if (wrongSize.length) {
+      // Drop the bad bytes so the app uploads the file again.
+      await storage.deleteKeys(wrongSize.map((w) => w.key)).catch(() => {});
+      throw invalidRequest(`Upload ${wrongSize.map((w) => `${w.id} ${w.problem}`).join('; ')}`);
+    }
 
     const started: string[] = [];
     await db.begin(async (tx) => {
@@ -129,7 +146,7 @@ export function batchRoutes(deps: AppDeps): Hono<Env> {
             select (select count(*) from clips where video_id = ${videoId} and uploaded_at is null)
                  + (select count(*) from broll_assets where video_id = ${videoId} and initial and uploaded_at is null) as n`;
           if (Number(pending?.n) === 0) {
-            await tx`update videos set status = 'queued', error = null, updated_at = now() where id = ${videoId}`;
+            await tx`update videos set status = 'queued', error = null, progress = 0, updated_at = now() where id = ${videoId}`;
             await queue.send(JOBS.analyze, { videoId }, tx);
             started.push(videoId);
           }

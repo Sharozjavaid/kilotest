@@ -1,0 +1,15 @@
+# Build context is the repository root (docker build -f server/Dockerfile .).
+# BuildKit reads this file because it sits next to the Dockerfile.
+**/node_modules
+**/.work
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+.git
+app
+fixtures
+docs
+*.mp4
+*.mov
+*.wav

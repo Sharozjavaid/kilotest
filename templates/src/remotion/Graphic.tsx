@@ -25,7 +25,7 @@ export interface GraphicInput {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const COMPONENTS: Record<string, React.FC<TemplateComponentProps<any>>> = {
+export const COMPONENTS: Record<string, React.FC<TemplateComponentProps<any>>> = {
   'bold-title': BoldTitle,
   'numbered-list': NumberedList,
   'stat-callout': StatCallout,

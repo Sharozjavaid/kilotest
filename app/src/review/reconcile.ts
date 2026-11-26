@@ -1,4 +1,4 @@
-import { toggleSegment, type Edl } from '@kilo/edl';
+import { toggleSegment, type Captions, type Edl, type Overlay } from '@kilo/edl';
 import { isKiloApiError } from '@/api/errors';
 
 /**
@@ -8,7 +8,50 @@ import { isKiloApiError } from '@/api/errors';
  * `baseRevision = server.revision`; on 409 the saver refetches, replays the pending
  * toggles onto the fresh EDL and saves again, so nothing the user tapped is lost and
  * nothing someone else saved is overwritten except the segments the user touched.
+ *
+ * Overlay and caption changes (B-roll screen, captions control) are kept the same
+ * way, as *pending edits* replayed in order on top of the server EDL.
  */
+
+/** A change to an EDL other than a keep toggle. Replayable onto a newer revision. */
+export type EdlEdit =
+  | { type: 'upsertOverlay'; overlay: Overlay }
+  | { type: 'removeOverlay'; overlayId: string }
+  | { type: 'captions'; captions: Captions };
+
+export interface PendingEdit {
+  edit: EdlEdit;
+  seq: number;
+}
+
+/** Applies edits in order. An overlay whose anchor segment no longer exists is dropped. */
+export function applyEdits(edl: Edl, edits: readonly PendingEdit[]): Edl {
+  let out = edl;
+  for (const { edit } of edits) {
+    if (edit.type === 'captions') {
+      out = { ...out, captions: edit.captions };
+    } else if (edit.type === 'removeOverlay') {
+      out = { ...out, overlays: out.overlays.filter((o) => o.id !== edit.overlayId) };
+    } else {
+      if (!out.segments.some((s) => s.id === edit.overlay.anchorSegmentId)) continue;
+      const i = out.overlays.findIndex((o) => o.id === edit.overlay.id);
+      out = { ...out, overlays: i >= 0 ? out.overlays.map((o, k) => (k === i ? edit.overlay : o)) : [...out.overlays, edit.overlay] };
+    }
+  }
+  return out;
+}
+
+/** True when the edits would change the EDL. */
+export function editsChange(edl: Edl, edits: readonly PendingEdit[]): boolean {
+  if (!edits.length) return false;
+  const after = applyEdits(edl, edits);
+  return JSON.stringify(after.overlays) !== JSON.stringify(edl.overlays) || JSON.stringify(after.captions) !== JSON.stringify(edl.captions);
+}
+
+/** What the screen shows: toggles, then edits, on top of the server EDL. */
+export function compose(server: Edl, pending: Pending, edits: readonly PendingEdit[] = []): Edl {
+  return applyEdits(applyPending(server, pending), edits);
+}
 
 export interface PendingToggle {
   /** The keep value the user wants. */
@@ -36,12 +79,13 @@ export function addToggle(pending: Pending, shown: Edl, segmentId: string, seq: 
   return { ...pending, [segmentId]: { keep: !seg.keep, seq } };
 }
 
-/** True when the pending toggles would change the server EDL. */
-export function hasChanges(server: Edl, pending: Pending): boolean {
-  return Object.entries(pending).some(([id, p]) => {
+/** True when the pending toggles (or edits) would change the server EDL. */
+export function hasChanges(server: Edl, pending: Pending, edits: readonly PendingEdit[] = []): boolean {
+  const toggles = Object.entries(pending).some(([id, p]) => {
     const seg = server.segments.find((s) => s.id === id);
     return !!seg && seg.keep !== p.keep;
   });
+  return toggles || editsChange(applyPending(server, pending), edits);
 }
 
 /** After a save carrying taps up to `sentSeq` succeeded: keep only taps made since, for segments that still exist. */
@@ -60,6 +104,8 @@ export interface SaverState {
   /** What the screen shows: server plus pending toggles. */
   local: Edl;
   pending: Pending;
+  /** Overlay and caption edits not yet saved, in order. */
+  edits: readonly PendingEdit[];
   saving: boolean;
   /** Last save error that was not a conflict. Cleared by the next successful save. */
   error: unknown;
@@ -97,7 +143,7 @@ export class EdlSaver {
       clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
       ...deps,
     };
-    this.state = { server: initial, local: initial, pending: {}, saving: false, error: null, conflicts: 0 };
+    this.state = { server: initial, local: initial, pending: {}, edits: [], saving: false, error: null, conflicts: 0 };
   }
 
   getState(): SaverState {
@@ -108,14 +154,22 @@ export class EdlSaver {
   toggle(segmentId: string): void {
     this.seq += 1;
     const pending = addToggle(this.state.pending, this.state.local, segmentId, this.seq);
-    this.update({ pending, local: applyPending(this.state.server, pending) });
+    this.update({ pending, local: compose(this.state.server, pending, this.state.edits) });
+    this.schedule();
+  }
+
+  /** An overlay or captions change: show it now, save after the debounce. */
+  edit(edit: EdlEdit): void {
+    this.seq += 1;
+    const edits = [...this.state.edits, { edit, seq: this.seq }];
+    this.update({ edits, local: compose(this.state.server, this.state.pending, edits) });
     this.schedule();
   }
 
   /** A newer EDL arrived from elsewhere (a refetch). Adopt it and keep the user's pending taps on top. */
   receive(edl: Edl): void {
     if (edl.revision <= this.state.server.revision) return;
-    this.update({ server: edl, local: applyPending(edl, this.state.pending) });
+    this.update({ server: edl, local: compose(edl, this.state.pending, this.state.edits) });
   }
 
   /** Save now (leaving the screen). Resolves when everything pending is saved or a save failed. */
@@ -125,15 +179,15 @@ export class EdlSaver {
       this.timer = null;
     }
     while (this.inFlight) await this.inFlight;
-    if (!hasChanges(this.state.server, this.state.pending)) {
-      if (Object.keys(this.state.pending).length) this.update({ pending: {} , local: this.state.server });
+    if (!hasChanges(this.state.server, this.state.pending, this.state.edits)) {
+      if (Object.keys(this.state.pending).length || this.state.edits.length) this.update({ pending: {}, edits: [], local: this.state.server });
       return;
     }
     this.inFlight = this.saveLoop().finally(() => {
       this.inFlight = null;
     });
     await this.inFlight;
-    if (!this.disposed && this.state.error === null && hasChanges(this.state.server, this.state.pending)) this.schedule();
+    if (!this.disposed && this.state.error === null && hasChanges(this.state.server, this.state.pending, this.state.edits)) this.schedule();
   }
 
   /** Retry after an error. */
@@ -162,11 +216,12 @@ export class EdlSaver {
     try {
       for (;;) {
         const sentSeq = this.seq;
-        const body = applyPending(this.state.server, this.state.pending);
+        const body = compose(this.state.server, this.state.pending, this.state.edits);
         try {
           const saved = await this.deps.save(body, this.state.server.revision);
           const pending = ackSaved(this.state.pending, sentSeq, saved);
-          this.update({ server: saved, pending, local: applyPending(saved, pending), error: null });
+          const edits = this.state.edits.filter((e) => e.seq > sentSeq);
+          this.update({ server: saved, pending, edits, local: compose(saved, pending, edits), error: null });
           return;
         } catch (e) {
           if (isKiloApiError(e) && e.isConflict && conflicts < this.deps.maxConflictRetries) {
@@ -174,11 +229,11 @@ export class EdlSaver {
             const fresh = await this.deps.fetchLatest();
             this.update({
               server: fresh,
-              local: applyPending(fresh, this.state.pending),
+              local: compose(fresh, this.state.pending, this.state.edits),
               conflicts: this.state.conflicts + 1,
             });
-            if (!hasChanges(fresh, this.state.pending)) {
-              this.update({ pending: {}, local: fresh, error: null });
+            if (!hasChanges(fresh, this.state.pending, this.state.edits)) {
+              this.update({ pending: {}, edits: [], local: fresh, error: null });
               return;
             }
             continue;

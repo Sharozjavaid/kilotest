@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { Edl, GraphicOverlay, Segment } from '@kilo/edl';
+import type { BrollAsset, Edl, GraphicOverlay, Segment } from '@kilo/edl';
 import { Edl as EdlSchema, PACING_PARAMS, TEMPLATES, getTemplate, parseTemplateProps, resolveTimeline, validateEdl } from '@kilo/edl';
 import { createAnalyze } from '../src/analyze.js';
+import { OVERLAY_SPACING_SEC } from '../src/overlays.js';
 import { buildChunks, prepareClipWords } from '../src/chunks.js';
 import { heuristicCuts } from '../src/heuristic.js';
 import { ASSETS, decideInput, richClips, synthClip, type SynthClip } from './helpers.js';
@@ -41,18 +42,20 @@ function expectSound(edl: Edl, clips: SynthClip[]) {
   }
 }
 
-function expectOverlaysSound(edl: Edl) {
+function expectOverlaysSound(edl: Edl, assets: readonly BrollAsset[] = ASSETS) {
   const tl = resolveTimeline(edl);
   const sorted = [...tl.overlays].sort((a, b) => a.outStart - b.outStart);
   for (let i = 1; i < sorted.length; i++) expect(sorted[i]!.outStart).toBeGreaterThanOrEqual(sorted[i - 1]!.outEnd - 1e-6);
-  expect(tl.overlays.length).toBeLessThanOrEqual(Math.max(1, Math.floor(tl.durationSec / 5.5)));
+  // A hook variant's opening title sits before anything else may start and is not counted.
+  const counted = tl.overlays.filter((o) => !(o.overlay.type === 'graphic' && o.overlay.template === 'bold-title' && o.outStart === 0));
+  expect(counted.length).toBeLessThanOrEqual(Math.max(1, Math.floor(tl.durationSec / OVERLAY_SPACING_SEC)));
   let titles = 0;
   for (const { overlay, outStart, outEnd } of tl.overlays) {
     if (overlay.type === 'broll') {
       expect(outStart).toBeGreaterThanOrEqual(2 - 1e-6);
       expect(overlay.durationSec).toBeGreaterThanOrEqual(1.5);
       expect(overlay.durationSec).toBeLessThanOrEqual(3.5);
-      const asset = ASSETS.find((a) => a.id === overlay.assetId)!;
+      const asset = assets.find((a) => a.id === overlay.assetId)!;
       if (asset.kind === 'image') expect(overlay.kenBurns).toBeDefined();
       else expect(overlay.sourceStartSec + overlay.durationSec).toBeLessThanOrEqual(asset.durationSec! + 1e-6);
     } else {
@@ -291,5 +294,71 @@ describe('replan', () => {
     const single = await analyze.replan({ ...input, settings: { ...input.settings, hookVariations: 1 }, edl: toggled, passes: ['variants'] });
     expect(single.variants).toEqual([]);
     expect(single.overlays).toEqual(toggled.overlays);
+  });
+});
+
+/** Deep copy with every object's keys in reverse order. */
+function reverseKeys<T>(v: T): T {
+  if (Array.isArray(v)) return v.map(reverseKeys) as T;
+  if (v && typeof v === 'object') {
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>).reverse().map(([k, x]) => [k, reverseKeys(x)])) as T;
+  }
+  return v;
+}
+
+describe('determinism', () => {
+  it('the same DecideInput always gives the same EDL, whatever the order of its arrays and keys', async () => {
+    const clips = richClips();
+    const input = decideInput(clips, { mode: 'tiktok_shop', hookVariations: 3, captions: true }, { broll: ASSETS });
+    const first = JSON.stringify(await analyze.decideEdit(input));
+    // Fresh analyzer, repeated runs.
+    const other = createAnalyze({ decider: 'heuristic', stock: null, log: () => {} });
+    for (let i = 0; i < 3; i++) expect(JSON.stringify(await other.decideEdit(structuredClone(input)))).toBe(first);
+    // Same meaning, different order: arrays reversed (clips keep their `order`), keys reversed.
+    const shuffled = reverseKeys({
+      ...input,
+      clips: [...input.clips].reverse(),
+      transcripts: [...input.transcripts].reverse().map((t) => ({ ...t, words: [...t.words].reverse() })),
+      silences: [...input.silences].reverse(),
+      broll: [...input.broll].reverse(),
+    });
+    expect(JSON.stringify(await analyze.decideEdit(shuffled))).toBe(first);
+    // Ids are stable and readable: segments s1.., overlays o1.., variants hook-a..
+    const edl = JSON.parse(first) as Edl;
+    expect(edl.segments.map((s) => s.id)).toEqual(edl.segments.map((_, i) => `s${i + 1}`));
+    expect(edl.overlays.every((o) => /^o\d+$/.test(o.id))).toBe(true);
+    expect(edl.variants.map((v) => v.id)).toEqual(['hook-a', 'hook-b', 'hook-c']);
+    // Replan is deterministic too.
+    const r1 = JSON.stringify(await analyze.replan({ ...input, edl, passes: ['broll', 'graphics', 'variants'] }));
+    const r2 = JSON.stringify(await other.replan({ ...shuffled, edl: reverseKeys(edl), passes: ['variants', 'graphics', 'broll'] }));
+    expect(r2).toBe(r1);
+  });
+
+  it('with B-roll available a spoken figure or price still gets a graphic, and B-roll still gets placed', async () => {
+    // One talking clip with a figure and a price, about 14 s: room for two overlays.
+    const clips = [
+      synthClip('c', 0, [
+        { say: 'This little organizer showed up yesterday.' },
+        { pause: 0.3 },
+        { say: 'My messy desk finally has a place for everything.' },
+        { pause: 0.3 },
+        { say: 'It took two minutes to set up.' },
+        { pause: 0.3 },
+        { say: "It's nineteen dollars, down from thirty four." },
+        { pause: 0.3 },
+        { say: 'Tap the link and grab one.' },
+      ]),
+    ];
+    const assets = [
+      { id: 'b-desk', kind: 'image' as const, width: 1600, height: 1200, description: 'Messy desk before', source: 'user' as const },
+      { id: 'b-org', kind: 'video' as const, durationSec: 5, width: 1080, height: 1920, description: 'Organizer on desk', source: 'user' as const },
+    ];
+    for (const mode of ['general', 'ugc_ad', 'tiktok_shop'] as const) {
+      const edl = await analyze.decideEdit(decideInput(clips, { mode, hookVariations: 3 }, { broll: assets }));
+      const kinds = edl.overlays.map((o) => (o.type === 'graphic' ? o.template : 'broll'));
+      expect(kinds, mode).toContain('broll');
+      expect(kinds.some((k) => k === 'price-tag' || k === 'stat-callout'), `${mode}: ${kinds}`).toBe(true);
+      expectOverlaysSound(edl, assets);
+    }
   });
 });

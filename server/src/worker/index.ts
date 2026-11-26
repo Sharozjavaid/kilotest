@@ -108,16 +108,23 @@ export class Worker {
         });
       }
     };
-    await register<AnalyzeJob>(JOBS.analyze, options.analyzeConcurrency, (d) => this.runAnalyze(d.videoId), (d, e) =>
-      this.failVideo(d.videoId, userMessage(e, MSG.analyze)),
-    );
-    await register<ReplanJob>(JOBS.replan, options.analyzeConcurrency, (d) => this.runReplan(d.videoId, d.passes), (d, e) =>
-      this.failVideo(d.videoId, userMessage(e, MSG.replan)),
-    );
-    await register<BrollIngestJob>(JOBS.brollIngest, 1, (d) => this.runBrollIngest(d.assetId), (d) => this.failAsset(d.assetId));
-    await register<RenderJob>(JOBS.render, options.renderConcurrency, (d) => this.runRender(d.renderId), (d, e) =>
-      this.failRender(d.renderId, userMessage(e, MSG.render)),
-    );
+    // A job that fails for good also drops its scratch directory; retries keep it so finished steps are skipped.
+    await register<AnalyzeJob>(JOBS.analyze, options.analyzeConcurrency, (d) => this.runAnalyze(d.videoId), async (d, e) => {
+      await this.failVideo(d.videoId, userMessage(e, MSG.analyze));
+      await this.removeWorkDir('videos', d.videoId);
+    });
+    await register<ReplanJob>(JOBS.replan, options.analyzeConcurrency, (d) => this.runReplan(d.videoId, d.passes), async (d, e) => {
+      await this.failVideo(d.videoId, userMessage(e, MSG.replan));
+      await this.removeWorkDir('videos', d.videoId);
+    });
+    await register<BrollIngestJob>(JOBS.brollIngest, 1, (d) => this.runBrollIngest(d.assetId), async (d) => {
+      await this.failAsset(d.assetId);
+      await this.removeWorkDir('broll', d.assetId);
+    });
+    await register<RenderJob>(JOBS.render, options.renderConcurrency, (d) => this.runRender(d.renderId), async (d, e) => {
+      await this.failRender(d.renderId, userMessage(e, MSG.render));
+      await this.removeWorkDir('renders', d.renderId);
+    });
     await register<object>(JOBS.goalReminders, 1, async () => {
       await this.runGoalReminders();
     }, async () => {});
@@ -139,10 +146,14 @@ export class Worker {
     // 1. Ingest, transcribe and detect silence, per clip.
     let clips = await this.db<ClipRow[]>`select * from clips where video_id = ${videoId} order by ord`;
     if (!clips.length) throw new UserFacingError(MSG.badClip);
+    // Progress weights: ingest and transcription of the clips 0.02..0.62, proxy to 0.72,
+    // B-roll to 0.8, stock to 0.84, the edit decision 0.84..1.
+    await this.progress(videoId, 0.02);
+    const clipSpan = (i: number, f: number) => 0.02 + (0.6 * (i + f)) / clips.length;
     const transcribed = new Set(
       (await this.db<{ clip_id: string }[]>`select clip_id from transcripts where video_id = ${videoId}`).map((r) => r.clip_id),
     );
-    for (const clip of clips) {
+    for (const [ci, clip] of clips.entries()) {
       const local = state.clips[clip.id];
       const haveLocal = local && existsSync(local.audioPath) && existsSync(local.normalizedPath);
       const needsAudio = !transcribed.has(clip.id) || clip.silences === null;
@@ -175,6 +186,7 @@ export class Worker {
         clip.info = info;
         clip.normalized_key = normKey;
       }
+      await this.progress(videoId, clipSpan(ci, 0.7));
       if (!transcribed.has(clip.id)) {
         const t = await this.analyze.transcribeClip({ clipId: clip.id, audioPath: paths!.audioPath, durationSec: clip.info!.durationSec });
         const transcript: Transcript = { ...t, clipId: clip.id };
@@ -189,6 +201,7 @@ export class Worker {
         await this.db`update clips set silences = ${this.db.json(gaps as never)} where id = ${clip.id}`;
         clip.silences = gaps;
       }
+      await this.progress(videoId, clipSpan(ci, 1));
     }
 
     // 2. The review proxy.
@@ -212,9 +225,11 @@ export class Worker {
       await this.storage.upload(proxyKey, proxy.path, 'video/mp4');
       await this.db`update videos set proxy_key = ${proxyKey}, clip_offsets = ${this.db.json(proxy.clipOffsets)} where id = ${videoId}`;
     }
+    await this.progress(videoId, 0.72);
 
     // 3. The creator's B-roll.
     await this.ingestPendingBroll(videoId, dir);
+    await this.progress(videoId, 0.8);
 
     // 4. Stock B-roll.
     clips = await this.db<ClipRow[]>`select * from clips where video_id = ${videoId} order by ord`;
@@ -240,6 +255,7 @@ export class Worker {
       }
       await this.db`update videos set stock_done = true where id = ${videoId}`;
     }
+    await this.progress(videoId, 0.84);
 
     // 5. Decide.
     if (!(await currentEdl(this.db, videoId))) {
@@ -261,6 +277,7 @@ export class Worker {
         values (${videoId}, 0, ${userId}, ${this.db.json(edl as never)}, 'decider')
         on conflict do nothing`;
     }
+    await this.progress(videoId, 1);
 
     const [done] = await this.db`
       update videos set status = 'ready_for_review', error = null, analyzed_at = coalesce(analyzed_at, now()), updated_at = now()
@@ -347,7 +364,9 @@ export class Worker {
     const video = await this.video(videoId);
     if (!video || video.status !== 'analyzing') return;
     const dir = join(this.deps.workDir, 'videos', videoId);
+    await this.progress(videoId, 0.05);
     await this.ingestPendingBroll(videoId, dir);
+    await this.progress(videoId, 0.5);
     const current = await currentEdl(this.db, videoId);
     if (!current) throw new UserFacingError(MSG.replan);
     const clips = await this.db<ClipRow[]>`select * from clips where video_id = ${videoId} order by ord`;
@@ -536,6 +555,22 @@ export class Worker {
   }
 
   // ---- helpers -----------------------------------------------------------
+
+  /** Removes a job's scratch directory under the work dir. Never throws. */
+  async removeWorkDir(kind: 'videos' | 'broll' | 'renders', id: string): Promise<void> {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return;
+    await rm(join(this.deps.workDir, kind, id), { recursive: true, force: true }).catch((err) =>
+      this.deps.log.warn('work dir cleanup failed', { kind, id, err: errorDetail(err) }),
+    );
+  }
+
+  /** Raises a video's analysis progress (never lowers it within an attempt). */
+  private async progress(videoId: string, value: number): Promise<void> {
+    const v = Math.max(0, Math.min(1, value));
+    await this.db`
+      update videos set progress = greatest(progress, ${v}), updated_at = now()
+      where id = ${videoId} and status in ('queued', 'analyzing')`;
+  }
 
   private async notify(userId: string, data: PushData): Promise<void> {
     await this.deps.notifier.notify(userId, data);

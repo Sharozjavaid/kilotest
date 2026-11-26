@@ -32,7 +32,11 @@ export type IconName =
   | 'pencil'
   | 'sparkle'
   | 'wifiOff'
-  | 'mail';
+  | 'mail'
+  | 'trash'
+  | 'flip'
+  | 'list'
+  | 'bell';
 
 export interface IconProps {
   name: IconName;
@@ -154,6 +158,14 @@ function renderIcon(name: IconName, c: Common, fill: string) {
       return <Path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6" {...c} />;
     case 'wifiOff':
       return <Path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 12.5a10 10 0 0 1 5-2.6M14.5 10a10 10 0 0 1 4.5 2.5M12 20h.01" {...c} />;
+    case 'trash':
+      return <Path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" {...c} />;
+    case 'flip':
+      return <Path d="M4 9a8 8 0 0 1 14-4l2 2M20 4v3h-3M20 15a8 8 0 0 1-14 4l-2-2M4 20v-3h3" {...c} />;
+    case 'list':
+      return <Path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" {...c} />;
+    case 'bell':
+      return <Path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0" {...c} />;
     case 'mail':
       return (
         <>

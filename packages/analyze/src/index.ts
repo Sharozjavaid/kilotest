@@ -1,13 +1,13 @@
-export { analyze, createAnalyze, enforceSettings, edlFps, selectDecider } from './analyze.js';
+export { analyze, canonicalInput, createAnalyze, enforceSettings, edlFps, selectDecider } from './analyze.js';
 export type { Analyze, AnalyzeOptions, DeciderName } from './analyze.js';
 export { ingestClip, buildConcatProxy, ingestBroll, nominalFps, sidecarPathFor, writeFixtureSidecar } from './ingest.js';
 export type { BrollDescriber } from './ingest.js';
 export { filenameDescriber, wordsFromFilename } from './describe.js';
 export { detectSilence, noiseProfile, parseSilenceDetect, readPcm16 } from './silence.js';
 export {
-  deepgramTranscriber, openaiTranscriber, fixtureTranscriber, selectTranscriber, restorePunctuation,
+  deepgramTranscriber, openaiTranscriber, fixtureTranscriber, selectTranscriber, restorePunctuation, splitWavOnSilences, OPENAI_MAX_UPLOAD_BYTES,
 } from './transcribe.js';
-export type { Transcriber, TranscribeInput, FetchLike } from './transcribe.js';
+export type { Transcriber, TranscribeInput, FetchLike, AudioPiece } from './transcribe.js';
 export { buildChunks, prepareClipWords } from './chunks.js';
 export type { Chunk, ClipWord, ClipWords } from './chunks.js';
 export { heuristicCuts, sameLine } from './heuristic.js';

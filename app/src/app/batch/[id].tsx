@@ -66,10 +66,11 @@ function VideoProgressCard({ video, upload }: { video: VideoSummary; upload?: Vi
     progress = upload?.fraction ?? 0;
   } else if (video.status === 'queued') {
     line = 'Uploaded. Waiting to edit';
-    progress = 0.15;
+    progress = video.progress ?? 0;
   } else if (video.status === 'analyzing') {
-    line = 'Editing: finding the best takes';
-    progress = 0.6;
+    const pct = video.progress != null ? ` · ${Math.round(video.progress * 100)}%` : '';
+    line = `Editing: finding the best takes${pct}`;
+    progress = video.progress ?? 0;
   } else if (ready) {
     line = reviewSubtitle(video);
   } else {

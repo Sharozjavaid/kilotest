@@ -32,6 +32,8 @@ export interface VideoRow {
   proxy_key: string | null;
   clip_offsets: Record<string, number> | null;
   stock_done: boolean;
+  /** 0..1 through analysis; meaningful only while queued or analyzing. */
+  progress: number;
   analyzed_at: Date | null;
   created_at: Date;
   updated_at: Date;
@@ -64,6 +66,7 @@ export interface BrollRow {
   filename: string;
   content_type: string;
   ext: string;
+  size_bytes: string;
   attribution: string | null;
   stock_query: string | null;
   initial: boolean;
@@ -94,6 +97,7 @@ export interface SummaryRow extends VideoRow {
   edl: Edl | null;
   thumb_key: string | null;
   posted_at: Date | null;
+  clip_count: number;
 }
 
 const iso = (d: Date | string) => new Date(d).toISOString();
@@ -107,7 +111,8 @@ export async function summaryRows(db: Db, where: Fragment, order: 'created' | 'u
   return db<SummaryRow[]>`
     select v.*, e.edl,
       (select c.thumb_key from clips c where c.video_id = v.id and c.thumb_key is not null order by c.ord limit 1) as thumb_key,
-      (select max(p.posted_at) from posts p where p.video_id = v.id) as posted_at
+      (select max(p.posted_at) from posts p where p.video_id = v.id) as posted_at,
+      (select count(*)::int from clips c where c.video_id = v.id) as clip_count
     from videos v
     left join lateral (select edl from edls where video_id = v.id order by revision desc limit 1) e on true
     where ${where}
@@ -124,6 +129,8 @@ export async function toSummary(storage: StorageDriver, row: SummaryRow): Promis
     status: row.status,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
+    clipCount: Number(row.clip_count),
+    progress: row.status === 'queued' || row.status === 'analyzing' ? Math.max(0, Math.min(1, Number(row.progress) || 0)) : null,
     thumbnailUrl: row.thumb_key ? await storage.signedUrl(row.thumb_key) : null,
     keptSec: stats ? round3(stats.keptSec) : null,
     totalSec: stats ? round3(stats.totalSec) : null,
@@ -162,20 +169,21 @@ export async function renderView(storage: StorageDriver, r: RenderRow): Promise<
 }
 
 export async function brollView(storage: StorageDriver, b: BrollRow): Promise<BrollAssetView> {
-  // Until ingest has measured the file, width/height are placeholders (the schema needs positive numbers).
-  const info = b.info;
+  // Measurements and the description exist only once ingest has finished.
+  const info = b.status === 'ready' ? b.info : null;
   return {
     id: b.id,
     kind: info?.kind ?? b.kind,
-    ...(info?.durationSec !== undefined ? { durationSec: info.durationSec } : {}),
-    width: info?.width ?? 1,
-    height: info?.height ?? 1,
+    durationSec: info?.durationSec ?? null,
+    width: info?.width ?? null,
+    height: info?.height ?? null,
     description: info?.description ?? '',
+    filename: b.filename,
     source: b.source,
     ...(b.attribution ? { attribution: b.attribution } : {}),
     status: b.status,
     url: b.status === 'ready' && b.normalized_key ? await storage.signedUrl(b.normalized_key) : null,
-    thumbnailUrl: b.thumb_key ? await storage.signedUrl(b.thumb_key) : null,
+    thumbnailUrl: b.status === 'ready' && b.thumb_key ? await storage.signedUrl(b.thumb_key) : null,
   };
 }
 

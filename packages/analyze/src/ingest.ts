@@ -90,6 +90,8 @@ export async function ingestClip(input: {
     '-af', 'aresample=48000:async=1000:first_pts=0,apad',
     '-t', sourceDuration.toFixed(6),
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-profile:v', 'high', '-pix_fmt', 'yuv420p',
+    // A keyframe at least every second: the renderer seeks into these files constantly.
+    '-g', String(fps), '-force_key_frames', 'expr:gte(t,n_forced*1)',
     '-r', String(fps), '-fps_mode', 'cfr',
     '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2',
     '-map_metadata', '-1', '-movflags', '+faststart',
@@ -211,6 +213,7 @@ export async function ingestBroll(
       '-threads', THREADS, '-i', input.inputPath, '-map', '0:v:0', '-an',
       '-vf', `scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:force_original_aspect_ratio=increase:flags=lanczos,crop=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT},setsar=1,fps=${fps},format=yuv420p`,
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-r', String(fps), '-fps_mode', 'cfr',
+      '-g', String(fps), '-force_key_frames', 'expr:gte(t,n_forced*1)',
       '-map_metadata', '-1', '-movflags', '+faststart', normalizedPath,
     ]);
     const norm = await probe(normalizedPath);
