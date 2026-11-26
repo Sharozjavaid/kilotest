@@ -1,3 +1,4 @@
+import { enforceOverlayRules } from './rules.js';
 import type { AnalyzeApi, BrollAsset, DecideInput, EditSettings, ReplanPass, Segment } from '@kilo/edl';
 import { Edl, OUTPUT_HEIGHT, OUTPUT_WIDTH, validateEdl } from '@kilo/edl';
 import { buildChunks, prepareClipWords, type Chunk } from './chunks.js';
@@ -160,7 +161,8 @@ function runPasses(edl: Edl, input: DecideInput, passes: readonly ReplanPass[], 
   next.overlays = [...next.overlays].sort(
     (a, b) => (order.get(a.anchorSegmentId) ?? 0) + a.offsetSec - ((order.get(b.anchorSegmentId) ?? 0) + b.offsetSec),
   );
-  return next;
+  // Overlays kept from an earlier plan may break the rules after the creator changed the cut.
+  return enforceOverlayRules(next);
 }
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);

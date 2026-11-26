@@ -67,7 +67,7 @@ export default async function upload(ctx) {
     // Mode and hooks.
     await page.getByRole('radio', { name: 'TikTok Shop' }).click();
     for (let i = 0; i < 5; i++) {
-      const now = Number(await page.locator('[aria-label="variations"]').first().innerText({ timeout: 5000 }));
+      const now = Number(/\d+/.exec(await page.locator('[aria-label="variations"]').first().innerText({ timeout: 5000 }))?.[0]);
       if (now === 3) break;
       await page.getByRole('button', { name: now > 3 ? 'Fewer variations' : 'More variations' }).click();
     }

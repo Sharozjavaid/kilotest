@@ -26,3 +26,5 @@ export type { ClaudeLike, ClaudeEdit, ClaudePlan } from './claude.js';
 export { pexelsProvider, suggestStock, stockQuery } from './stock.js';
 export type { StockProvider } from './stock.js';
 export { flagFillers, FILLER_WORDS } from './text.js';
+export { enforceOverlayRules, overlayRuleProblems } from './rules.js';
+export type { RuleProblem } from './rules.js';

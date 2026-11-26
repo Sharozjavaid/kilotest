@@ -6,6 +6,7 @@ import { OVERLAY_SPACING_SEC, findEmphasis } from '../src/overlays.js';
 import { buildLines } from '../src/lines.js';
 import { buildChunks, prepareClipWords } from '../src/chunks.js';
 import { heuristicCuts } from '../src/heuristic.js';
+import { overlayRuleProblems } from '../src/rules.js';
 import { ASSETS, decideInput, richClips, synthClip, type SynthClip } from './helpers.js';
 
 const analyze = createAnalyze({ decider: 'heuristic', stock: null, log: () => {} });
@@ -44,6 +45,8 @@ function expectSound(edl: Edl, clips: SynthClip[]) {
 }
 
 function expectOverlaysSound(edl: Edl, assets: readonly BrollAsset[] = ASSETS) {
+  // The server's rules for a saved EDL.
+  expect(overlayRuleProblems(edl)).toEqual([]);
   const tl = resolveTimeline(edl);
   const sorted = [...tl.overlays].sort((a, b) => a.outStart - b.outStart);
   for (let i = 1; i < sorted.length; i++) expect(sorted[i]!.outStart).toBeGreaterThanOrEqual(sorted[i - 1]!.outEnd - 1e-6);
@@ -167,7 +170,8 @@ describe('heuristic decideEdit', () => {
           const o = v.overlays[k]!;
           expect(o.type === 'graphic' && o.template === 'bold-title').toBe(true);
         }
-        expectOverlaysSound({ ...edl, overlays: [...edl.overlays, ...v.overlays] });
+        expectOverlaysSound({ ...edl, overlays: [...edl.overlays, ...v.overlays], variants: [] });
+        expect(overlayRuleProblems(edl)).toEqual([]);
       }
       const opens = new Set(edl.variants.map((v) => `${v.segmentOrder[0]}|${v.overlays.map((o) => (o.type === 'graphic' ? String(o.props.text) : '')).join()}`));
       expect(opens.size).toBe(n);
@@ -291,6 +295,18 @@ describe('replan', () => {
     expect(noBroll.segments).toEqual(toggled.segments);
     const kept = toggled.segments.filter((s) => s.keep).map((s) => s.id).sort();
     for (const v of noBroll.variants) expect([...v.segmentOrder].sort()).toEqual(kept);
+
+    expect(overlayRuleProblems(out)).toEqual([]);
+
+    // The creator cut lines under the overlays: kept overlays slide earlier, and the replan
+    // must still hand back an EDL the server accepts.
+    let cut = edl;
+    for (const s of edl.segments.filter((x) => x.keep).slice(0, 3)) cut = toggleSegment(cut, s.id);
+    for (const passes of [['broll'], ['graphics'], ['variants'], ['broll', 'graphics', 'variants']] as const) {
+      const r = await analyze.replan({ ...input, edl: cut, passes: [...passes] });
+      expect(overlayRuleProblems(r)).toEqual([]);
+      expect(r.segments).toEqual(cut.segments);
+    }
 
     const single = await analyze.replan({ ...input, settings: { ...input.settings, hookVariations: 1 }, edl: toggled, passes: ['variants'] });
     expect(single.variants).toEqual([]);
