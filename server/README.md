@@ -21,7 +21,8 @@ KILO_PIPELINE=fake npm run dev            # fake pipeline; drop KILO_PIPELINE on
 curl localhost:8787/v1/health
 ```
 
-Defaults are all offline: `KILO_AUTH=dev` (token `dev:<user uuid>`), `KILO_STORAGE=local`
+Defaults are all offline: `npm run dev` sets `KILO_AUTH=dev` (token `dev:<user uuid>`);
+`api` and `worker` need `KILO_AUTH` set explicitly, with no default. `KILO_STORAGE=local`
 (files under `KILO_STORAGE_DIR`, default `.work/storage`, served by the signed
 `/v1/local/upload/:token` and `/v1/local/file/:token` routes, with `Range`), and
 push notifications written to the log when a user has no devices. Every variable is
@@ -81,6 +82,62 @@ tolerance (1%, at least 64 KiB) with 413 `file_too_large`; `POST
 (either driver), deletes a mismatching file and answers 400, so the app uploads it
 again.
 
+Clips must be MP4, MOV, M4V, WebM, MKV or 3GP; B-roll may also be JPEG, PNG, WebP or
+HEIC. Anything else is refused at creation (400 `unsupported_file_type`), and the
+pipeline checks the bytes as well. `uploads/complete` answers 200 with a result per id
+(`not_found`, `not_uploaded`, `size_mismatch`) and starts every video whose files are
+all in, whatever happened to the others; `POST /v1/uploads/targets` hands out fresh
+targets for files not in yet. The local upload route refuses bytes for a file whose
+video was deleted (or that is already in).
+
+## Limits
+
+Per user, configurable (see `.env.example`), answered with 429 and a code saying which:
+videos uploading/queued/analysing at once (`too_many_active_videos`), renders waiting
+(`too_many_renders`), replans of one video per hour (`too_many_replans`), batches per
+day (`too_many_batches`). JSON bodies are capped (`KILO_MAX_BODY_BYTES`, 413
+`body_too_large`). A render request for a cut whose render of the same revision is
+still queued or running returns that render instead of making another. Jobs carry a
+pg-boss priority of minus the number of jobs the same user already has waiting, so
+users are served round-robin: one user's 50-video batch does not hold up another
+user's single video.
+
+## Saving edits
+
+`PUT /v1/videos/:id/edl` takes from the client only `keep`, `userOverride`, `zoom` and
+`transitionIn` of each segment, the overlays, the captions, and each variant's segment
+order and overlays. Segment ids, clips and times must match the stored edit exactly;
+`videoId`, `fps`, `settings`, `decidedBy`, segment reasons and text and variant labels
+are copied from it. At most 4000 segments, 40 overlays, 5 variants and 10 overlays per
+variant. `validateEdl` (including `duplicate_variant_segment`) and `checkOverlayRules`
+must pass.
+
+## Jobs, crashes and shutdown
+
+The worker fetches jobs itself (not pg-boss's `work()`, which fails any handler that
+runs longer than the job's expiry) and keeps each running job alive with a heartbeat.
+Jobs expire after `KILO_JOB_EXPIRE_SEC` (90 s) without one, so a killed worker's job is
+retried by another within about two minutes. On SIGTERM the worker takes no new jobs,
+gives running ones `KILO_STOP_GRACE_MS` to finish (the pipeline kills its ffmpeg
+children itself), then cancels what still runs and queues it again to start in a few
+seconds, without spending a retry. On start, and every five minutes, videos left
+`queued`/`analyzing` and renders left `queued`/`rendering` with no live job are queued
+again (three times at most, then failed). Every storage write first checks that the
+video still exists; a job whose video was deleted stops and removes what it wrote. An
+hourly sweep removes storage prefixes with no video once their newest file is older
+than `KILO_SWEEP_GRACE_SEC` (6 h).
+
+A pipeline error's own message reaches the user ("This file type is not supported",
+the timeout advice). A video in which no speech was heard keeps the notice from
+`decideEditWithNotices()` (`VideoSummary.notice`).
+
+## Production checks
+
+At start the server logs which transcriber and decider are active (`describeProviders()`,
+never keys). With `NODE_ENV=production` it refuses dev auth, local storage without a
+chosen `KILO_LOCAL_SIGNING_SECRET`, and, unless `KILO_ALLOW_STAND_INS=1`, a worker whose
+transcriber or decider is an offline stand-in.
+
 ## Auth
 
 `KILO_AUTH=supabase` accepts both kinds of Supabase access token:
@@ -93,8 +150,17 @@ again.
   when a token names an unknown `kid` (key rotation), at most every 30 seconds. The
   issuer must be `<SUPABASE_URL>/auth/v1` when the token carries one.
 
-Either way the token must be unexpired, for the `authenticated` role and audience,
-and `sub` is the user id.
+Either way the token must be unexpired, carry `aud: authenticated` (and the
+`authenticated` role when it has one) and, when `SUPABASE_URL` is set, the issuer
+`<SUPABASE_URL>/auth/v1`, on both the HS256 and JWKS paths; `sub` is the user id. The
+JWKS fetch times out after 5 s; once a key set is cached a refresh runs in the
+background and never holds requests. A token that cannot be checked because the key
+set could not be fetched answers 503 `auth_unavailable` (the app retries), not 401
+(which signs the user out).
+
+Push tokens stay with the account that registered them: `POST /v1/devices` does not
+move a token registered to someone else. The app calls `DELETE /v1/devices` on
+sign-out, after which the next account to sign in on that phone can register it.
 
 ## Local storage links
 
@@ -108,10 +174,17 @@ agree.
 - **Database**: Supabase Postgres. Set `DATABASE_URL` to the direct connection
   (or session pooler); pg-boss needs `LISTEN`-free polling only, but long
   transactions and advisory locks rule out the transaction pooler for the worker.
-  Run `npm run migrate` on each release. `002_rls.sql` (row-level security keyed
-  on `auth.uid()`) applies only where the `auth` schema exists, so it runs on
-  Supabase and is skipped on plain Postgres. The server connects as the table
-  owner and is not subject to RLS; it enforces ownership in every query.
+  Run `npm run migrate` on each release. `002_rls.sql` and `005_lockdown.sql` apply
+  only where the `auth` schema exists, so they run on Supabase and are skipped on plain
+  Postgres. `005_lockdown.sql` removes every policy and revokes all table, sequence and
+  function privileges in `public` (and pg-boss's schema) from `anon` and
+  `authenticated`, now and through default privileges for tables created later, and
+  leaves row-level security on with no policies: the app uses Supabase only to sign in,
+  and no table is reachable through Supabase's REST API. The server connects as the
+  table owner; it enforces ownership in every query and does not trust stored rows to
+  name another user's files (signed URLs and job inputs must sit under the row's own
+  `users/<user>/videos/<video>/` prefix). Run migrations as the role that owns the
+  tables (normally `postgres`), so the default-privilege change covers future tables.
 - **Storage**: `KILO_STORAGE=supabase`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
   and a private bucket named `KILO_BUCKET` (default `kilo`). The app gets `tus`
   targets carrying a signed upload token (`x-signature`), never the service key.

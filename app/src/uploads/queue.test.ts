@@ -216,4 +216,129 @@ describe('UploadQueue', () => {
     expect(q.getJobs()[0]).toMatchObject({ status: 'failed', error: refuse.message });
     expect(complete).toHaveBeenCalledTimes(2);
   });
+
+  it('reads uploads/complete per file: done, dropped (not_found) or sent again on a fresh target, and one bad file never blocks the rest', async () => {
+    const { transport, calls } = manualTransport();
+    const fresh = { ...target(), url: 'https://up.example/fresh' };
+    const reissue = jest.fn(async (b: { clipIds?: string[]; assetIds?: string[] }) => ({
+      clips: (b.clipIds ?? []).map((clipId) => ({ clipId, upload: fresh })),
+      broll: [],
+    }));
+    let round = 0;
+    const complete = jest.fn(async (b: CompleteUploadsRequest) => {
+      round += 1;
+      return {
+        startedVideoIds: round === 1 ? ['v1'] : ['v3'],
+        results: b.clipIds.map((id) =>
+          round === 1 && id === 'bad' ? { id, kind: 'clip' as const, ok: false, code: 'size_mismatch' }
+          : round === 1 && id === 'gone' ? { id, kind: 'clip' as const, ok: false, code: 'not_found' }
+          : { id, kind: 'clip' as const, ok: true },
+        ),
+      };
+    });
+    const onStarted = jest.fn();
+    const q = new UploadQueue({ transport, store: memoryStore(), complete, reissue, concurrency: 3, backoffMs: () => 100, onStarted });
+    await q.enqueue([job('good', 'v1'), job('bad', 'v3'), job('gone', 'v2')]);
+    await flush();
+    calls.forEach((c) => c.resolve());
+    await flush();
+    await flush();
+    expect(complete).toHaveBeenCalledWith({ clipIds: ['good', 'bad', 'gone'], assetIds: [] });
+    expect(onStarted).toHaveBeenCalledWith(['v1']);
+    // The good file is done, the deleted one is gone from the queue, the bad one waits for a fresh target.
+    expect(q.getJobs().map((j) => [j.id, j.status])).toEqual([['good', 'done'], ['bad', 'pending']]);
+    expect(q.getJobs()[1]).toMatchObject({ needsTarget: true, bytesSent: 0 });
+    expect(q.canProgress('v3')).toBe(true);
+    await jest.advanceTimersByTimeAsync(150);
+    expect(reissue).toHaveBeenCalledWith({ clipIds: ['bad'], assetIds: [] });
+    await flush();
+    expect(calls).toHaveLength(4);
+    expect(calls[3]!.job.target.url).toBe('https://up.example/fresh');
+    calls[3]!.resolve();
+    await flush();
+    await flush();
+    expect(q.getJobs().every((j) => j.status === 'done')).toBe(true);
+    expect(onStarted).toHaveBeenLastCalledWith(['v3']);
+  });
+
+  it('a refused file that keeps failing becomes failed; retry asks for a fresh target', async () => {
+    const { transport, calls } = manualTransport();
+    const reissue = jest.fn(async (b: { clipIds?: string[] }) => ({ clips: (b.clipIds ?? []).map((clipId) => ({ clipId, upload: target() })), broll: [] }));
+    const complete = jest.fn(async (b: CompleteUploadsRequest) => ({
+      startedVideoIds: [],
+      results: b.clipIds.map((id) => ({ id, kind: 'clip' as const, ok: false, code: 'size_mismatch' })),
+    }));
+    const q = new UploadQueue({ transport, store: memoryStore(), complete, reissue, maxAttempts: 1, backoffMs: () => 100 });
+    await q.enqueue([job('c1', 'v1')]);
+    await flush();
+    calls[0]!.resolve();
+    await flush();
+    await flush();
+    expect(q.getJobs()[0]).toMatchObject({ status: 'failed', error: 'The file arrived incomplete. Uploading it again.' });
+    // Nothing left that can move: screens stop polling this video.
+    expect(q.canProgress('v1')).toBe(false);
+    expect(q.canProgressBatch('b1')).toBe(false);
+    q.retry(['c1']);
+    await flush();
+    expect(reissue).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(calls).toHaveLength(2);
+  });
+
+  it('an upload refused as expired or unauthorised gets a fresh target at once', async () => {
+    const { transport, calls } = manualTransport();
+    const fresh = { ...target(), url: 'https://up.example/renewed' };
+    const reissue = jest.fn(async () => ({ clips: [{ clipId: 'c1', upload: fresh }], broll: [] }));
+    const q = new UploadQueue({ transport, store: memoryStore(), complete: async () => ({ startedVideoIds: [], results: [] }), reissue, backoffMs: () => 60_000 });
+    await q.enqueue([job('c1', 'v1')]);
+    await flush();
+    calls[0]!.reject(Object.assign(new Error('Upload failed (401)'), { status: 401 }));
+    await flush();
+    await flush();
+    expect(reissue).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.job.target.url).toBe('https://up.example/renewed');
+    // A plain network failure keeps its target and backs off.
+    calls[1]!.reject(new Error('Network error during upload'));
+    await flush();
+    expect(reissue).toHaveBeenCalledTimes(1);
+    expect(q.getJobs()[0]).toMatchObject({ status: 'pending', needsTarget: false });
+  });
+
+  it('a file the server no longer expects (left out of re-issued targets) is reported, and dropped when not_found', async () => {
+    const { transport, calls } = manualTransport();
+    const reissue = jest.fn(async () => ({ clips: [], broll: [] }));
+    const complete = jest.fn(async (b: CompleteUploadsRequest) => ({
+      startedVideoIds: [],
+      results: b.clipIds.map((id) => ({ id, kind: 'clip' as const, ok: false, code: 'not_found' })),
+    }));
+    const q = new UploadQueue({ transport, store: memoryStore(), complete, reissue });
+    await q.enqueue([job('c1', 'v1')]);
+    await flush();
+    calls[0]!.reject(Object.assign(new Error('Upload failed (404)'), { status: 404 }));
+    await flush();
+    await flush();
+    await flush();
+    expect(complete).toHaveBeenCalledWith({ clipIds: ['c1'], assetIds: [] });
+    expect(q.getJobs()).toEqual([]);
+  });
+
+  it('reset forgets the jobs without overwriting what another account stored', async () => {
+    const store = memoryStore();
+    const { transport, calls } = manualTransport();
+    const q = new UploadQueue({ transport, store, complete: async () => ({ startedVideoIds: [], results: [] }) });
+    await q.enqueue([job('c1', 'v1')]);
+    await flush();
+    expect(store.saved).toHaveLength(1);
+    await q.reset(false);
+    expect(calls[0]!.cb.signal.aborted).toBe(true);
+    expect(q.getJobs()).toEqual([]);
+    // The aborted upload finishing late writes nothing over the stored queue.
+    calls[0]!.resolve();
+    await flush();
+    expect(store.saved).toHaveLength(1);
+    await q.reset(true);
+    expect(store.saved).toEqual([]);
+  });
 });

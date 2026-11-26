@@ -88,8 +88,9 @@ export default async function recorder(ctx) {
     await shot(page, '22-record-review');
     // The takes were deleted once their uploads were confirmed (on web: the blob URLs are revoked).
     const errorsBefore = errors.length;
-    const takes = await page.evaluate(async () => {
-      const jobs = JSON.parse(localStorage.getItem('kilo.uploads.v1') ?? '[]').filter((j) => j.deleteAfterUpload);
+    // The upload queue is stored per signed-in account.
+    const takes = await page.evaluate(async (userId) => {
+      const jobs = JSON.parse(localStorage.getItem(`kilo.uploads.v2.${userId}`) ?? '[]').filter((j) => j.deleteAfterUpload);
       const out = [];
       for (const j of jobs) {
         let alive = true;
@@ -101,7 +102,7 @@ export default async function recorder(ctx) {
         out.push({ status: j.status, alive });
       }
       return out;
-    });
+    }, ctx.userId);
     errors.splice(errorsBefore); // our own fetches of the revoked URLs
     ctx.log(`  takes after upload: ${JSON.stringify(takes)}`);
     assert(takes.length === 3 && takes.every((t) => t.status === 'done' && !t.alive), 'recorded takes were not deleted after their upload');

@@ -27,6 +27,7 @@ import { KiloApiError } from '../errors';
 import type { KiloApi } from '../types';
 import { buildMockAnalysis } from './build';
 import { placeOverlay, spokenLines } from '@/broll/overlays';
+import { mediaExtension, mergeClientEdl } from './rules';
 
 /** URLs of the media the mock serves. Resolved from bundled assets in src/api/mock/media.ts. */
 export interface MockMedia {
@@ -103,6 +104,12 @@ export class MockKiloApi implements KiloApi {
   private renders = new Map<string, RenderView>();
   private styles: Style[] = [];
   private devices: string[] = [];
+  /** EDL revision each render was made from, for the "already on its way" check. */
+  private renderRevision = new Map<string, number>();
+  /** Monday (UTC) of each week a video was marked posted in: a video counts once a week. */
+  private postedWeeks = new Map<string, Set<string>>();
+  /** Test hook: the next uploads/complete refuses these ids with this code (size_mismatch, not_uploaded). */
+  private refusals = new Map<string, string>();
   private goal: GoalView;
   private timers = new Set<ReturnType<typeof setTimeout>>();
 
@@ -126,6 +133,11 @@ export class MockKiloApi implements KiloApi {
   dispose(): void {
     for (const t of this.timers) clearTimeout(t);
     this.timers.clear();
+  }
+
+  /** Test hook: the next uploads/complete answers `code` for this file and keeps it pending, as the server does for bad bytes. */
+  refuseUpload(id: string, code: 'size_mismatch' | 'not_uploaded' = 'size_mismatch'): void {
+    this.refusals.set(id, code);
   }
 
   /** Test hook: pretend another device saved this video's EDL, so the next save conflicts. */
@@ -158,6 +170,11 @@ export class MockKiloApi implements KiloApi {
 
   async createBatch(body: Parameters<KiloApi['createBatch']>[0]) {
     await this.delay();
+    if (!body.videos.length) throw new KiloApiError(400, 'invalid_request', 'videos: give at least one');
+    for (const [i, nv] of body.videos.entries()) {
+      for (const c of nv.clips) if (!mediaExtension(c.filename, c.contentType, 'clip')) throw unsupported(`videos.${i}: `, c.filename);
+      for (const b of nv.broll ?? []) if (!mediaExtension(b.filename, b.contentType, 'broll')) throw unsupported(`videos.${i}: `, b.filename);
+    }
     const batch: MockBatch = { id: this.id('batch'), createdAt: this.iso(), settings: body.settings, videoIds: [] };
     this.batches.set(batch.id, batch);
     const out = body.videos.map((nv) => {
@@ -203,12 +220,23 @@ export class MockKiloApi implements KiloApi {
 
   async completeUploads(body: { clipIds?: string[]; assetIds?: string[] }) {
     await this.delay();
+    if (!body.clipIds?.length && !body.assetIds?.length) throw new KiloApiError(400, 'invalid_request', 'Give at least one clipId or assetId');
+    const knownClip = (id: string) => [...this.videos.values()].some((v) => v.clipIds.includes(id));
+    const knownAsset = (id: string) => [...this.videos.values()].some((v) => v.broll.some((b) => b.id === id));
     const started: string[] = [];
+    const refused = new Map<string, string>();
+    for (const id of [...(body.clipIds ?? []), ...(body.assetIds ?? [])]) {
+      const code = this.refusals.get(id);
+      if (code) {
+        refused.set(id, code);
+        this.refusals.delete(id);
+      }
+    }
     for (const v of this.videos.values()) {
       let touched = false;
-      for (const id of body.clipIds ?? []) if (v.pendingClipIds.delete(id)) touched = true;
+      for (const id of body.clipIds ?? []) if (!refused.has(id) && v.pendingClipIds.delete(id)) touched = true;
       for (const id of body.assetIds ?? []) {
-        if (v.pendingAssetIds.delete(id)) {
+        if (!refused.has(id) && v.pendingAssetIds.delete(id)) {
           touched = true;
           const asset = v.broll.find((a) => a.id === id);
           if (asset) {
@@ -226,11 +254,30 @@ export class MockKiloApi implements KiloApi {
         started.push(v.summary.id);
       }
     }
+    // As the server: one result per id; unknown (or deleted) ids are `not_found`, the rest are in.
+    const result = (id: string, kind: 'clip' | 'asset', known: boolean) =>
+      !known ? { id, kind, ok: false, code: 'not_found' } : refused.has(id) ? { id, kind, ok: false, code: refused.get(id)! } : { id, kind, ok: true };
     const results = [
-      ...(body.clipIds ?? []).map((id) => ({ id, kind: 'clip' as const, ok: true })),
-      ...(body.assetIds ?? []).map((id) => ({ id, kind: 'asset' as const, ok: true })),
+      ...[...new Set(body.clipIds ?? [])].map((id) => result(id, 'clip', knownClip(id))),
+      ...[...new Set(body.assetIds ?? [])].map((id) => result(id, 'asset', knownAsset(id))),
     ];
     return { startedVideoIds: started, results };
+  }
+
+  async reissueUploads(body: { clipIds?: string[]; assetIds?: string[] }) {
+    await this.delay();
+    const clips: { clipId: string; upload: UploadTarget }[] = [];
+    const broll: { assetId: string; upload: UploadTarget }[] = [];
+    for (const v of this.videos.values()) {
+      for (const id of body.clipIds ?? []) {
+        if (v.pendingClipIds.has(id)) clips.push({ clipId: id, upload: this.target(v.summary.id, `clips/${id}/source.mp4`) });
+      }
+      for (const id of body.assetIds ?? []) {
+        const a = v.broll.find((b) => b.id === id);
+        if (a && v.pendingAssetIds.has(id) && a.status === 'uploading') broll.push({ assetId: id, upload: this.target(v.summary.id, `broll/${id}/source.jpg`) });
+      }
+    }
+    return clone({ clips, broll });
   }
 
   async listVideos(query?: { status?: VideoStatus; batchId?: string }) {
@@ -289,10 +336,14 @@ export class MockKiloApi implements KiloApi {
     if (body.baseRevision !== v.edl.revision) {
       throw new KiloApiError(409, 'revision_conflict', `The edit has changed since revision ${body.baseRevision}; reload it`);
     }
+    if (parsed.data.videoId !== videoId) throw new KiloApiError(400, 'invalid_request', 'edl.videoId does not match the video');
+    // The cut points and everything else a client may not change stay as stored (server mergeClientEdl).
+    const merged = mergeClientEdl(v.edl, parsed.data);
+    if (merged.problems.length) throw new KiloApiError(400, 'invalid_request', merged.problems.slice(0, 5).join('; '));
+    const next = merged.edl;
     const problems: string[] = [];
-    if (parsed.data.videoId !== videoId) problems.push('edl.videoId does not match the video');
-    problems.push(...validateEdl(parsed.data, v.clips).map((i) => i.message));
-    for (const o of [...parsed.data.overlays, ...parsed.data.variants.flatMap((x) => x.overlays)]) {
+    problems.push(...validateEdl(next, v.clips).map((i) => i.message));
+    for (const o of [...next.overlays, ...next.variants.flatMap((x) => x.overlays)]) {
       if (o.type === 'graphic' && !TemplatePropsSchemas[o.template].safeParse(o.props).success) {
         problems.push(`Overlay ${o.id} has invalid props for ${getTemplate(o.template).name}`);
       }
@@ -300,11 +351,9 @@ export class MockKiloApi implements KiloApi {
         problems.push(`Overlay ${o.id} uses B-roll that is not ready or does not exist`);
       }
     }
-    problems.push(...checkOverlayRules(parsed.data).map((i) => i.message));
+    problems.push(...checkOverlayRules(next).map((i) => i.message));
     if (problems.length) throw new KiloApiError(400, 'invalid_request', problems.slice(0, 5).join('; '));
-    // What a client may not change stays as stored.
-    const stored = v.edl;
-    v.edl = { ...parsed.data, videoId, fps: stored.fps, settings: stored.settings, decidedBy: stored.decidedBy, revision: stored.revision + 1 };
+    v.edl = { ...next, revision: v.edl.revision + 1 };
     this.applyStats(v);
     if (v.summary.status === 'done') this.setStatus(v, 'ready_for_review');
     else v.summary.updatedAt = this.iso();
@@ -314,7 +363,8 @@ export class MockKiloApi implements KiloApi {
   async addBroll(videoId: string, body: Parameters<KiloApi['addBroll']>[1]) {
     await this.delay();
     const v = this.mustVideo(videoId);
-    if (v.summary.status === 'failed') throw new KiloApiError(409, 'invalid_state', 'B-roll cannot be added to a video that failed');
+    for (const a of body.assets) if (!mediaExtension(a.filename, a.contentType, 'broll')) throw unsupported('', a.filename);
+    if (v.summary.status === 'failed') throw new KiloApiError(409, 'invalid_state', 'Retry the video before adding B-roll');
     const out = body.assets.map((a) => {
       const assetId = this.id('asset');
       v.broll.push(this.newBroll(assetId, a.kind, a.filename));
@@ -327,10 +377,10 @@ export class MockKiloApi implements KiloApi {
   async deleteBroll(videoId: string, assetId: string) {
     await this.delay();
     const v = this.mustVideo(videoId);
-    if (v.summary.status === 'analyzing' || v.summary.status === 'rendering') {
-      throw new KiloApiError(409, 'invalid_state', 'B-roll cannot be removed while the video is being edited or exported');
-    }
     if (!v.broll.some((b) => b.id === assetId)) throw notFound('B-roll asset');
+    if (v.summary.status === 'analyzing' || v.summary.status === 'rendering') {
+      throw new KiloApiError(409, 'invalid_state', `B-roll cannot be removed while the video is ${v.summary.status}`);
+    }
     v.broll = v.broll.filter((b) => b.id !== assetId);
     v.pendingAssetIds.delete(assetId);
     if (v.edl) {
@@ -346,10 +396,10 @@ export class MockKiloApi implements KiloApi {
   async replan(videoId: string, body: { passes: ReplanPass[] }) {
     await this.delay();
     const v = this.mustVideo(videoId);
-    if (!v.edl) throw new KiloApiError(409, 'invalid_state', 'This video has not been analysed yet');
     if (v.summary.status !== 'ready_for_review' && v.summary.status !== 'done') {
-      throw new KiloApiError(409, 'invalid_state', 'This video is busy. Try again in a moment.');
+      throw new KiloApiError(409, 'invalid_state', `A video that is ${v.summary.status} cannot be replanned`);
     }
+    if (!v.edl) throw new KiloApiError(409, 'invalid_state', 'The video has no edit yet');
     const passes = new Set(body.passes);
     this.setStatus(v, 'analyzing', MOCK_TIMINGS.replan);
     this.later(MOCK_TIMINGS.replan, () => {
@@ -392,12 +442,22 @@ export class MockKiloApi implements KiloApi {
   async createRenders(videoId: string, body: { quality: 'preview' | 'final'; variantIds?: Array<string | null> }) {
     await this.delay();
     const v = this.mustVideo(videoId);
-    if (!v.edl) throw new KiloApiError(409, 'invalid_state', 'This video has not been analysed yet');
-    const ids = body.variantIds ?? (v.edl.variants.length ? v.edl.variants.map((x) => x.id) : [null]);
+    // As the server: only a reviewed (or finished, or exporting) video can be rendered.
+    if (!['ready_for_review', 'done', 'rendering'].includes(v.summary.status)) {
+      throw new KiloApiError(409, 'invalid_state', `A video that is ${v.summary.status} cannot be rendered`);
+    }
+    if (!v.edl) throw new KiloApiError(409, 'invalid_state', 'The video has no edit yet');
+    const edl = v.edl;
+    const ids = [...new Set(body.variantIds ?? (edl.variants.length ? edl.variants.map((x) => x.id) : [null]))];
+    if (!ids.length) throw new KiloApiError(400, 'invalid_request', 'variantIds: give at least one, or omit it');
+    const unknown = ids.filter((x) => x !== null && !edl.variants.some((y) => y.id === x));
+    if (unknown.length) throw new KiloApiError(400, 'invalid_request', `variantIds: unknown variant ${unknown.join(', ')}`);
     const renders = ids.map((variantId) => {
-      if (variantId !== null && !v.edl!.variants.some((x) => x.id === variantId)) {
-        throw new KiloApiError(400, 'invalid_request', `Unknown variant ${variantId}`);
-      }
+      // The same cut of the same revision already on its way is handed back, not rendered twice.
+      const existing = v.renders.find(
+        (x) => x.quality === body.quality && x.variantId === variantId && (x.status === 'queued' || x.status === 'rendering') && this.renderRevision.get(x.id) === edl.revision,
+      );
+      if (existing) return existing;
       const r: RenderView = {
         id: this.id('render'),
         videoId,
@@ -411,6 +471,7 @@ export class MockKiloApi implements KiloApi {
         error: null,
       };
       this.renders.set(r.id, r);
+      this.renderRevision.set(r.id, edl.revision);
       v.renders = [...v.renders.filter((x) => !(x.quality === r.quality && x.variantId === r.variantId)), r];
       this.runRender(v, r);
       return r;
@@ -429,10 +490,18 @@ export class MockKiloApi implements KiloApi {
   async markPosted(videoId: string, _body?: Parameters<KiloApi['markPosted']>[1]) {
     await this.delay();
     const v = this.mustVideo(videoId);
-    if (!v.summary.postedAt) {
-      v.summary.postedAt = this.iso();
-      this.goal.postedThisWeek += 1;
+    // As the server: only a video with a finished final render can be posted, and it counts once a week.
+    if (!v.renders.some((r) => r.quality === 'final' && r.status === 'done')) {
+      throw new KiloApiError(409, 'invalid_state', 'Export the video before marking it posted');
     }
+    const week = mondayOf(new Date(this.now()));
+    const weeks = this.postedWeeks.get(videoId) ?? new Set<string>();
+    if (!weeks.has(week)) {
+      weeks.add(week);
+      this.postedWeeks.set(videoId, weeks);
+      if (week === this.goal.weekStart) this.goal.postedThisWeek += 1;
+    }
+    v.summary.postedAt = this.iso();
     v.summary.updatedAt = this.iso();
     return clone(v.summary);
   }
@@ -478,6 +547,16 @@ export class MockKiloApi implements KiloApi {
   async registerDevice(body: { expoPushToken: string }) {
     await this.delay();
     if (!this.devices.includes(body.expoPushToken)) this.devices.push(body.expoPushToken);
+  }
+
+  async unregisterDevice(body: { expoPushToken: string }) {
+    await this.delay();
+    this.devices = this.devices.filter((t) => t !== body.expoPushToken);
+  }
+
+  /** Test hook: the devices registered to the mock account. */
+  registeredDevices(): readonly string[] {
+    return this.devices;
   }
 
   // ---- Status machine ---------------------------------------------------------
@@ -700,6 +779,8 @@ export class MockKiloApi implements KiloApi {
       }
       if (opts.posted) {
         v.summary.postedAt = this.iso(-opts.ageMs / 3);
+        // Seeded as posted this week, whatever day it is, so the seeded goal reads the same every day.
+        this.postedWeeks.set(id, new Set([this.goal.weekStart]));
         this.goal.postedThisWeek += 1;
       }
       if (opts.error) v.summary.error = opts.error;
@@ -743,6 +824,10 @@ function byNewest(a: { createdAt: string }, b: { createdAt: string }): number {
 
 function byUpdatedNewest(a: VideoSummary, b: VideoSummary): number {
   return b.updatedAt.localeCompare(a.updatedAt);
+}
+
+function unsupported(where: string, filename: string): KiloApiError {
+  return new KiloApiError(400, 'unsupported_file_type', `${where}${filename}: this file type is not supported.`);
 }
 
 function notFound(what: string): KiloApiError {

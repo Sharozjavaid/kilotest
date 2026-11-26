@@ -7,7 +7,7 @@
   "scripts": {
     "api": "tsx src/main.ts api",
     "worker": "tsx src/main.ts worker",
-    "dev": "tsx src/main.ts dev",
+    "dev": "KILO_AUTH=${KILO_AUTH:-dev} tsx src/main.ts dev",
     "migrate": "tsx src/db/migrate-cli.ts",
     "kilo": "tsx src/cli/kilo.ts",
     "dev-db": "bash scripts/dev-db.sh",

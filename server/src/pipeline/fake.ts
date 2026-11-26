@@ -26,7 +26,7 @@ import {
   type Variant,
 } from '@kilo/edl';
 import { ffmpeg, ffprobe, nominalFps } from '../media.js';
-import type { Pipeline } from './types.js';
+import type { AnalyzeExtras, Pipeline } from './types.js';
 
 /**
  * Fast stand-ins for @kilo/analyze, @kilo/render and @kilo/templates. They do the
@@ -51,6 +51,9 @@ interface ManifestClip {
   wordsFile: string;
   units: ManifestUnit[];
 }
+
+/** The same words as @kilo/analyze's NO_SPEECH_MESSAGE. */
+export const FAKE_NO_SPEECH_MESSAGE = "We couldn't hear any speech in this video, so nothing was cut";
 
 export interface FakeOptions {
   /** Where fixture manifests live (default `<repo>/fixtures/out`). */
@@ -192,7 +195,7 @@ function buildVariants(segments: Segment[], count: number): Variant[] {
   return variants;
 }
 
-export function createFakeAnalyze(options: FakeOptions = {}): AnalyzeApi {
+export function createFakeAnalyze(options: FakeOptions = {}): AnalyzeApi & AnalyzeExtras {
   const fixturesDir = options.fixturesDir ?? DEFAULT_FIXTURES;
   let fixtures: { clip: ManifestClip; words: Transcript }[] | undefined;
   const getFixtures = () => (fixtures ??= loadFixtureClips(fixturesDir));
@@ -327,6 +330,16 @@ export function createFakeAnalyze(options: FakeOptions = {}): AnalyzeApi {
 
     async decideEdit(input) {
       return decide(input);
+    },
+
+    // Through `this.decideEdit`, so a test that replaces decideEdit on a copy of this object still decides.
+    async decideEditWithNotices(this: AnalyzeApi, input: DecideInput) {
+      const heard = input.transcripts.some((t) => t.words.length > 0);
+      return { edl: await this.decideEdit(input), notices: heard ? [] : [{ code: 'no_speech', message: FAKE_NO_SPEECH_MESSAGE }] };
+    },
+
+    describeProviders() {
+      return { standIns: ['transcriber', 'decider', 'describer', 'stock'], summary: 'fake pipeline (offline stand-ins for tests)' };
     },
 
     async replan(input) {

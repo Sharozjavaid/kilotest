@@ -1,5 +1,5 @@
 import type { AnalyzeApi, RenderApi, TemplatesApi } from '@kilo/edl';
-import type { Pipeline } from './types.js';
+import type { AnalyzeExtras, Pipeline } from './types.js';
 
 async function load<T>(pkg: string, exportName: string): Promise<T> {
   let mod: Record<string, unknown>;
@@ -19,7 +19,7 @@ async function load<T>(pkg: string, exportName: string): Promise<T> {
 /** Loads @kilo/analyze, @kilo/render and @kilo/templates. */
 export async function loadRealPipeline(): Promise<Pipeline> {
   const [analyze, render, templates] = await Promise.all([
-    load<AnalyzeApi>('@kilo/analyze', 'analyze'),
+    load<AnalyzeApi & AnalyzeExtras>('@kilo/analyze', 'analyze'),
     load<RenderApi>('@kilo/render', 'render'),
     load<TemplatesApi>('@kilo/templates', 'templates'),
   ]);

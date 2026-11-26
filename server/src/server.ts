@@ -1,7 +1,7 @@
 import { serve, type ServerType } from '@hono/node-server';
 import { createApp } from './api/app.js';
 import { combinedSupabaseAuth, devAuth, type Authenticator } from './auth.js';
-import { assertConfig, type Config } from './config.js';
+import { assertConfig, assertProviders, type Config } from './config.js';
 import { connect, type Sql } from './db/index.js';
 import { migrate } from './db/migrate.js';
 import { consoleLogger, type Logger } from './log.js';
@@ -53,6 +53,10 @@ export async function startServer(options: StartOptions): Promise<RunningServer>
   const { config, pipeline } = options;
   assertConfig(config, { api: options.api, worker: options.worker });
   const log = options.log ?? consoleLogger(options.api && options.worker ? 'dev' : options.api ? 'api' : 'worker');
+  // Which transcriber and decider will run, and whether each is a real service (never prints keys).
+  const providers = pipeline.analyze.describeProviders?.() ?? null;
+  log.info('providers', { summary: providers?.summary ?? 'unknown (the pipeline does not report its providers)', standIns: providers?.standIns ?? null });
+  assertProviders(config, providers, { worker: options.worker });
   const sql = connect(config.databaseUrl);
   if (options.migrate) await migrate(sql, undefined, (l) => log.info(l));
   const storage = options.storage ?? createStorage(config);
@@ -60,6 +64,7 @@ export async function startServer(options: StartOptions): Promise<RunningServer>
     retryLimit: config.jobRetryLimit,
     retryDelay: 2,
     schedule: options.worker,
+    expireInSeconds: config.jobExpireSec,
   });
   const push = options.push ?? (config.push === 'expo' ? new ExpoPush(config.expoAccessToken) : new LogPush(log));
   const notifier = new Notifier(sql, push, log);
@@ -75,6 +80,7 @@ export async function startServer(options: StartOptions): Promise<RunningServer>
       workDir: config.workDir,
       allowFileUrls: config.nodeEnv !== 'production',
       now: options.now,
+      sweepGraceSec: config.sweepGraceSec,
     });
     await worker.start(queue, {
       analyzeConcurrency: config.analyzeConcurrency,
@@ -95,6 +101,8 @@ export async function startServer(options: StartOptions): Promise<RunningServer>
       now: options.now,
       maxUploadBytes: config.maxUploadBytes,
       corsOrigins: config.corsOrigins,
+      maxBodyBytes: config.maxBodyBytes,
+      limits: config.limits,
     });
     http = serve({ fetch: app.fetch, port: config.port });
     log.info('api listening', { port: config.port, storage: storage.kind, auth: config.auth });
@@ -107,7 +115,9 @@ export async function startServer(options: StartOptions): Promise<RunningServer>
     worker,
     http,
     async stop() {
-      worker?.beginStop();
+      // Take no new jobs; running ones finish, are interrupted by the pipeline's own SIGTERM handling, or are
+      // handed back to the queue so another worker starts them within seconds.
+      const released = worker?.release(Number(process.env.KILO_STOP_GRACE_MS ?? 8000));
       if (http) {
         // close() waits for every open connection; browsers keep idle ones alive, and an
         // upload in flight would hold shutdown for as long as it takes. Drop idle ones now
@@ -119,7 +129,9 @@ export async function startServer(options: StartOptions): Promise<RunningServer>
         await closed;
         clearTimeout(force);
       }
-      await queue.stop();
+      await released;
+      // Whatever still runs was handed back to the queue above; do not wait long for it.
+      await queue.stop(worker ? 2000 : 10_000);
       await sql.end({ timeout: 5 });
     },
   };

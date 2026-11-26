@@ -1,4 +1,4 @@
-import type { CompleteUploadsRequest, CompleteUploadsResponse, UploadTarget } from '@kilo/edl';
+import type { CompleteUploadsRequest, CompleteUploadsResponse, ReissueUploadsRequest, ReissueUploadsResponse, UploadTarget } from '@kilo/edl';
 
 /**
  * The upload queue. Pure logic with injected transport, persistence and clock, so
@@ -13,6 +13,13 @@ import type { CompleteUploadsRequest, CompleteUploadsResponse, UploadTarget } fr
  * - Persists every state change, so after a relaunch `resume()` picks up where it
  *   stopped: jobs that were mid-upload start again (a `tus` job continues from its
  *   saved upload URL), uploaded files not yet reported are reported.
+ * - Reads `uploads/complete` per file: a file the server refused (`size_mismatch`,
+ *   `not_uploaded`) is sent again on a fresh target, and is `failed` once it runs out
+ *   of attempts (retry asks for a fresh target too); a file the server no longer knows
+ *   (`not_found`: its video was deleted) is dropped. One bad file never holds up the
+ *   others.
+ * - Asks for a fresh target (`uploads/targets`) when an upload is refused as expired
+ *   or unauthorised.
  */
 
 export type JobStatus = 'pending' | 'uploading' | 'uploaded' | 'done' | 'failed';
@@ -37,6 +44,8 @@ export interface UploadJob {
   resumeUrl?: string;
   /** A file the app made itself (a recorded take): delete it once the server has it. */
   deleteAfterUpload?: boolean;
+  /** The target is spent (expired, refused, or the server dropped the bytes): ask for a fresh one before uploading. */
+  needsTarget?: boolean;
   error?: string;
 }
 
@@ -63,6 +72,8 @@ export interface QueueDeps {
   transport: UploadTransport;
   store: QueueStore;
   complete: (body: CompleteUploadsRequest) => Promise<CompleteUploadsResponse>;
+  /** POST /uploads/targets. Without it a spent target is simply tried again. */
+  reissue?: (body: ReissueUploadsRequest) => Promise<ReissueUploadsResponse>;
   concurrency?: number;
   maxAttempts?: number;
   /** Delay before attempt n+1 after n failures. */
@@ -74,6 +85,20 @@ export interface QueueDeps {
   onStarted?: (videoIds: string[]) => void;
   /** Deletes a local file once the server confirmed it (jobs with `deleteAfterUpload`). */
   discard?: (fileUri: string) => void;
+}
+
+/** Upload failures that mean the target itself is no good (expired or refused link), not the network. */
+export function isSpentTargetError(e: unknown): boolean {
+  const status = (e as { status?: unknown } | null)?.status;
+  if (typeof status === 'number') return status === 401 || status === 403 || status === 404 || status === 410;
+  return /\b(401|403|404|410)\b|expired/i.test(e instanceof Error ? e.message : String(e));
+}
+
+/** Words for the user about a file the server refused. */
+export function refusalMessage(code: string | undefined): string {
+  if (code === 'size_mismatch') return 'The file arrived incomplete. Uploading it again.';
+  if (code === 'not_uploaded') return 'The file did not arrive. Uploading it again.';
+  return 'The server did not accept this file.';
 }
 
 export const defaultBackoff = (attempts: number): number => Math.min(60_000, 1000 * 2 ** Math.max(0, attempts - 1));
@@ -88,9 +113,13 @@ export class UploadQueue {
   private completing = false;
   private completeAttempts = 0;
   private completeNotBefore = 0;
+  private reissuing = false;
+  private reissueAttempts = 0;
   private loaded = false;
   private paused = false;
-  private readonly d: Required<Omit<QueueDeps, 'onStarted' | 'discard'>> & Pick<QueueDeps, 'onStarted' | 'discard'>;
+  /** Bumped by `reset()`, so answers to calls made before it are ignored. */
+  private generation = 0;
+  private readonly d: Required<Omit<QueueDeps, 'onStarted' | 'discard' | 'reissue'>> & Pick<QueueDeps, 'onStarted' | 'discard' | 'reissue'>;
 
   constructor(deps: QueueDeps) {
     this.d = {
@@ -135,12 +164,15 @@ export class UploadQueue {
     else this.pump();
   }
 
-  /** The user tapped retry on a failed file (or a failed video's files). */
+  /** The user tapped retry on a failed file (or a failed video's files). Asks for a fresh target first. */
   retry(ids?: string[]): void {
     const set = ids ? new Set(ids) : null;
     this.jobs = this.jobs.map((j) =>
-      j.status === 'failed' && (!set || set.has(j.id)) ? { ...j, status: 'pending', attempts: 0, nextAttemptAt: 0, error: undefined } : j,
+      j.status === 'failed' && (!set || set.has(j.id))
+        ? { ...j, status: 'pending', attempts: 0, nextAttemptAt: 0, error: undefined, bytesSent: 0, resumeUrl: undefined, needsTarget: !!this.d.reissue }
+        : j,
     );
+    this.reissueAttempts = 0;
     this.completeAttempts = 0;
     this.completeNotBefore = 0;
     void this.persist();
@@ -162,6 +194,36 @@ export class UploadQueue {
     }
     this.active.clear();
     await this.persist();
+  }
+
+  /**
+   * Forgets every job (sign-out, or another account signed in): running uploads are
+   * cancelled, nothing is persisted from here on until `resume()` loads again.
+   */
+  async reset(clearStored = false): Promise<void> {
+    this.generation += 1;
+    for (const c of this.active.values()) c.abort();
+    this.active.clear();
+    if (this.wakeTimer !== null) this.d.clearTimer(this.wakeTimer);
+    this.wakeTimer = null;
+    this.jobs = [];
+    this.loaded = false;
+    this.completing = false;
+    this.reissuing = false;
+    this.completeAttempts = 0;
+    this.completeNotBefore = 0;
+    if (clearStored) await this.persist(true);
+    this.emit();
+  }
+
+  /** True while a video still has files this queue can move (pending, uploading or waiting to be reported). */
+  canProgress(videoId: string): boolean {
+    return this.jobs.some((j) => j.videoId === videoId && j.status !== 'done' && j.status !== 'failed');
+  }
+
+  /** Same, for any video of a batch. */
+  canProgressBatch(batchId: string): boolean {
+    return this.jobs.some((j) => j.batchId === batchId && j.status !== 'done' && j.status !== 'failed');
   }
 
   /** Drops finished jobs from storage. */
@@ -198,8 +260,10 @@ export class UploadQueue {
         soonest = Math.min(soonest, job.nextAttemptAt);
         continue;
       }
+      if (job.needsTarget && this.d.reissue) continue;
       this.start(job);
     }
+    this.maybeReissue();
     this.maybeComplete();
     if (this.jobs.some((j) => j.status === 'uploaded') && !this.completing && this.completeNotBefore > now) {
       soonest = Math.min(soonest, this.completeNotBefore);
@@ -249,10 +313,17 @@ export class UploadQueue {
           if (controller.signal.aborted) return;
           const j = current();
           const message = e instanceof Error ? e.message : String(e);
+          // An expired or refused link will not work again: the next attempt asks for a fresh one.
+          const spent = isSpentTargetError(e);
           if (j.attempts >= this.d.maxAttempts) {
-            this.patch(job.id, { status: 'failed', error: message });
+            this.patch(job.id, { status: 'failed', error: message, needsTarget: spent || j.needsTarget });
           } else {
-            this.patch(job.id, { status: 'pending', error: message, nextAttemptAt: this.d.now() + this.d.backoffMs(j.attempts) });
+            this.patch(job.id, {
+              status: 'pending',
+              error: message,
+              nextAttemptAt: spent ? this.d.now() : this.d.now() + this.d.backoffMs(j.attempts),
+              ...(spent ? { needsTarget: true, resumeUrl: undefined, bytesSent: 0 } : {}),
+            });
           }
         },
       )
@@ -275,13 +346,44 @@ export class UploadQueue {
     };
     const sent = new Set(ready.map((j) => j.id));
     this.completing = true;
+    const generation = this.generation;
     this.d
       .complete(body)
       .then(
         (res) => {
+          if (generation !== this.generation) return;
           this.completeAttempts = 0;
-          const finished = this.jobs.filter((j) => sent.has(j.id) && j.status === 'uploaded');
-          this.jobs = this.jobs.map((j) => (sent.has(j.id) && j.status === 'uploaded' ? { ...j, status: 'done' } : j));
+          // Each file's own outcome (CONTRACTS.md: one bad id never fails the others).
+          const outcome = new Map((res.results ?? []).map((r) => [`${r.kind === 'clip' ? 'clip' : 'broll'}:${r.id}`, r]));
+          const finished: UploadJob[] = [];
+          const next: UploadJob[] = [];
+          for (const j of this.jobs) {
+            if (!sent.has(j.id) || j.status !== 'uploaded') {
+              next.push(j);
+              continue;
+            }
+            const r = outcome.get(`${j.kind}:${j.id}`);
+            if (!r || r.ok) {
+              finished.push(j);
+              next.push({ ...j, status: 'done', error: undefined });
+            } else if (r.code === 'not_found') {
+              // Its video was deleted (or it was never this account's): nothing to send it to.
+              continue;
+            } else if (j.attempts >= this.d.maxAttempts) {
+              next.push({ ...j, status: 'failed', error: refusalMessage(r.code), needsTarget: true });
+            } else {
+              next.push({
+                ...j,
+                status: 'pending',
+                bytesSent: 0,
+                resumeUrl: undefined,
+                needsTarget: true,
+                error: refusalMessage(r.code),
+                nextAttemptAt: this.d.now() + this.d.backoffMs(j.attempts),
+              });
+            }
+          }
+          this.jobs = next;
           // The server has these files now: drop the app's own copies (recorded takes).
           for (const j of finished) {
             if (!j.deleteAfterUpload) continue;
@@ -294,6 +396,7 @@ export class UploadQueue {
           if (res.startedVideoIds.length) this.d.onStarted?.(res.startedVideoIds);
         },
         (e: unknown) => {
+          if (generation !== this.generation) return;
           const status = (e as { status?: unknown })?.status;
           if (typeof status === 'number' && status >= 400 && status < 500 && status !== 401 && status !== 408 && status !== 429) {
             // The server refused these files (a size that does not match: it deleted the bytes).
@@ -313,7 +416,58 @@ export class UploadQueue {
         },
       )
       .finally(() => {
+        if (generation !== this.generation) return;
         this.completing = false;
+        void this.persist();
+        this.emit();
+        this.pump();
+      });
+  }
+
+  /** Fresh targets for jobs whose target is spent, in one call. */
+  private maybeReissue(): void {
+    const reissue = this.d.reissue;
+    if (!reissue || this.reissuing || this.paused) return;
+    const now = this.d.now();
+    const due = this.jobs.filter((j) => j.status === 'pending' && j.needsTarget && j.nextAttemptAt <= now);
+    if (!due.length) {
+      const later = this.jobs.filter((j) => j.status === 'pending' && j.needsTarget).map((j) => j.nextAttemptAt);
+      if (later.length) this.wakeAt(Math.min(...later));
+      return;
+    }
+    const asked = new Set(due.map((j) => j.id));
+    this.reissuing = true;
+    const generation = this.generation;
+    reissue({
+      clipIds: due.filter((j) => j.kind === 'clip').map((j) => j.id),
+      assetIds: due.filter((j) => j.kind === 'broll').map((j) => j.id),
+    })
+      .then(
+        (res) => {
+          if (generation !== this.generation) return;
+          this.reissueAttempts = 0;
+          const fresh = new Map<string, UploadTarget>([
+            ...res.clips.map((c) => [`clip:${c.clipId}`, c.upload] as const),
+            ...res.broll.map((b) => [`broll:${b.assetId}`, b.upload] as const),
+          ]);
+          this.jobs = this.jobs.map((j) => {
+            if (!asked.has(j.id) || j.status !== 'pending' || !j.needsTarget) return j;
+            const t = fresh.get(`${j.kind}:${j.id}`);
+            if (t) return { ...j, target: t, needsTarget: false, resumeUrl: undefined, bytesSent: 0 };
+            // Left out: already in on the server, or gone. Reporting it says which (done, or dropped as not_found).
+            return { ...j, status: 'uploaded', needsTarget: false };
+          });
+        },
+        () => {
+          if (generation !== this.generation) return;
+          this.reissueAttempts += 1;
+          const at = this.d.now() + this.d.backoffMs(this.reissueAttempts);
+          this.jobs = this.jobs.map((j) => (asked.has(j.id) && j.status === 'pending' ? { ...j, nextAttemptAt: at } : j));
+        },
+      )
+      .finally(() => {
+        if (generation !== this.generation) return;
+        this.reissuing = false;
         void this.persist();
         this.emit();
         this.pump();
@@ -324,7 +478,9 @@ export class UploadQueue {
     this.jobs = this.jobs.map((j) => (j.id === id ? { ...j, ...p } : j));
   }
 
-  private persist(): Promise<void> {
+  /** Saves the jobs. Not before the stored ones are loaded, so an empty start never overwrites them. */
+  private persist(force = false): Promise<void> {
+    if (!this.loaded && !force) return Promise.resolve();
     return this.d.store.save(this.jobs).catch(() => undefined);
   }
 

@@ -1,8 +1,9 @@
 import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { ZodError, type ZodType, type ZodTypeDef } from 'zod';
-import type { Authenticator } from '../auth.js';
-import { isUuid } from '../auth.js';
+import { AuthUnavailableError, isUuid, type Authenticator } from '../auth.js';
+import { DEFAULT_LIMITS, DEFAULT_MAX_BODY_BYTES, type Limits } from '../config.js';
 import type { Sql } from '../db/index.js';
 import { HttpError, invalidRequest, notFound, unauthorized } from '../errors.js';
 import type { Logger } from '../log.js';
@@ -32,7 +33,13 @@ export interface AppDeps {
   maxUploadBytes?: number;
   /** Browser origins allowed to call the API (CORS). Empty or ['*'] allows any origin. */
   corsOrigins?: string[];
+  /** Largest JSON body a route accepts (default 2 MiB). */
+  maxBodyBytes?: number;
+  /** Per-user limits (defaults in config.ts). */
+  limits?: Limits;
 }
+
+export const limitsOf = (deps: AppDeps): Limits => deps.limits ?? DEFAULT_LIMITS;
 
 /**
  * Headers a browser app may send and read. Auth is a bearer token (no cookies), so
@@ -117,13 +124,31 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.get('/v1/health', (c) => c.json({ ok: true as const }));
 
-  if (deps.storage instanceof LocalStorage) app.route('/v1/local', localRoutes(deps.storage, deps.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES));
+  if (deps.storage instanceof LocalStorage) app.route('/v1/local', localRoutes(deps.storage, deps.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES, deps.db));
 
   const authed = new Hono<Env>();
+  // JSON bodies only: file bytes go to the upload routes above, which have their own limits.
+  const maxBody = deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  authed.use(
+    '*',
+    bodyLimit({
+      maxSize: maxBody,
+      onError: (c) => c.json({ error: { code: 'body_too_large', message: `Request bodies are limited to ${maxBody} bytes` } }, 413),
+    }),
+  );
   authed.use('*', async (c, next) => {
     const header = c.req.header('authorization') ?? '';
     const match = /^Bearer\s+(.+)$/i.exec(header);
-    const userId = match ? await deps.authenticate(match[1]!.trim()) : null;
+    let userId: string | null = null;
+    try {
+      userId = match ? await deps.authenticate(match[1]!.trim()) : null;
+    } catch (err) {
+      if (err instanceof AuthUnavailableError) {
+        // The token was not rejected; it could not be checked. Telling the app 401 would sign the user out.
+        throw new HttpError(503, 'auth_unavailable', 'Sign-in could not be checked right now. Try again in a moment.');
+      }
+      throw err;
+    }
     if (!userId) throw unauthorized();
     c.set('userId', userId);
     await next();

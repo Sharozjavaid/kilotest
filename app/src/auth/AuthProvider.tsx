@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { setTokenProvider, setUnauthorizedHandler } from '@/api/client';
 import type { AuthMode } from '@/lib/env';
 import { getAuthBackend, type Session } from './backends';
+import { runBeforeSignOut } from './signOutHooks';
 
 export interface AuthState {
   status: 'loading' | 'signedOut' | 'signedIn';
@@ -21,8 +22,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setTokenProvider(() => backend.getToken());
+    // Only a 401 (the server rejected the token) lands here; a 503 "could not verify" is retried instead.
     setUnauthorizedHandler(() => {
-      if (backend.needsSignIn) void backend.signOut();
+      if (backend.needsSignIn) void runBeforeSignOut(1500).finally(() => backend.signOut());
     });
     let alive = true;
     backend
@@ -46,7 +48,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       verifyCode: async (email, code) => {
         setSession(await backend.verifyCode(email, code));
       },
-      signOut: () => backend.signOut(),
+      // Unregister push and drop this account's uploads while the session (and its token) still works.
+      signOut: async () => {
+        await runBeforeSignOut();
+        await backend.signOut();
+      },
     }),
     [loading, session, backend],
   );

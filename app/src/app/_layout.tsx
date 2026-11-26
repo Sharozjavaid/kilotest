@@ -43,10 +43,10 @@ function Navigator() {
   if (auth.status === 'loading') return null;
   return (
     <>
-      {signedIn ? (
+      {signedIn && auth.session ? (
         <>
-          <UploadManager />
-          <PushManager />
+          <UploadManager userId={auth.session.userId} />
+          <PushManager key={auth.session.userId} />
         </>
       ) : null}
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: color.ground } }}>

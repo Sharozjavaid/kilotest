@@ -14,6 +14,8 @@ import type {
   ListVideosResponse,
   MarkPostedRequest,
   RegisterDeviceRequest,
+  ReissueUploadsRequest,
+  ReissueUploadsResponse,
   RenderView,
   ReplanRequest,
   SaveEdlRequest,
@@ -41,6 +43,8 @@ export interface KiloApi {
   createBatch(body: CreateBatchRequestInput): Promise<CreateBatchResponse>;
   getBatch(batchId: string): Promise<BatchDetail>;
   completeUploads(body: Partial<CompleteUploadsRequest>): Promise<CompleteUploadsResponse>;
+  /** Fresh upload targets for files not in yet (an expired target, or a file the server refused). */
+  reissueUploads(body: Partial<ReissueUploadsRequest>): Promise<ReissueUploadsResponse>;
 
   listVideos(query?: { status?: VideoStatus; batchId?: string }): Promise<ListVideosResponse>;
   getVideo(videoId: string): Promise<VideoDetail>;
@@ -63,6 +67,8 @@ export interface KiloApi {
   deleteStyle(styleId: string): Promise<void>;
 
   registerDevice(body: RegisterDeviceRequest): Promise<void>;
+  /** On sign-out, before the session is cleared: this device stops getting this account's notifications. */
+  unregisterDevice(body: { expoPushToken: string }): Promise<void>;
 }
 
 /** CreateBatchRequest where each video's `broll` may be omitted (it defaults to []). */

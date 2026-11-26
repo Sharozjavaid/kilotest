@@ -20,6 +20,7 @@ import {
 } from '@kilo/edl';
 import type { ZodTypeAny, z } from 'zod';
 import { createApp } from '../src/api/app.js';
+import { DEFAULT_LIMITS, type Limits } from '../src/config.js';
 import { devAuth } from '../src/auth.js';
 import { connect, type Sql } from '../src/db/index.js';
 import { memoryLogger } from '../src/log.js';
@@ -94,6 +95,8 @@ export interface TestEnv {
   clock: { now: Date | null };
   /** The worker's scratch directory. */
   workDir: string;
+  databaseUrl: string;
+  storageDir: string;
   as(userId: string): Client;
   stop(): Promise<void>;
 }
@@ -113,6 +116,12 @@ export interface EnvOptions {
   workers?: boolean;
   retryLimit?: number;
   maxUploadBytes?: number;
+  limits?: Partial<Limits>;
+  maxBodyBytes?: number;
+  /** Job expiry, seconds (default the server's 90). */
+  expireInSeconds?: number;
+  maintenanceIntervalSeconds?: number;
+  sweepGraceSec?: number;
 }
 
 /** A fresh database cloned from the run's template, local storage, the real queue and worker, the fake pipeline. */
@@ -149,13 +158,30 @@ export async function createEnv(options: EnvOptions = {}): Promise<TestEnv> {
   const port = (http.address() as AddressInfo).port;
   const baseUrl = `http://127.0.0.1:${port}`;
   const storage = new LocalStorage(join(dir, 'storage'), 'kilo', baseUrl, 'test-secret', 600);
-  const queue = await BossQueue.start(databaseUrl, { retryLimit: options.retryLimit ?? 0, retryDelay: 1, schedule: false });
+  const queue = await BossQueue.start(databaseUrl, {
+    retryLimit: options.retryLimit ?? 0,
+    retryDelay: 1,
+    schedule: false,
+    ...(options.expireInSeconds ? { expireInSeconds: options.expireInSeconds } : {}),
+    ...(options.maintenanceIntervalSeconds ? { maintenanceIntervalSeconds: options.maintenanceIntervalSeconds } : {}),
+  });
   const notifier = new Notifier(sql, push, log, push);
-  const worker = new Worker({ db: sql, storage, pipeline, notifier, log, workDir: join(dir, 'jobs'), allowFileUrls: true, now });
+  const worker = new Worker({ db: sql, storage, pipeline, notifier, log, workDir: join(dir, 'jobs'), allowFileUrls: true, now, sweepGraceSec: options.sweepGraceSec });
   if (options.workers !== false) {
     await worker.start(queue, { analyzeConcurrency: 1, renderConcurrency: 1, pollingIntervalSeconds: 0.5, scheduleReminders: false });
   }
-  const app = createApp({ db: sql, storage, queue, authenticate: devAuth, log, pipeline, now, maxUploadBytes: options.maxUploadBytes });
+  const app = createApp({
+    db: sql,
+    storage,
+    queue,
+    authenticate: devAuth,
+    log,
+    pipeline,
+    now,
+    maxUploadBytes: options.maxUploadBytes,
+    limits: { ...DEFAULT_LIMITS, ...options.limits },
+    maxBodyBytes: options.maxBodyBytes,
+  });
   handler = (req) => app.fetch(req);
 
   const as = (userId: string): Client => {
@@ -209,10 +235,13 @@ export async function createEnv(options: EnvOptions = {}): Promise<TestEnv> {
     pipeline,
     clock,
     workDir: join(dir, 'jobs'),
+    databaseUrl,
+    storageDir: join(dir, 'storage'),
     as,
     async stop() {
+      worker.beginStop();
       await new Promise<void>((r) => http.close(() => r()));
-      await queue.stop();
+      await queue.stop(2000);
       await sql.end({ timeout: 5 });
       const a = postgres(adminUrl, { max: 1, onnotice: () => {} });
       await a.unsafe(`drop database if exists "${dbName}" with (force)`).catch(() => {});

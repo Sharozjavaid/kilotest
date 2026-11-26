@@ -21,6 +21,11 @@ export interface StorageDriver {
   deleteKeys(keys: string[]): Promise<void>;
   /** Removes every object whose key starts with `prefix/`. */
   deletePrefix(prefix: string): Promise<void>;
+  /**
+   * Every `users/<userId>/videos/<videoId>` prefix in the bucket, with the time of its
+   * newest object (null when unknown), for the orphan sweep.
+   */
+  listVideoPrefixes(): Promise<{ userId: string; videoId: string; newest: Date | null }[]>;
 }
 
 const EXT_BY_TYPE: Record<string, string> = {
@@ -28,6 +33,8 @@ const EXT_BY_TYPE: Record<string, string> = {
   'video/quicktime': 'mov',
   'video/webm': 'webm',
   'video/x-m4v': 'm4v',
+  'video/x-matroska': 'mkv',
+  'video/3gpp': '3gp',
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
@@ -39,6 +46,8 @@ const TYPE_BY_EXT: Record<string, string> = {
   m4v: 'video/x-m4v',
   mov: 'video/quicktime',
   webm: 'video/webm',
+  mkv: 'video/x-matroska',
+  '3gp': 'video/3gpp',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   png: 'image/png',
@@ -47,6 +56,24 @@ const TYPE_BY_EXT: Record<string, string> = {
   wav: 'audio/wav',
   json: 'application/json',
 };
+
+/** Containers a clip may come in. The pipeline also checks the bytes; this only keeps storage keys sane. */
+export const CLIP_EXTENSIONS: readonly string[] = ['mp4', 'mov', 'm4v', 'webm', 'mkv', '3gp'];
+/** B-roll may also be a still. */
+export const BROLL_EXTENSIONS: readonly string[] = [...CLIP_EXTENSIONS, 'jpg', 'jpeg', 'png', 'webp', 'heic'];
+
+/**
+ * The storage-key extension for an uploaded clip or B-roll file, or null when the
+ * file is not a media type Kilo accepts. The file name's extension decides when it
+ * has one; a name without one falls back to the content type.
+ */
+export function mediaExtension(filename: string, contentType: string, kind: 'clip' | 'broll'): string | null {
+  const allowed = kind === 'clip' ? CLIP_EXTENSIONS : BROLL_EXTENSIONS;
+  const fromName = /\.([A-Za-z0-9]{1,5})$/.exec(filename)?.[1]?.toLowerCase();
+  const ext = fromName ?? EXT_BY_TYPE[contentType.toLowerCase().split(';')[0]!.trim()];
+  if (!ext || !allowed.includes(ext)) return null;
+  return ext === 'jpeg' ? 'jpg' : ext;
+}
 
 /** File extension for a storage key: from the file name when sane, else the content type. */
 export function extensionFor(filename: string, contentType: string): string {
@@ -74,6 +101,20 @@ export const keys = {
   brollPrefix: (u: string, v: string, assetId: string) => `users/${u}/videos/${v}/broll/${assetId}`,
   render: (u: string, v: string, renderId: string) => `users/${u}/videos/${v}/renders/${renderId}.mp4`,
 };
+
+/** True when `key` sits under the video's own prefix: `users/<userId>/videos/<videoId>/…`. */
+export function keyBelongsTo(key: string | null | undefined, userId: string, videoId: string): key is string {
+  if (!key) return false;
+  const prefix = `${keys.video(userId, videoId)}/`;
+  return key.startsWith(prefix) && !key.slice(prefix.length).split('/').some((p) => p === '' || p === '.' || p === '..');
+}
+
+/** Parses `users/<u>/videos/<v>/(clips|broll)/<id>/source.<ext>`, the key of an upload target. */
+export function parseSourceKey(key: string): { userId: string; videoId: string; kind: 'clip' | 'broll'; id: string } | null {
+  const m = /^users\/([0-9a-f-]{36})\/videos\/([0-9a-f-]{36})\/(clips|broll)\/([0-9a-f-]{36})\/source\.[a-z0-9]{1,5}$/.exec(key);
+  if (!m) return null;
+  return { userId: m[1]!, videoId: m[2]!, kind: m[3] === 'clips' ? 'clip' : 'broll', id: m[4]! };
+}
 
 /** Rejects keys that could escape the bucket. */
 export function assertSafeKey(key: string): void {

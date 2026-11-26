@@ -15,7 +15,7 @@ import {
 } from '@kilo/edl';
 import type { Db, Fragment } from './db/index.js';
 import { goalStats } from './goal.js';
-import type { StorageDriver } from './storage/types.js';
+import { keyBelongsTo, keys, type StorageDriver } from './storage/types.js';
 
 /** Row shapes and the queries that turn them into API views. */
 
@@ -34,6 +34,9 @@ export interface VideoRow {
   stock_done: boolean;
   /** 0..1 through analysis; meaningful only while queued or analyzing. */
   progress: number;
+  /** Shown to the user about a video that did not fail (e.g. no speech heard). */
+  notice: string | null;
+  recoveries: number;
   analyzed_at: Date | null;
   created_at: Date;
   updated_at: Date;
@@ -91,6 +94,7 @@ export interface RenderRow {
   duration_sec: number | null;
   error: string | null;
   created_at: Date;
+  recoveries?: number;
 }
 
 export interface SummaryRow extends VideoRow {
@@ -110,11 +114,11 @@ export async function summaryRows(db: Db, where: Fragment, order: 'created' | 'u
   const orderBy = order === 'created' ? db`v.created_at desc, v.id` : db`v.updated_at desc, v.id`;
   return db<SummaryRow[]>`
     select v.*, e.edl,
-      (select c.thumb_key from clips c where c.video_id = v.id and c.thumb_key is not null order by c.ord limit 1) as thumb_key,
+      (select c.thumb_key from clips c where c.video_id = v.id and c.user_id = v.user_id and c.thumb_key is not null order by c.ord limit 1) as thumb_key,
       (select max(p.posted_at) from posts p where p.video_id = v.id) as posted_at,
       (select count(*)::int from clips c where c.video_id = v.id) as clip_count
     from videos v
-    left join lateral (select edl from edls where video_id = v.id order by revision desc limit 1) e on true
+    left join lateral (select edl from edls where video_id = v.id and user_id = v.user_id order by revision desc limit 1) e on true
     where ${where}
     order by ${orderBy}
     limit ${limit}`;
@@ -131,15 +135,14 @@ export async function toSummary(storage: StorageDriver, row: SummaryRow): Promis
     updatedAt: iso(row.updated_at),
     clipCount: Number(row.clip_count),
     progress: row.status === 'queued' || row.status === 'analyzing' ? Math.max(0, Math.min(1, Number(row.progress) || 0)) : null,
-    thumbnailUrl: row.thumb_key ? await storage.signedUrl(row.thumb_key) : null,
+    thumbnailUrl: keyBelongsTo(row.thumb_key, row.user_id, row.id) ? await storage.signedUrl(row.thumb_key) : null,
     keptSec: stats ? round3(stats.keptSec) : null,
     totalSec: stats ? round3(stats.totalSec) : null,
     cutCount: stats ? stats.cutCount : null,
     variantCount: row.edl?.variants.length ?? 0,
     postedAt: row.posted_at ? iso(row.posted_at) : null,
     error: row.status === 'failed' ? (row.error ?? 'Something went wrong') : null,
-    // Not stored yet: the worker will keep analyze's decide notices (no_speech) on the video.
-    notice: null,
+    notice: row.status === 'failed' ? null : (row.notice ?? null),
   };
 }
 
@@ -163,7 +166,8 @@ export async function renderView(storage: StorageDriver, r: RenderRow): Promise<
     quality: r.quality,
     status: r.status,
     progress: Math.max(0, Math.min(1, Number(r.progress))),
-    url: r.status === 'done' && r.output_key ? await storage.signedUrl(r.output_key) : null,
+    // Signed only when the key is this render's own file under its video: a row is not trusted to name another's.
+    url: r.status === 'done' && r.output_key === keys.render(r.user_id, r.video_id, r.id) ? await storage.signedUrl(r.output_key) : null,
     durationSec: r.duration_sec === null ? null : Number(r.duration_sec),
     createdAt: iso(r.created_at),
     error: r.status === 'failed' ? (r.error ?? 'Render failed') : null,
@@ -184,14 +188,16 @@ export async function brollView(storage: StorageDriver, b: BrollRow): Promise<Br
     source: b.source,
     ...(b.attribution ? { attribution: b.attribution } : {}),
     status: b.status,
-    url: b.status === 'ready' && b.normalized_key ? await storage.signedUrl(b.normalized_key) : null,
-    thumbnailUrl: b.status === 'ready' && b.thumb_key ? await storage.signedUrl(b.thumb_key) : null,
+    url: b.status === 'ready' && keyBelongsTo(b.normalized_key, b.user_id, b.video_id) ? await storage.signedUrl(b.normalized_key) : null,
+    thumbnailUrl: b.status === 'ready' && keyBelongsTo(b.thumb_key, b.user_id, b.video_id) ? await storage.signedUrl(b.thumb_key) : null,
   };
 }
 
 export async function currentEdl(db: Db, videoId: string): Promise<{ edl: Edl; revision: number } | null> {
+  // Only rows written for the video's own owner count.
   const [row] = await db<{ edl: Edl; revision: number }[]>`
-    select edl, revision from edls where video_id = ${videoId} order by revision desc limit 1`;
+    select e.edl, e.revision from edls e join videos v on v.id = e.video_id and v.user_id = e.user_id
+    where e.video_id = ${videoId} order by e.revision desc limit 1`;
   return row ?? null;
 }
 
@@ -200,17 +206,18 @@ export async function videoDetail(db: Db, storage: StorageDriver, userId: string
   if (!row) return null;
   const [summary, clips, transcripts, broll, renders] = await Promise.all([
     toSummary(storage, row),
-    db<ClipRow[]>`select * from clips where video_id = ${videoId} order by ord`,
+    db<ClipRow[]>`select * from clips where video_id = ${videoId} and user_id = ${userId} order by ord`,
     db<{ transcript: Transcript }[]>`
-      select t.transcript from transcripts t join clips c on c.id = t.clip_id where t.video_id = ${videoId} order by c.ord`,
-    db<BrollRow[]>`select * from broll_assets where video_id = ${videoId} order by created_at, id`,
-    db<RenderRow[]>`select * from renders where video_id = ${videoId} order by created_at, id`,
+      select t.transcript from transcripts t join clips c on c.id = t.clip_id
+      where t.video_id = ${videoId} and t.user_id = ${userId} and c.user_id = ${userId} order by c.ord`,
+    db<BrollRow[]>`select * from broll_assets where video_id = ${videoId} and user_id = ${userId} order by created_at, id`,
+    db<RenderRow[]>`select * from renders where video_id = ${videoId} and user_id = ${userId} order by created_at, id`,
   ]);
   return {
     ...summary,
     script: row.script,
     clips: clips.filter((c) => c.info).map((c) => c.info!),
-    proxy: row.proxy_key ? { url: await storage.signedUrl(row.proxy_key), clipOffsets: row.clip_offsets ?? {} } : null,
+    proxy: keyBelongsTo(row.proxy_key, row.user_id, row.id) ? { url: await storage.signedUrl(row.proxy_key), clipOffsets: row.clip_offsets ?? {} } : null,
     edl: row.edl,
     transcripts: transcripts.map((t) => t.transcript),
     broll: await Promise.all(broll.map((b) => brollView(storage, b))),

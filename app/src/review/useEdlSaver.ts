@@ -5,6 +5,7 @@ import { getApi } from '@/api/client';
 import { keys } from '@/api/queries';
 import { KiloApiError } from '@/api/errors';
 import { EdlSaver, type SaverState } from './reconcile';
+import { pendingStore } from './pendingStore';
 
 /**
  * Binds an EdlSaver to a video: debounced PUT /edl, 409 reconciliation, and the
@@ -33,6 +34,13 @@ export function useEdlSaver(videoId: string, edl: Edl | null) {
         return v.edl;
       },
       onChange: setState,
+      // Every unsaved tap is on the device too: a failed save survives this screen going away.
+      persist: (snap) => pendingStore.save(videoId, snap),
+    });
+    // Taps an earlier visit could not save are replayed on top of the server's edit.
+    const created = saverRef.current;
+    void pendingStore.load(videoId).then((snap) => {
+      if (snap && saverRef.current === created) created.restore(snap);
     });
   }
 
@@ -41,7 +49,8 @@ export function useEdlSaver(videoId: string, edl: Edl | null) {
     if (edl) saverRef.current?.receive(edl);
   }, [edl]);
 
-  // Save whatever is pending when the screen goes away.
+  // Save whatever is pending when the screen goes away. If that fails the operations stay on the
+  // device (persist above) and are replayed the next time this video is opened.
   useEffect(
     () => () => {
       const saver = saverRef.current;

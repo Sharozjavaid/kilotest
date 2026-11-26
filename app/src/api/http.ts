@@ -14,12 +14,15 @@ import {
   ListVideosResponse,
   MarkPostedRequest,
   RegisterDeviceRequest,
+  ReissueUploadsRequest,
+  ReissueUploadsResponse,
   RenderView,
   ReplanRequest,
   SaveEdlRequest,
   SaveEdlResponse,
   SaveStyleRequest,
   Style,
+  UnregisterDeviceRequest,
   UpdateGoalRequest,
   VideoDetail,
   VideoSummary,
@@ -88,6 +91,8 @@ export function createHttpApi(opts: HttpApiOptions): KiloApi {
       }
     }
     if (!res.ok) {
+      // Only a token the server rejected (401) signs the user out. 503 `auth_unavailable` means the
+      // server could not check it right now: a transient error the caller retries, never a sign-out.
       if (res.status === 401) opts.onUnauthorized?.();
       throw KiloApiError.fromResponse(res.status, json);
     }
@@ -117,6 +122,7 @@ export function createHttpApi(opts: HttpApiOptions): KiloApi {
     createBatch: async (b) => request('POST', '/batches', CreateBatchResponse, body(CreateBatchRequest, b)),
     getBatch: (id) => request('GET', `/batches/${enc(id)}`, BatchDetail),
     completeUploads: async (b) => request('POST', '/uploads/complete', CompleteUploadsResponse, body(CompleteUploadsRequest, b)),
+    reissueUploads: async (b) => request('POST', '/uploads/targets', ReissueUploadsResponse, body(ReissueUploadsRequest, b)),
 
     listVideos: (q) => {
       const params = new URLSearchParams();
@@ -145,5 +151,6 @@ export function createHttpApi(opts: HttpApiOptions): KiloApi {
     deleteStyle: (id) => request('DELETE', `/styles/${enc(id)}`, null),
 
     registerDevice: async (b) => request('POST', '/devices', null, body(RegisterDeviceRequest, b)),
+    unregisterDevice: async (b) => request('DELETE', '/devices', null, body(UnregisterDeviceRequest, b)),
   };
 }

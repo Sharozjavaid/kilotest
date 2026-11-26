@@ -192,26 +192,56 @@ export class SupabaseStorage implements StorageDriver {
     }
   }
 
+  /** One page-through of a folder: its sub-folders and objects (with their times). */
+  private async listFolder(folder: string): Promise<{ folders: string[]; objects: { path: string; at: Date | null }[] }> {
+    const folders: string[] = [];
+    const objects: { path: string; at: Date | null }[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const res = await this.call(`/object/list/${this.bucket}`, {
+        method: 'POST',
+        headers: this.auth({ 'content-type': 'application/json' }),
+        body: JSON.stringify({ prefix: folder, limit: 1000, offset, sortBy: { column: 'name', order: 'asc' } }),
+      });
+      const items = (await res.json()) as { name: string; id: string | null; updated_at?: string | null; created_at?: string | null }[];
+      for (const item of items) {
+        const path = folder ? `${folder}/${item.name}` : item.name;
+        if (item.id === null) folders.push(path);
+        else {
+          const t = item.updated_at ?? item.created_at;
+          objects.push({ path, at: t ? new Date(t) : null });
+        }
+      }
+      if (items.length < 1000) break;
+    }
+    return { folders, objects };
+  }
+
+  private async walk(folder: string): Promise<{ path: string; at: Date | null }[]> {
+    const { folders, objects } = await this.listFolder(folder);
+    for (const f of folders) objects.push(...(await this.walk(f)));
+    return objects;
+  }
+
   async deletePrefix(prefix: string): Promise<void> {
     assertSafeKey(prefix);
-    const all: string[] = [];
-    const walk = async (folder: string): Promise<void> => {
-      for (let offset = 0; ; offset += 1000) {
-        const res = await this.call(`/object/list/${this.bucket}`, {
-          method: 'POST',
-          headers: this.auth({ 'content-type': 'application/json' }),
-          body: JSON.stringify({ prefix: folder, limit: 1000, offset, sortBy: { column: 'name', order: 'asc' } }),
-        });
-        const items = (await res.json()) as { name: string; id: string | null }[];
-        for (const item of items) {
-          const path = `${folder}/${item.name}`;
-          if (item.id === null) await walk(path);
-          else all.push(path);
-        }
-        if (items.length < 1000) break;
+    const all = await this.walk(prefix);
+    await this.deleteKeys(all.map((o) => o.path));
+  }
+
+  /** Not yet exercised against a real Supabase project; tested against a mocked storage API. */
+  async listVideoPrefixes(): Promise<{ userId: string; videoId: string; newest: Date | null }[]> {
+    const out: { userId: string; videoId: string; newest: Date | null }[] = [];
+    for (const userFolder of (await this.listFolder('users')).folders) {
+      const userId = userFolder.split('/')[1]!;
+      for (const videoFolder of (await this.listFolder(`${userFolder}/videos`)).folders) {
+        const videoId = videoFolder.split('/').pop()!;
+        const objects = await this.walk(videoFolder);
+        const times = objects.map((o) => o.at?.getTime() ?? NaN).filter((t) => Number.isFinite(t));
+        // An object without a time counts as new: the sweep must never remove what it cannot date.
+        const newest = objects.some((o) => !o.at) ? new Date() : times.length ? new Date(Math.max(...times)) : null;
+        out.push({ userId, videoId, newest });
       }
-    };
-    await walk(prefix);
-    await this.deleteKeys(all);
+    }
+    return out;
   }
 }

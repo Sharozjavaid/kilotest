@@ -46,6 +46,26 @@ review, broll, export, recorder (Chromium's fake camera), styles (with the weekl
 failures. Later flows use what the upload flow made. Logs, downloads and server output go
 to `.work/e2e/`; screenshots of every main screen with real data to `.work/shots-real/`.
 
+## Behaviour worth knowing
+
+- **Uploads** (`src/uploads/`): the queue is stored per signed-in account and cleared on
+  sign-out. `uploads/complete` is read per file: a refused file is sent again on a fresh
+  target (`POST /v1/uploads/targets`), then marked failed with a retry that asks for a
+  fresh target; a file whose video was deleted is dropped. An upload refused as expired
+  or unauthorised gets a fresh target at once. Home and Batch stop polling a video that
+  is `uploading` when this phone has nothing left to send for it.
+- **Saving edits** (`src/review/`): `EdlSaver.flush()` resolves false when the save
+  failed; passing failures are retried by themselves. "Looks good" waits for the save
+  and says so if it cannot; Export gets the revision reviewed (`?rev=`) and refuses to
+  render a different one. Unsaved taps are kept per video on the device and replayed
+  when the video is opened again.
+- **Sign-out**: unregisters this device's push token (`DELETE /v1/devices`) and clears
+  the account's uploads and unsaved edits before the session goes. A 503
+  `auth_unavailable` is retried, never treated as a sign-out.
+- **Mock** (`src/api/mock/`): follows the server's rules; `src/api/conformance/scenarios.ts`
+  runs the same scenarios against the mock (jest) and the server
+  (`server/test/conformance.test.ts`).
+
 ## Device builds
 
 The recorder uses `react-native-vision-camera` (v5, Nitro modules), which is native code: the app needs a development build, not Expo Go. `ios/` and `android/` are generated from `app.json`; do not edit them by hand.

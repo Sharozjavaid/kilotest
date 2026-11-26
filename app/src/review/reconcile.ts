@@ -119,6 +119,19 @@ export interface SaverState {
   conflicts: number;
 }
 
+/** What the saver has not saved yet, kept on the device so leaving the screen (or the app) loses nothing. */
+export interface PendingSnapshot {
+  videoId: string;
+  /** The server revision the operations were made on top of (they replay onto newer ones too). */
+  baseRevision: number;
+  pending: Pending;
+  edits: readonly PendingEdit[];
+  seq: number;
+}
+
+/** Retry delays after a save failed for a passing reason (network, timeout, 5xx), ms. */
+export const SAVE_RETRY_MS = [1500, 3000, 6000, 12000, 30000] as const;
+
 export interface SaverDeps {
   /** PUT /videos/:id/edl. Resolves with the stored EDL. Rejects with KiloApiError (409 on a stale base). */
   save: (edl: Edl, baseRevision: number) => Promise<Edl>;
@@ -130,6 +143,8 @@ export interface SaverDeps {
   maxConflictRetries?: number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
+  /** Called with what is not saved yet whenever that changes; null once everything is saved. */
+  persist?: (snapshot: PendingSnapshot | null) => void;
 }
 
 /** Debounced, conflict-safe saving of review toggles. One per open review screen. */
@@ -138,8 +153,11 @@ export class EdlSaver {
   private seq = 0;
   private timer: unknown = null;
   private inFlight: Promise<void> | null = null;
-  private readonly deps: Required<Omit<SaverDeps, 'onChange'>> & Pick<SaverDeps, 'onChange'>;
+  private readonly deps: Required<Omit<SaverDeps, 'onChange' | 'persist'>> & Pick<SaverDeps, 'onChange' | 'persist'>;
   private disposed = false;
+  private retryTimer: unknown = null;
+  private failures = 0;
+  private lastPersisted = '';
 
   constructor(initial: Edl, deps: SaverDeps) {
     this.deps = {
@@ -178,33 +196,93 @@ export class EdlSaver {
     this.update({ server: edl, local: compose(edl, this.state.pending, this.state.edits) });
   }
 
-  /** Save now (leaving the screen). Resolves when everything pending is saved or a save failed. */
-  async flush(): Promise<void> {
+  /**
+   * Save now (leaving the screen). Resolves true once everything the user did is
+   * saved, false when a save failed (the error is in the state, and the operations
+   * are kept: in memory, through `persist`, and for the automatic retry). Callers
+   * that must not move on with an older revision (Export) check the result.
+   */
+  async flush(): Promise<boolean> {
     if (this.timer !== null) {
       this.deps.clearTimer(this.timer);
       this.timer = null;
     }
     while (this.inFlight) await this.inFlight;
     if (!hasChanges(this.state.server, this.state.pending, this.state.edits)) {
-      if (Object.keys(this.state.pending).length || this.state.edits.length) this.update({ pending: {}, edits: [], local: this.state.server });
-      return;
+      if (Object.keys(this.state.pending).length || this.state.edits.length) this.update({ pending: {}, edits: [], local: this.state.server, error: null });
+      return true;
     }
     this.inFlight = this.saveLoop().finally(() => {
       this.inFlight = null;
     });
     await this.inFlight;
-    if (!this.disposed && this.state.error === null && hasChanges(this.state.server, this.state.pending, this.state.edits)) this.schedule();
+    const left = hasChanges(this.state.server, this.state.pending, this.state.edits);
+    if (this.state.error !== null) {
+      this.scheduleRetry();
+      return false;
+    }
+    if (left && !this.disposed) this.schedule();
+    // Taps made while this save was in flight are saved by the next one; what the caller asked about is saved.
+    return true;
+  }
+
+  /**
+   * Saves, retrying passing failures a few times, until everything is saved.
+   * False when it still is not (offline, the server refused the edit).
+   */
+  async saveUntilDone(attempts = 3, waitMs: (n: number) => number = (n) => 800 * 2 ** n): Promise<boolean> {
+    for (let i = 0; i < attempts; i++) {
+      const ok = await this.flush();
+      if (ok && !hasChanges(this.state.server, this.state.pending, this.state.edits)) return true;
+      if (!ok && !isTransientError(this.state.error)) return false;
+      if (i < attempts - 1) await new Promise((r) => this.deps.setTimer(() => r(undefined), waitMs(i)));
+    }
+    return !hasChanges(this.state.server, this.state.pending, this.state.edits) && this.state.error === null;
   }
 
   /** Retry after an error. */
-  retry(): Promise<void> {
+  retry(): Promise<boolean> {
+    this.failures = 0;
     return this.flush();
+  }
+
+  /** Puts back operations saved on the device by an earlier screen (a failed save, the app closed). */
+  restore(snapshot: PendingSnapshot): void {
+    if (snapshot.videoId !== this.state.server.videoId) return;
+    const pending: Record<string, PendingToggle> = { ...this.state.pending };
+    for (const [id, p] of Object.entries(snapshot.pending)) if (!pending[id]) pending[id] = { keep: p.keep, seq: p.seq };
+    const known = new Set(this.state.edits.map((e) => e.seq));
+    const edits = [...snapshot.edits.filter((e) => !known.has(e.seq)), ...this.state.edits].sort((a, b) => a.seq - b.seq);
+    this.seq = Math.max(this.seq, snapshot.seq);
+    this.update({ pending, edits, local: compose(this.state.server, pending, edits) });
+    if (hasChanges(this.state.server, pending, edits)) this.schedule();
+  }
+
+  /** What is not saved yet, or null. */
+  snapshot(): PendingSnapshot | null {
+    const { server, pending, edits } = this.state;
+    if (!Object.keys(pending).length && !edits.length) return null;
+    return { videoId: server.videoId, baseRevision: server.revision, pending, edits, seq: this.seq };
   }
 
   dispose(): void {
     this.disposed = true;
     if (this.timer !== null) this.deps.clearTimer(this.timer);
+    if (this.retryTimer !== null) this.deps.clearTimer(this.retryTimer);
     this.timer = null;
+    this.retryTimer = null;
+  }
+
+  /** A save that failed for a passing reason is tried again by itself, with growing waits. */
+  private scheduleRetry(): void {
+    if (this.disposed || !isTransientError(this.state.error)) return;
+    if (this.retryTimer !== null) this.deps.clearTimer(this.retryTimer);
+    const ms = SAVE_RETRY_MS[Math.min(this.failures, SAVE_RETRY_MS.length - 1)]!;
+    this.failures += 1;
+    this.retryTimer = this.deps.setTimer(() => {
+      this.retryTimer = null;
+      void this.flush();
+    }, ms);
   }
 
   private schedule(): void {
@@ -227,6 +305,7 @@ export class EdlSaver {
           const saved = await this.deps.save(body, this.state.server.revision);
           const pending = ackSaved(this.state.pending, sentSeq, saved);
           const edits = this.state.edits.filter((e) => e.seq > sentSeq);
+          this.failures = 0;
           this.update({ server: saved, pending, edits, local: compose(saved, pending, edits), error: null });
           return;
         } catch (e) {
@@ -257,6 +336,23 @@ export class EdlSaver {
 
   private update(patch: Partial<SaverState>): void {
     this.state = { ...this.state, ...patch };
+    if (this.deps.persist && ('pending' in patch || 'edits' in patch || 'server' in patch)) {
+      const snap = this.snapshot();
+      const key = snap ? JSON.stringify([snap.pending, snap.edits.map((e) => e.seq)]) : '';
+      if (key !== this.lastPersisted) {
+        this.lastPersisted = key;
+        try {
+          this.deps.persist(snap);
+        } catch {
+          // Best effort: the edits are still in memory and on their way to the server.
+        }
+      }
+    }
     if (!this.disposed) this.deps.onChange?.(this.state);
   }
+}
+
+/** Network failures, timeouts, 429 and 5xx: worth trying the same save again. A 400 or 409 is not. */
+export function isTransientError(e: unknown): boolean {
+  return isKiloApiError(e) ? e.isTransient : e !== null && e !== undefined;
 }

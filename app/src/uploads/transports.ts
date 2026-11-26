@@ -33,7 +33,7 @@ async function nativePut(job: UploadJob, cb: TransportCallbacks): Promise<void> 
   });
   try {
     const res = await task.uploadAsync();
-    if (res.status < 200 || res.status >= 300) throw new Error(`Upload failed (${res.status})`);
+    if (res.status < 200 || res.status >= 300) throw httpError(res.status);
   } finally {
     task.release();
   }
@@ -47,7 +47,7 @@ async function webPut(job: UploadJob, cb: TransportCallbacks): Promise<void> {
     xhr.setRequestHeader('Content-Type', job.contentType);
     for (const [k, v] of Object.entries(job.target.headers)) xhr.setRequestHeader(k, v);
     xhr.upload.onprogress = (e) => cb.onProgress(e.loaded, e.total || blob.size);
-    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Upload failed (${xhr.status})`)));
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(httpError(xhr.status)));
     xhr.onerror = () => reject(new Error('Network error during upload'));
     xhr.onabort = () => reject(new Error('Upload cancelled'));
     cb.signal.addEventListener('abort', () => xhr.abort());
@@ -81,7 +81,11 @@ async function tusUpload(job: UploadJob, cb: TransportCallbacks): Promise<void> 
       },
       onProgress: (sent, total) => cb.onProgress(sent, total),
       onSuccess: () => resolve(),
-      onError: (e) => reject(e),
+      // The status tells the queue an expired or refused upload link from a network failure.
+      onError: (e) => {
+        const status = (e as { originalResponse?: { getStatus?: () => number } | null }).originalResponse?.getStatus?.();
+        reject(typeof status === 'number' && status > 0 ? Object.assign(e, { status }) : e);
+      },
     });
     cb.signal.addEventListener('abort', () => {
       void upload.abort();
@@ -89,6 +93,11 @@ async function tusUpload(job: UploadJob, cb: TransportCallbacks): Promise<void> 
     });
     upload.start();
   });
+}
+
+/** An upload answered with an error status; the queue reads `status` (401/403/404/410: ask for a fresh target). */
+function httpError(status: number): Error {
+  return Object.assign(new Error(`Upload failed (${status})`), { status });
 }
 
 /** Mock mode: progress over one to three seconds; nothing is sent. */

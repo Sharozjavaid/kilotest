@@ -8,6 +8,7 @@ import { getApi } from '@/api/client';
 import { errorMessage } from '@/api/errors';
 import { keys, useBatch, useMarkPosted, useVideo } from '@/api/queries';
 import { saveToCameraRoll, shareVideo } from '@/export/media';
+import { revisionCheck } from '@/export/revision';
 import { formatDuration, plural } from '@/lib/format';
 import { VideoModal } from '@/components/VideoModal';
 import { Card, ErrorState, Header, Icon, LoadingBlock, PillButton, ProgressBar, Row, Screen, Text, color, radius, shadow } from '@/ui';
@@ -30,8 +31,9 @@ function notify(title: string, message: string) {
 
 /** Export (mock-up `Export`): final renders per version, save, share, mark as posted, next video. */
 export default function ExportScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, rev } = useLocalSearchParams<{ id: string; rev?: string }>();
   const video = useVideo(id);
+  const reviewed = rev !== undefined && rev !== '' && Number.isInteger(Number(rev)) ? Number(rev) : null;
   const v = video.data;
 
   if (video.isPending) {
@@ -50,10 +52,10 @@ export default function ExportScreen() {
       </Screen>
     );
   }
-  return <ExportBody video={v} />;
+  return <ExportBody video={v} reviewedRevision={reviewed} refetch={() => void video.refetch()} />;
 }
 
-function ExportBody({ video }: { video: VideoDetail }) {
+function ExportBody({ video, reviewedRevision, refetch }: { video: VideoDetail; reviewedRevision: number | null; refetch: () => void }) {
   const qc = useQueryClient();
   const edl = video.edl!;
   const batch = useBatch(video.batchId);
@@ -86,14 +88,20 @@ function ExportBody({ video }: { video: VideoDetail }) {
       setRequestError(e);
     }
   };
+  const check = revisionCheck(edl.revision, reviewedRevision);
+  useEffect(() => {
+    if (check === 'behind') refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [check]);
   useEffect(() => {
     if (requested.current) return;
-    if (video.status === 'ready_for_review') {
+    // Only the revision the creator looked at is exported.
+    if (video.status === 'ready_for_review' && check === 'ok') {
       requested.current = true;
       void createRenders();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [video.status]);
+  }, [video.status, check]);
 
   const allDone = versions.every((x) => x.render?.status === 'done' && x.render.url);
   const anyFailed = versions.some((x) => x.render?.status === 'failed');
@@ -193,6 +201,18 @@ function ExportBody({ video }: { video: VideoDetail }) {
         ))}
         {n === 1 ? <View style={{ flex: 2 }} /> : null}
       </View>
+
+      {check === 'ahead' && video.status === 'ready_for_review' ? (
+        <Card gap={8} testID="revision-changed">
+          <Text variant="body" weight={600} tone="cut">
+            This edit changed since you reviewed it
+          </Text>
+          <Text variant="secondary" tone="muted">
+            Kilo only exports the version you checked. Look over the latest edit, then tap Looks good again.
+          </Text>
+          <PillButton variant="secondary" height={44} label="Review the latest edit" onPress={() => router.replace(`/review/${video.id}`)} />
+        </Card>
+      ) : null}
 
       {requestError || anyFailed ? (
         <Card gap={8}>

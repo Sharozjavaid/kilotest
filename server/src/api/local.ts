@@ -3,7 +3,8 @@ import { Hono } from 'hono';
 import { HttpError } from '../errors.js';
 import { UploadTooLargeError, type LocalStorage } from '../storage/local.js';
 import { DEFAULT_MAX_UPLOAD_BYTES } from '../uploads.js';
-import { contentTypeFor } from '../storage/types.js';
+import { contentTypeFor, parseSourceKey } from '../storage/types.js';
+import type { Db } from '../db/index.js';
 
 const badToken = () => new HttpError(401, 'unauthorized', 'This link is invalid or has expired');
 
@@ -30,12 +31,25 @@ export function parseRange(header: string | undefined, size: number): { start: n
 }
 
 /** Upload and download endpoints for the local storage driver's signed tokens. */
-export function localRoutes(storage: LocalStorage, maxUploadBytes = DEFAULT_MAX_UPLOAD_BYTES): Hono {
+export function localRoutes(storage: LocalStorage, maxUploadBytes = DEFAULT_MAX_UPLOAD_BYTES, db?: Db): Hono {
   const app = new Hono();
+
+  /** An upload target outlives the file it was made for when the video is deleted: refuse those bytes. */
+  const stillWanted = async (key: string): Promise<boolean> => {
+    if (!db) return true;
+    const src = parseSourceKey(key);
+    if (!src) return false;
+    const rows =
+      src.kind === 'clip'
+        ? await db`select 1 from clips where id = ${src.id} and video_id = ${src.videoId} and user_id = ${src.userId} and uploaded_at is null`
+        : await db`select 1 from broll_assets where id = ${src.id} and video_id = ${src.videoId} and user_id = ${src.userId} and uploaded_at is null`;
+    return rows.length > 0;
+  };
 
   app.put('/upload/:token', async (c) => {
     const token = storage.verifyToken(c.req.param('token'), 'put');
     if (!token) throw badToken();
+    if (!(await stillWanted(token.key))) throw new HttpError(404, 'not_found', 'This file is no longer expected: its video was deleted or it is already uploaded');
     const limit = Math.min(token.max ?? maxUploadBytes, maxUploadBytes);
     const tooLarge = () => new HttpError(413, 'file_too_large', `This file is larger than the ${limit} bytes declared for it`);
     const declaredLength = Number(c.req.header('content-length'));
@@ -47,6 +61,11 @@ export function localRoutes(storage: LocalStorage, maxUploadBytes = DEFAULT_MAX_
     } catch (err) {
       if (err instanceof UploadTooLargeError) throw tooLarge();
       throw err;
+    }
+    // Deleted while the bytes were arriving: do not keep them.
+    if (!(await stillWanted(token.key))) {
+      await storage.deleteKeys([token.key]).catch(() => {});
+      throw new HttpError(404, 'not_found', 'This file is no longer expected: its video was deleted');
     }
     return c.body(null, 204);
   });

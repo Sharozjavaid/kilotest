@@ -52,6 +52,31 @@ describe('HTTP API client', () => {
     expect(onUnauthorized).toHaveBeenCalled();
   });
 
+  it('does not sign out when the server could not verify the token (503 auth_unavailable): it is transient', async () => {
+    const onUnauthorized = jest.fn();
+    const api = createHttpApi({
+      baseUrl: 'http://x',
+      getToken: () => 'tok',
+      fetch: fakeFetch(503, { error: { code: 'auth_unavailable', message: 'Sign-in could not be checked right now.' } }),
+      onUnauthorized,
+    });
+    const err = await api.home().catch((e) => e);
+    expect(err).toMatchObject({ status: 503, code: 'auth_unavailable', isTransient: true, isUnauthorized: false });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('sends DELETE /v1/devices on unregister and POST /v1/uploads/targets on reissue', async () => {
+    const f = fakeFetch(204, undefined);
+    const api = createHttpApi({ baseUrl: 'http://x', getToken: () => 'tok', fetch: f });
+    await api.unregisterDevice({ expoPushToken: 'ExponentPushToken[x]' });
+    expect(f.mock.calls[0]![0]).toBe('http://x/v1/devices');
+    expect(f.mock.calls[0]![1]!.method).toBe('DELETE');
+    const g = fakeFetch(200, { clips: [], broll: [] });
+    await createHttpApi({ baseUrl: 'http://x', getToken: () => 'tok', fetch: g }).reissueUploads({ clipIds: ['c1'] });
+    expect(g.mock.calls[0]![0]).toBe('http://x/v1/uploads/targets');
+    expect(JSON.parse(String(g.mock.calls[0]![1]!.body))).toEqual({ clipIds: ['c1'], assetIds: [] });
+  });
+
   it('treats 204 responses as empty', async () => {
     const api = createHttpApi({ baseUrl: 'http://x', getToken: () => null, fetch: fakeFetch(204, undefined) });
     await expect(api.registerDevice({ expoPushToken: 'ExponentPushToken[x]', platform: 'ios' })).resolves.toBeUndefined();

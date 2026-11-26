@@ -3,6 +3,7 @@ import type { BatchDetail, HomeResponse, RenderView, VideoDetail } from '@kilo/e
 import { getApi } from './client';
 import { isKiloApiError } from './errors';
 import { isBusy } from './types';
+import { uploadActivity, type UploadActivity } from '@/uploads/activity';
 
 /** Query keys, in one place so invalidation stays consistent. */
 export const keys = {
@@ -33,13 +34,22 @@ export function createQueryClient(): QueryClient {
   });
 }
 
-export function homeNeedsPolling(home: HomeResponse | undefined): boolean {
+/**
+ * Poll only while something can still move: the server is working (queued,
+ * analysing, rendering), or a video is uploading and this phone still has its files
+ * to send. A video whose uploads all failed (or that waits for files from another
+ * device) stays `uploading` until someone acts, and polling it would never end.
+ */
+export function homeNeedsPolling(home: HomeResponse | undefined, uploads: UploadActivity = uploadActivity()): boolean {
   if (!home) return false;
-  return home.activeBatches.length > 0 || [...home.readyToReview, ...home.recent].some((v) => isBusy(v.status));
+  const batchMoving = home.activeBatches.some(
+    (b) => (b.counts.queued ?? 0) > 0 || (b.counts.analyzing ?? 0) > 0 || ((b.counts.uploading ?? 0) > 0 && uploads.canProgressBatch(b.id)),
+  );
+  return batchMoving || [...home.readyToReview, ...home.recent].some((v) => isBusy(v.status));
 }
 
-export function batchNeedsPolling(batch: BatchDetail | undefined): boolean {
-  return !!batch && batch.videos.some((v) => isBusy(v.status));
+export function batchNeedsPolling(batch: BatchDetail | undefined, uploads: UploadActivity = uploadActivity()): boolean {
+  return !!batch && batch.videos.some((v) => isBusy(v.status) && (v.status !== 'uploading' || uploads.canProgress(v.id)));
 }
 
 export function videoNeedsPolling(video: VideoDetail | undefined): boolean {

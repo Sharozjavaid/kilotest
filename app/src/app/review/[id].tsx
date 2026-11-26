@@ -180,7 +180,8 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
   const requestPreview = async () => {
     setPreviewError(null);
     try {
-      await saver?.flush();
+      // A preview of an older revision than the screen shows would mislead.
+      if (saver && !(await saver.flush())) throw saver.getState().error ?? new Error("Your last changes aren't saved yet.");
       sp.pause();
       const res = await getApi().createRenders(video.id, { quality: 'preview', variantIds: [activeVariant] });
       setPreviewId(res.renders[0]?.id ?? null);
@@ -192,10 +193,26 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
   const previewReady = preview.data?.status === 'done' && !!preview.data.url;
   const previewBusy = !!previewId && !previewReady && preview.data?.status !== 'failed';
 
+  // Export renders what the server has. Leaving before the last taps are saved would export an older
+  // revision than the one on screen, so it waits for the save (retrying passing failures) and says so if it
+  // cannot. The revision reviewed goes along, and Export checks the server still has it.
+  const [leaving, setLeaving] = useState(false);
+  const [blocked, setBlocked] = useState<string | null>(null);
   const looksGood = async () => {
     sp.pause();
-    await saver?.flush();
-    router.push(`/export/${video.id}`);
+    setBlocked(null);
+    setLeaving(true);
+    try {
+      const ok = saver ? await saver.saveUntilDone(3) : true;
+      if (!ok) {
+        setBlocked(`Your last changes aren't saved yet, so Kilo won't export an older version. ${errorMessage(saver?.getState().error)} Kilo keeps trying; tap Looks good again in a moment.`);
+        return;
+      }
+      const revision = saver?.getState().server.revision ?? video.edl.revision;
+      router.push(`/export/${video.id}?rev=${revision}`);
+    } finally {
+      setLeaving(false);
+    }
   };
 
   const saveError = state?.error;
@@ -214,7 +231,7 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
       footer={
         <View style={styles.actions}>
           <PillButton variant="secondary" label="B-roll" style={{ flex: 1 }} onPress={() => router.push(`/broll/${video.id}`)} />
-          <PillButton label="Looks good" height={52} style={{ flex: 2 }} onPress={looksGood} testID="looks-good" />
+          <PillButton label="Looks good" height={52} style={{ flex: 2 }} onPress={looksGood} loading={leaving} testID="looks-good" />
         </View>
       }
     >
@@ -290,6 +307,15 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
           </View>
         </View>
       </View>
+
+      {blocked ? (
+        <View style={styles.notice} testID="save-blocked" accessibilityLiveRegion="assertive">
+          <Icon name="alert" size={16} color={color.cut} />
+          <Text variant="secondary" tone="cut" style={{ flex: 1 }}>
+            {blocked}
+          </Text>
+        </View>
+      ) : null}
 
       {noSpeech ? (
         <View style={styles.notice} testID="no-speech" accessibilityLiveRegion="polite">

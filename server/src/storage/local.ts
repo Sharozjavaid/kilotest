@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { copyFile, mkdir, rename, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -163,5 +163,28 @@ export class LocalStorage implements StorageDriver {
 
   async deletePrefix(prefix: string): Promise<void> {
     await rm(this.pathOf(prefix), { recursive: true, force: true });
+  }
+
+  async listVideoPrefixes(): Promise<{ userId: string; videoId: string; newest: Date | null }[]> {
+    const users = join(this.root, this.bucket, 'users');
+    const out: { userId: string; videoId: string; newest: Date | null }[] = [];
+    const names = async (dir: string) => readdir(dir).catch(() => [] as string[]);
+    // Files' times only: making a directory is not writing a file (an empty prefix falls back to its own time).
+    const newest = async (path: string): Promise<number> => {
+      const s = await stat(path).catch(() => null);
+      if (!s) return 0;
+      if (!s.isDirectory()) return s.mtimeMs;
+      let max = 0;
+      for (const n of await names(path)) max = Math.max(max, await newest(join(path, n)));
+      return max;
+    };
+    for (const userId of await names(users)) {
+      for (const videoId of await names(join(users, userId, 'videos'))) {
+        const dir = join(users, userId, 'videos', videoId);
+        const t = (await newest(dir)) || ((await stat(dir).catch(() => null))?.mtimeMs ?? 0);
+        out.push({ userId, videoId, newest: t ? new Date(t) : null });
+      }
+    }
+    return out;
   }
 }

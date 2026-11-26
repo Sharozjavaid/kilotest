@@ -8,6 +8,7 @@ import { errorMessage } from '@/api/errors';
 import { keys, useVideo } from '@/api/queries';
 import { useEdlSaver } from '@/review/useEdlSaver';
 import { getUploadQueue, useUploadJobs } from '@/uploads/UploadManager';
+import { brollPoll } from '@/broll/polling';
 import { pickFromLibrary, sampleFiles } from '@/newBatch/picker';
 import type { PickedFile } from '@/newBatch/grouping';
 import {
@@ -116,13 +117,30 @@ function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refe
     return m;
   }, [jobs, video.id]);
 
-  // Asset status (processing -> ready) is not a video status, so poll while any asset is on its way.
-  const assetsMoving = assets.some((a) => a.status === 'uploading' || a.status === 'processing');
+  // Asset status (processing -> ready) is not a video status, so poll while any asset is on its way:
+  // not forever, though. An upload that failed here, or a file not on this phone, cannot move; after a
+  // few minutes with nothing changing the screen stops asking and offers a retry instead.
+  const stateKey = assets.map((a) => `${a.id}:${a.status}`).join(',') + '|' + jobs.filter((j) => j.kind === 'broll').map((j) => `${j.id}:${j.status}`).join(',');
+  const [since, setSince] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!assetsMoving) return;
-    const t = setInterval(refetch, 1500);
+    setSince(Date.now());
+  }, [stateKey]);
+  const poll = brollPoll(assets, jobs, since, now);
+  useEffect(() => {
+    if (!poll.poll) return;
+    const t = setInterval(() => {
+      setNow(Date.now());
+      refetch();
+    }, 1500);
     return () => clearInterval(t);
-  }, [assetsMoving, refetch]);
+  }, [poll.poll, refetch]);
+  const stuck = new Map(poll.stuck.map((x) => [x.id, x.canRetry]));
+  const retryAsset = (id: string) => {
+    setSince(Date.now());
+    setNow(Date.now());
+    getUploadQueue().retry([id]);
+  };
 
   const [sheet, setSheet] = useState<{ line: SpokenLine; overlay: Overlay | null } | null>(null);
   const [adding, setAdding] = useState(false);
@@ -236,7 +254,15 @@ function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refe
             Adding {plural(moving.length, 'clip')}
           </Text>
           {moving.map((a, i) => (
-            <AssetRow key={a.id} asset={a} divider={i > 0} upload={uploads.get(a.id)} canRemove={false} onRemove={() => undefined} />
+            <AssetRow
+              key={a.id}
+              asset={a}
+              divider={i > 0}
+              upload={uploads.get(a.id)}
+              stuck={stuck.has(a.id) ? { canRetry: !!stuck.get(a.id), onRetry: () => retryAsset(a.id) } : undefined}
+              canRemove={stuck.has(a.id) && canEdit}
+              onRemove={() => void deleteAsset(a)}
+            />
           ))}
         </Card>
       ) : null}
@@ -406,8 +432,22 @@ function EmptyLineCard({ line, disabled, onAdd }: { line: SpokenLine; disabled: 
   );
 }
 
-function AssetRow({ asset, divider, upload, canRemove, onRemove }: { asset: BrollAssetView; divider: boolean; upload?: number; canRemove: boolean; onRemove: () => void }) {
-  const status = assetStatus(asset, upload);
+function AssetRow({
+  asset,
+  divider,
+  upload,
+  canRemove,
+  onRemove,
+  stuck,
+}: {
+  asset: BrollAssetView;
+  divider: boolean;
+  upload?: number;
+  canRemove: boolean;
+  onRemove: () => void;
+  stuck?: { canRetry: boolean; onRetry: () => void };
+}) {
+  const status = stuck ? (stuck.canRetry ? 'Upload stopped' : 'Not uploaded from this phone') : assetStatus(asset, upload);
   return (
     <View style={[styles.assetRow, divider && styles.divider]} testID={`bin-${asset.id}`}>
       <Thumb uri={asset.status === 'ready' ? asset.thumbnailUrl : null} width={36} height={48} />
@@ -418,8 +458,11 @@ function AssetRow({ asset, divider, upload, canRemove, onRemove }: { asset: Brol
         <Text variant="label" tone={asset.status === 'failed' ? 'cut' : 'muted'}>
           {status}
         </Text>
-        {asset.status === 'uploading' && upload !== undefined ? <ProgressBar value={upload} height={3} accessibilityLabel={`${asset.filename} ${status}`} /> : null}
+        {asset.status === 'uploading' && upload !== undefined && !stuck ? <ProgressBar value={upload} height={3} accessibilityLabel={`${asset.filename} ${status}`} /> : null}
       </View>
+      {stuck?.canRetry ? (
+        <PillButton variant="secondary" height={44} label="Retry" onPress={stuck.onRetry} accessibilityLabel={`Retry uploading ${assetTitle(asset)}`} testID={`retry-${asset.id}`} />
+      ) : null}
       {canRemove ? (
         <Pressable onPress={onRemove} accessibilityRole="button" accessibilityLabel={`Delete ${assetTitle(asset)}`} style={styles.iconHit} testID={`delete-${asset.id}`}>
           <Icon name="close" size={16} color={color.muted} />

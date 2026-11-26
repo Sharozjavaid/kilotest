@@ -5,6 +5,7 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import { getApi } from '@/api/client';
+import { onBeforeSignOut } from '@/auth/signOutHooks';
 import { routeForPush } from './routing';
 
 Notifications.setNotificationHandler({
@@ -45,15 +46,26 @@ export async function getPushToken(): Promise<string | null> {
 export function PushManager() {
   useEffect(() => {
     let cancelled = false;
+    let registered: string | null = null;
+    // On sign-out, before the session goes: the server keeps a token with the account that
+    // registered it until that account lets go, so the next person to sign in here can take it.
+    const offSignOut = onBeforeSignOut(async () => {
+      if (registered) await getApi().unregisterDevice({ expoPushToken: registered });
+    });
     getPushToken()
-      .then((token) => {
+      .then(async (token) => {
         if (!token || cancelled) return;
         const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web';
-        return getApi().registerDevice({ expoPushToken: token, platform });
+        await getApi().registerDevice({ expoPushToken: token, platform });
+        registered = token;
       })
       .catch((e) => console.warn('Push registration failed', e));
 
-    if (Platform.OS === 'web') return () => void (cancelled = true);
+    if (Platform.OS === 'web')
+      return () => {
+        cancelled = true;
+        offSignOut();
+      };
 
     const open = (response: Notifications.NotificationResponse | null) => {
       const route = routeForPush(response?.notification.request.content.data);
@@ -64,6 +76,7 @@ export function PushManager() {
     const sub = Notifications.addNotificationResponseReceivedListener(open);
     return () => {
       cancelled = true;
+      offSignOut();
       sub.remove();
     };
   }, []);

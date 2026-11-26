@@ -27,6 +27,7 @@ describe('startServer (dev mode: API and worker in one process)', () => {
     // PORT=0 picks a free port; the public URL is fixed up below once it is known.
     const config = loadConfig({
       NODE_ENV: 'test',
+      KILO_AUTH: 'dev',
       DATABASE_URL: url.toString(),
       PORT: '0',
       KILO_STORAGE_DIR: join(dir, 'storage'),
@@ -50,7 +51,11 @@ describe('startServer (dev mode: API and worker in one process)', () => {
     const base = `http://127.0.0.1:${(server.http!.address() as AddressInfo).port}`;
     expect(await (await fetch(`${base}/v1/health`)).json()).toEqual({ ok: true });
     const schedules = await server.queue.boss.getSchedules();
-    expect(schedules.map((s) => [s.name, s.cron])).toEqual([['goal.reminders', '0 * * * *']]);
+    expect(schedules.map((s) => [s.name, s.cron]).sort()).toEqual([
+      ['goal.reminders', '0 * * * *'],
+      ['kilo.recover', '*/5 * * * *'],
+      ['kilo.sweep', '41 * * * *'],
+    ]);
     const user = randomUUID();
     const headers = { authorization: `Bearer dev:${user}`, 'content-type': 'application/json' };
     const m = manifest('routine');

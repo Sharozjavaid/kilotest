@@ -18,10 +18,10 @@ import {
 } from '@kilo/edl';
 import { isUuid } from '../auth.js';
 import type { Db } from '../db/index.js';
-import { HttpError, invalidRequest, invalidState, notFound } from '../errors.js';
+import { HttpError, invalidRequest, invalidState, notFound, tooMany } from '../errors.js';
 import { JOBS } from '../queue.js';
 import { DEFAULT_MAX_UPLOAD_BYTES, uploadLimit } from '../uploads.js';
-import { extensionFor, keys } from '../storage/types.js';
+import { keys, mediaExtension } from '../storage/types.js';
 import {
   currentEdl,
   renderView,
@@ -33,7 +33,59 @@ import {
   type RenderRow,
   type VideoRow,
 } from '../views.js';
-import { pathId, parseBody, type AppDeps, type Env } from './app.js';
+import { limitsOf, pathId, parseBody, type AppDeps, type Env } from './app.js';
+import { analyzePriority, lockUser, renderPriority, unsupportedFile } from './batches.js';
+
+/** Most a saved EDL may hold. Deciders stay far below; these only bound what a client can make the renderer do. */
+export const EDL_LIMITS = { segments: 4000, overlays: 40, variantOverlays: 10, variants: 5 } as const;
+
+/**
+ * Builds the EDL to store from a client's save. The cut points are the server's:
+ * segment ids, clips and times must match the stored EDL exactly, and a client may
+ * change only `keep`, `userOverride`, `zoom` and `transitionIn` of a segment, the
+ * overlays, the captions, and each variant's segment order and overlays. Everything
+ * else (video, frame rate, settings, decider, segment reasons and text, variant
+ * labels) is copied from the stored EDL. Returns the problems instead when the save
+ * changes what it may not.
+ */
+export function mergeClientEdl(stored: Edl, client: Edl): { edl: Edl; problems: string[] } {
+  const problems: string[] = [];
+  if (client.segments.length > EDL_LIMITS.segments) problems.push(`An edit has at most ${EDL_LIMITS.segments} segments`);
+  if (client.overlays.length > EDL_LIMITS.overlays) problems.push(`An edit has at most ${EDL_LIMITS.overlays} overlays`);
+  if (client.variants.length > EDL_LIMITS.variants) problems.push(`An edit has at most ${EDL_LIMITS.variants} variants`);
+  for (const v of client.variants) {
+    if (v.overlays.length > EDL_LIMITS.variantOverlays) problems.push(`Variant ${v.id} has more than ${EDL_LIMITS.variantOverlays} overlays`);
+  }
+  if (problems.length) return { edl: stored, problems };
+  const sameCut =
+    client.segments.length === stored.segments.length &&
+    client.segments.every((s, i) => {
+      const t = stored.segments[i]!;
+      return s.id === t.id && s.clipId === t.clipId && Math.abs(s.start - t.start) < 1e-6 && Math.abs(s.end - t.end) < 1e-6;
+    });
+  if (!sameCut) problems.push('Segments cannot be added, removed, reordered or re-timed; a save may only keep or cut them');
+  const storedVariants = new Map(stored.variants.map((v) => [v.id, v]));
+  const clientIds = client.variants.map((v) => v.id);
+  if (new Set(clientIds).size !== clientIds.length) problems.push('Duplicate variant id');
+  if (clientIds.length !== storedVariants.size || clientIds.some((id) => !storedVariants.has(id))) {
+    problems.push('Variants cannot be added or removed in a save; replan to make new ones');
+  }
+  if (problems.length) return { edl: stored, problems };
+  const edl: Edl = {
+    ...stored,
+    segments: stored.segments.map((t, i) => {
+      const s = client.segments[i]!;
+      return { ...t, keep: s.keep, userOverride: s.userOverride, zoom: s.zoom, transitionIn: s.transitionIn };
+    }),
+    overlays: client.overlays,
+    captions: client.captions,
+    variants: client.variants.map((v) => {
+      const t = storedVariants.get(v.id)!;
+      return { ...t, segmentOrder: v.segmentOrder, overlays: v.overlays };
+    }),
+  };
+  return { edl, problems };
+}
 
 /** Removes every overlay (base and per-variant) that shows the given B-roll asset. */
 export function withoutAsset(edl: Edl, assetId: string): Edl {
@@ -50,6 +102,7 @@ async function edlProblems(db: Db, videoId: string, edl: Edl): Promise<string[]>
   const problems: string[] = [];
   if (edl.videoId !== videoId) problems.push('edl.videoId does not match the video');
   const clips = await db<ClipRow[]>`select * from clips where video_id = ${videoId} and info is not null`;
+  // validateEdl covers duplicate ids, unknown anchors and duplicate_variant_segment; checkOverlayRules is below.
   problems.push(...validateEdl(edl, clips.map((c) => c.info!)).map((i) => i.message));
   const ready = new Set(
     (await db<{ id: string }[]>`select id from broll_assets where video_id = ${videoId} and status = 'ready'`).map((r) => r.id),
@@ -74,6 +127,7 @@ async function edlProblems(db: Db, videoId: string, edl: Edl): Promise<string[]>
 
 export function videoRoutes(deps: AppDeps): Hono<Env> {
   const { db, storage, queue } = deps;
+  const limits = limitsOf(deps);
   const app = new Hono<Env>();
 
   /** Loads a video the user owns, optionally locking it, or throws 404. */
@@ -121,8 +175,9 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
     await db.begin(async (tx) => {
       const video = await own(tx, userId, id, true);
       if (video.status !== 'failed') throw invalidState(`Only a failed video can be retried (status is ${video.status})`);
+      const priority = await analyzePriority(tx, userId, id);
       await tx`update videos set status = 'queued', error = null, progress = 0, updated_at = now() where id = ${id}`;
-      await queue.send(JOBS.analyze, { videoId: id }, tx);
+      await queue.send(JOBS.analyze, { videoId: id }, tx, { priority });
     });
     return c.json(await summaryOf(userId, id));
   });
@@ -141,17 +196,14 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
       if (req.baseRevision !== current.revision) {
         throw new HttpError(409, 'revision_conflict', `The edit has changed since revision ${req.baseRevision}; reload it`);
       }
-      const problems = await edlProblems(tx, id, req.edl);
+      if (req.edl.videoId !== id) throw invalidRequest('edl.videoId does not match the video');
+      // What the client may not change stays as stored: the video, its frame rate, the settings it was made with,
+      // who decided it, and every cut point.
+      const merged = mergeClientEdl(current.edl, req.edl);
+      if (merged.problems.length) throw invalidRequest(merged.problems.slice(0, 5).join('; '));
+      const problems = await edlProblems(tx, id, merged.edl);
       if (problems.length) throw invalidRequest(problems.slice(0, 5).join('; '));
-      // What the client may not change stays as stored: the video, its frame rate, the settings it was made with, who decided it.
-      const edl: Edl = {
-        ...req.edl,
-        videoId: current.edl.videoId,
-        fps: current.edl.fps,
-        settings: current.edl.settings,
-        decidedBy: current.edl.decidedBy,
-        revision: current.revision + 1,
-      };
+      const edl: Edl = { ...merged.edl, revision: current.revision + 1 };
       await tx`insert into edls (video_id, revision, user_id, edl, author) values (${id}, ${edl.revision}, ${userId}, ${tx.json(edl as never)}, 'user')`;
       await tx`
         update videos set updated_at = now(),
@@ -170,6 +222,7 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
     const maxBytes = deps.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
     for (const a of req.assets) {
       if (a.sizeBytes > maxBytes) throw invalidRequest(`${a.filename} is larger than the ${maxBytes}-byte limit`);
+      if (!mediaExtension(a.filename, a.contentType, 'broll')) throw unsupportedFile('', a.filename, 'broll');
     }
     const created: { id: string; key: string; type: string; size: number }[] = [];
     await db.begin(async (tx) => {
@@ -177,7 +230,7 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
       if (video.status === 'failed') throw invalidState('Retry the video before adding B-roll');
       for (const asset of req.assets) {
         const assetId = randomUUID();
-        const ext = extensionFor(asset.filename, asset.contentType);
+        const ext = mediaExtension(asset.filename, asset.contentType, 'broll')!;
         await tx`
           insert into broll_assets (id, user_id, video_id, kind, filename, content_type, size_bytes, ext, initial)
           values (${assetId}, ${userId}, ${id}, ${asset.kind}, ${asset.filename}, ${asset.contentType}, ${asset.sizeBytes}, ${ext}, false)`;
@@ -236,8 +289,18 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
         throw invalidState(`A video that is ${video.status} cannot be replanned`);
       }
       if (!(await currentEdl(tx, id))) throw invalidState('The video has no edit yet');
+      if (limits.replansPerHour > 0) {
+        const [r] = await tx<{ n: number }[]>`
+          select count(*)::int as n from usage_events
+          where user_id = ${userId} and kind = 'replan' and video_id = ${id} and at > now() - interval '1 hour'`;
+        if (Number(r?.n) >= limits.replansPerHour) {
+          throw tooMany('too_many_replans', `This video was re-planned ${limits.replansPerHour} times in the last hour. Try again later.`);
+        }
+      }
+      await tx`insert into usage_events (user_id, kind, video_id) values (${userId}, 'replan', ${id})`;
+      const priority = await analyzePriority(tx, userId, id);
       await tx`update videos set status = 'analyzing', error = null, progress = 0, updated_at = now() where id = ${id}`;
-      await queue.send(JOBS.replan, { videoId: id, passes: [...new Set(req.passes)] }, tx);
+      await queue.send(JOBS.replan, { videoId: id, passes: [...new Set(req.passes)] }, tx, { priority });
     });
     return c.json(await summaryOf(userId, id));
   });
@@ -247,6 +310,7 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
     const id = pathId(c, 'id', 'Video');
     const req = await parseBody(c, CreateRenderRequest);
     const rows = await db.begin(async (tx) => {
+      await lockUser(tx, userId);
       const video = await own(tx, userId, id, true);
       if (!['ready_for_review', 'done', 'rendering'].includes(video.status)) {
         throw invalidState(`A video that is ${video.status} cannot be rendered`);
@@ -261,14 +325,32 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
       const unknown = variantIds.filter((v) => v !== null && !known.has(v));
       if (unknown.length) throw invalidRequest(`variantIds: unknown variant ${unknown.join(', ')}`);
       const out: RenderRow[] = [];
+      const fresh: (string | null)[] = [];
       for (const variantId of variantIds) {
+        // The same cut of the same revision already on its way: hand that one back instead of rendering it twice.
+        const [existing] = await tx<RenderRow[]>`
+          select * from renders
+          where video_id = ${id} and quality = ${req.quality} and edl_revision = ${current.revision}
+            and variant_id is not distinct from ${variantId} and status in ('queued', 'rendering')
+          order by created_at desc limit 1`;
+        if (existing) out.push(existing);
+        else fresh.push(variantId);
+      }
+      if (fresh.length && limits.queuedRenders > 0) {
+        const [q] = await tx<{ n: number }[]>`select count(*)::int as n from renders where user_id = ${userId} and status in ('queued', 'rendering')`;
+        if (Number(q?.n) + fresh.length > limits.queuedRenders) {
+          throw tooMany('too_many_renders', `You have ${Number(q?.n)} exports waiting; up to ${limits.queuedRenders} at a time. Wait for some to finish.`);
+        }
+      }
+      let priority = await renderPriority(tx, userId);
+      for (const variantId of fresh) {
         const renderId = randomUUID();
         const [row] = await tx<RenderRow[]>`
           insert into renders (id, user_id, video_id, variant_id, quality, edl_revision)
           values (${renderId}, ${userId}, ${id}, ${variantId}, ${req.quality}, ${current.revision})
           returning *`;
         out.push(row!);
-        await queue.send(JOBS.render, { renderId }, tx);
+        await queue.send(JOBS.render, { renderId }, tx, { priority: priority-- });
       }
       if (req.quality === 'final') {
         await tx`update videos set status = 'rendering', error = null, updated_at = now() where id = ${id}`;
@@ -281,7 +363,9 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
 
   app.get('/renders/:id', async (c) => {
     const id = pathId(c, 'id', 'Render');
-    const [row] = await db<RenderRow[]>`select * from renders where id = ${id} and user_id = ${c.get('userId')}`;
+    const [row] = await db<RenderRow[]>`
+      select r.* from renders r join videos v on v.id = r.video_id and v.user_id = r.user_id
+      where r.id = ${id} and r.user_id = ${c.get('userId')}`;
     if (!row) throw notFound('Render');
     return c.json(await renderView(storage, row));
   });
@@ -292,7 +376,7 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
     const req = await parseBody(c, MarkPostedRequest);
     await db.begin(async (tx) => {
       await own(tx, userId, id, true);
-      const [render] = await tx`select 1 from renders where video_id = ${id} and quality = 'final' and status = 'done' limit 1`;
+      const [render] = await tx`select 1 from renders where video_id = ${id} and user_id = ${userId} and quality = 'final' and status = 'done' limit 1`;
       if (!render) throw invalidState('Export the video before marking it posted');
       const now = deps.now?.() ?? new Date();
       await tx`insert into posts (id, user_id, video_id, platform, posted_at) values (${randomUUID()}, ${userId}, ${id}, ${req.platform}, ${now})`;

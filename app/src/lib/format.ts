@@ -10,8 +10,17 @@ export function plural(n: number, one: string, many = `${one}s`): string {
 export function reviewSubtitle(v: VideoSummary): string {
   if (v.keptSec == null || v.totalSec == null) return statusLabel(v.status);
   const head = `${formatDuration(v.keptSec)} kept of ${formatDuration(v.totalSec)}`;
-  if (v.variantCount > 1) return `${head} · ${plural(v.variantCount, 'variation')}`;
-  return `${head} · ${plural(v.cutCount ?? 0, 'cut')}`;
+  const line = v.variantCount > 1 ? `${head} · ${plural(v.variantCount, 'variation')}` : `${head} · ${plural(v.cutCount ?? 0, 'cut')}`;
+  const notice = compactNotice(v.notice);
+  return notice ? `${line} · ${notice}` : line;
+}
+
+/** A video's notice, short enough for a list row (the Review screen shows it in full). */
+export function compactNotice(notice: string | null | undefined): string | null {
+  if (!notice) return null;
+  if (/hear any speech|no speech/i.test(notice)) return 'No speech heard';
+  const first = notice.split(/(?<=[.!?])\s/)[0]!.trim();
+  return first.length > 40 ? `${first.slice(0, 39).trimEnd()}…` : first;
 }
 
 export function statusLabel(s: VideoStatus): string {

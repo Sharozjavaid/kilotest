@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   AddBrollResponse,
+  CompleteUploadsResponse,
   ApiError,
   BatchDetail,
   CreateBatchResponse,
@@ -78,9 +79,15 @@ describe('every route: validation, unknown ids, other users, wrong state', () =>
     const clipId = uploading.videos[0]!.clips[0]!.clipId;
     await a.err(400, 'invalid_request', 'POST', '/v1/uploads/complete', { clipIds: 'x' });
     await a.err(400, 'invalid_request', 'POST', '/v1/uploads/complete', {});
-    await a.err(404, 'not_found', 'POST', '/v1/uploads/complete', { clipIds: [missing] });
-    await a.err(404, 'not_found', 'POST', '/v1/uploads/complete', { clipIds: ['nope'] });
-    await b.err(404, 'not_found', 'POST', '/v1/uploads/complete', { clipIds: [clipId] });
+    // One result per id, 200 even when every id fails.
+    const results = async (client: typeof a, body: object) => {
+      const res = await client.ok(CompleteUploadsResponse, 'POST', '/v1/uploads/complete', body);
+      return res.results.map((r) => [r.id, r.kind, r.ok, r.code ?? null]);
+    };
+    expect(await results(a, { clipIds: [missing] })).toEqual([[missing, 'clip', false, 'not_found']]);
+    expect(await results(a, { clipIds: ['nope'] })).toEqual([['nope', 'clip', false, 'not_found']]);
+    expect(await results(b, { clipIds: [clipId] })).toEqual([[clipId, 'clip', false, 'not_found']]);
+    expect(await results(a, { assetIds: [missing] })).toEqual([[missing, 'asset', false, 'not_found']]);
     // Bytes not there yet: the batch was created with targets but nothing was PUT.
     const empty = await a.ok(
       CreateBatchResponse,
@@ -90,7 +97,8 @@ describe('every route: validation, unknown ids, other users, wrong state', () =>
       201,
     );
     expect(empty.videos[0]!.clips[0]!.upload.objectKey).toMatch(/\/source\.mov$/);
-    await a.err(400, 'invalid_request', 'POST', '/v1/uploads/complete', { clipIds: [empty.videos[0]!.clips[0]!.clipId] });
+    const emptyId = empty.videos[0]!.clips[0]!.clipId;
+    expect(await results(a, { clipIds: [emptyId] })).toEqual([[emptyId, 'clip', false, 'not_uploaded']]);
   });
 
   it('GET /v1/videos', async () => {
@@ -292,10 +300,19 @@ describe('every route: validation, unknown ids, other users, wrong state', () =>
     await a.err(400, 'invalid_request', 'POST', '/v1/devices', { platform: 'ios' });
     expect((await a.req('POST', '/v1/devices', { expoPushToken: 'ExponentPushToken[a]', platform: 'ios' })).status).toBe(204);
     expect((await a.req('POST', '/v1/devices', { expoPushToken: 'ExponentPushToken[a]', platform: 'ios' })).status).toBe(204);
-    // A token that moves to another account belongs to that account only.
+    // Knowing a token is not enough to take it: it stays with the account that registered it.
     expect((await b.req('POST', '/v1/devices', { expoPushToken: 'ExponentPushToken[a]', platform: 'android' })).status).toBe(204);
-    const rows = await env.sql`select user_id, platform from devices`;
-    expect(rows.map((r) => [r.user_id, r.platform])).toEqual([[b.userId, 'android']]);
+    const rows = async () => (await env.sql`select user_id, platform from devices`).map((r) => [r.user_id, r.platform]);
+    expect(await rows()).toEqual([[a.userId, 'ios']]);
+    // Someone else's sign-out does not remove it either; only its owner's does.
+    expect((await b.req('DELETE', '/v1/devices', { expoPushToken: 'ExponentPushToken[a]' })).status).toBe(204);
+    expect(await rows()).toEqual([[a.userId, 'ios']]);
+    await a.err(400, 'invalid_request', 'DELETE', '/v1/devices', {});
+    expect((await a.req('DELETE', '/v1/devices', { expoPushToken: 'ExponentPushToken[a]' })).status).toBe(204);
+    expect(await rows()).toEqual([]);
+    // Once let go of (the app signs out first), the same phone can register it for the next account.
+    expect((await b.req('POST', '/v1/devices', { expoPushToken: 'ExponentPushToken[a]', platform: 'android' })).status).toBe(204);
+    expect(await rows()).toEqual([[b.userId, 'android']]);
   });
 
   it('GET /v1/home', async () => {

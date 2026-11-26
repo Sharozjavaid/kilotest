@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
   RegisterDeviceRequest,
+  UnregisterDeviceRequest,
   SaveStyleRequest,
   UpdateGoalRequest,
   type HomeResponse,
@@ -84,14 +85,31 @@ export function userRoutes(deps: AppDeps): Hono<Env> {
     return c.body(null, 204);
   });
 
+  /**
+   * A token stays with the account that registered it. Another account can take it
+   * over only after the first one let go of it (`DELETE /devices`, which the app
+   * sends on sign-out); until then a second registration is a quiet no-op, so
+   * knowing someone's push token is not enough to receive their notifications.
+   */
   app.post('/devices', async (c) => {
     const userId = c.get('userId');
     const req = await parseBody(c, RegisterDeviceRequest);
     if (!req.expoPushToken.trim()) throw invalidRequest('expoPushToken: required');
-    await db`
+    const rows = await db`
       insert into devices (id, user_id, expo_push_token, platform)
       values (${randomUUID()}, ${userId}, ${req.expoPushToken}, ${req.platform})
-      on conflict (expo_push_token) do update set user_id = excluded.user_id, platform = excluded.platform, updated_at = now()`;
+      on conflict (expo_push_token) do update set platform = excluded.platform, updated_at = now()
+        where devices.user_id = excluded.user_id
+      returning id`;
+    if (!rows.length) deps.log.warn('push token already registered to another account; not moved', { userId });
+    return c.body(null, 204);
+  });
+
+  /** Sign-out: this device stops getting the caller's notifications. Only the caller's own registration is removed. */
+  app.delete('/devices', async (c) => {
+    const userId = c.get('userId');
+    const req = await parseBody(c, UnregisterDeviceRequest);
+    await db`delete from devices where expo_push_token = ${req.expoPushToken} and user_id = ${userId}`;
     return c.body(null, 204);
   });
 

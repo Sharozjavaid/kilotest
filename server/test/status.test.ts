@@ -24,7 +24,8 @@ function controllable(stockUrl?: string) {
   const calls: Record<string, number> = {};
   const faults: Faults = {};
   const analyze = Object.fromEntries(
-    Object.entries(base.analyze).map(([name, fn]) => [
+    // decideEditWithNotices is left out so faults injected on decideEdit apply (the worker falls back to it).
+    Object.entries(base.analyze).filter(([name]) => name !== 'decideEditWithNotices').map(([name, fn]) => [
       name,
       async (input: unknown) => {
         calls[name] = (calls[name] ?? 0) + 1;
