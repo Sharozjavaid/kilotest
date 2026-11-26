@@ -45,5 +45,5 @@ await templates.renderGraphic({ template: 'stat-callout', props: { value: '10 se
 
 ## Licences
 
-- **Remotion is not free for companies.** Its licence allows free use for individuals and companies of up to three people; any larger company needs a paid Remotion Company License before Kilo ships (see https://www.remotion.dev/license). Set `REMOTION_LICENSE_KEY` once there is one.
+- **Remotion licence.** Kilo uses Remotion under its free licence, which covers individuals and companies of up to three people, so no key is set. If the company grows past three people it needs a paid Remotion Company License (see https://www.remotion.dev/license); set `REMOTION_LICENSE_KEY` then.
 - Inter (`assets/fonts/`) is under the SIL Open Font License 1.1; the licence is in `assets/fonts/LICENSE.txt`.

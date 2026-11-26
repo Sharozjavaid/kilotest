@@ -65,7 +65,7 @@ One TypeScript monorepo, so the app, the server and the graphics templates share
 | Transcription | Hosted speech-to-text with word timestamps | Chosen in phase 0 by testing on real footage. Must keep filler words. |
 | Edit decisions | Claude, structured output | Start on the most capable model (`claude-fable-5-2`) to prove quality, then test `claude-sonnet-5-5` for batch volume. |
 | B-roll understanding | Claude vision on sampled frames | Produces a one-line description per clip. The creator labels nothing. |
-| Motion graphics | Remotion (React components rendered to video) | Check its company licence terms before launch. |
+| Motion graphics | Remotion (React components rendered to video) | Used under its free licence: individuals and companies of up to three people. A paid licence is needed only past that size. |
 | Notifications | Expo push | Batch finished, weekly goal reminder. |
 
 ### Repo layout
@@ -110,7 +110,7 @@ Everything below is built and passes its checks on synthetic recordings, in a br
 | 1 | Sign-in, upload queue, batch screen, review with scrubbing and tap-to-fix, export, push registration. | A device build: background uploads, saving to the camera roll, the share sheet, push delivery. Supabase sign-in and storage on a real project. |
 | 2 | Script entry, teleprompter, one clip per line with keep or delete, 60 fps capture request. | 60 fps capture on real phones (the browser version is what was tested). |
 | 3 | B-roll bin, descriptions, placement, slow pan, swap and remove. | Claude's descriptions and placement with a real key; the offline decider was used in tests. |
-| 4 | Five templates in three themes. | Remotion licence terms for the company. |
+| 4 | Five templates in three themes. | Nothing outside this repository. Remotion's free licence covers a solo developer. |
 | 5 | Hook variations, three modes, optional burned-in captions. | Whether the variations read as distinct on real footage. |
 | 6 | Weekly goal, reminders, stock B-roll lookup. | Direct posting is not built: it needs the platforms' app review. Export goes to the camera roll and the share sheet. |
 

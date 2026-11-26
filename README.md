@@ -68,6 +68,7 @@ Nothing in this list has been run from this repository yet; each is written and 
 | A container host | The API and the worker (`server/Dockerfile`: Node, ffmpeg, Chromium, fonts) | see `server/.env.example` |
 | An Expo account and device builds | The phone app, push notifications | `eas init`, then `eas build`; see `app/README.md` |
 | Optional: a Pexels key | Stock B-roll | `PEXELS_API_KEY` |
-| A Remotion company licence, if the company has more than three people | Motion graphics | `REMOTION_LICENSE_KEY` |
+
+Motion graphics use Remotion under its free licence, which covers individuals and companies of up to three people. No key is needed. A paid company licence (`REMOTION_LICENSE_KEY`) only becomes necessary if the company grows past three people.
 
 Before trusting the cuts, run the plan's first test on about ten real recordings. The cut accuracy numbers so far come from computer-generated speech.
