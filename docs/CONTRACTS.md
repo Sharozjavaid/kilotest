@@ -84,7 +84,7 @@ Base path `/v1`. JSON in and out. Bodies are the zod schemas in `packages/edl/sr
 |---|---|---|---|
 | `GET /v1/health` | | `{ ok: true }` | No auth. |
 | `GET /v1/home` | | `HomeResponse` | |
-| `POST /v1/batches` | `CreateBatchRequest` | `CreateBatchResponse` | Creates the batch, videos, clips and B-roll rows and an upload target for each file. |
+| `POST /v1/batches` | `CreateBatchRequest` | `CreateBatchResponse` | Creates the batch, videos, clips and B-roll rows and an upload target for each file. 400 `unsupported_file_type` for a file extension outside the allowed list. |
 | `GET /v1/batches/:id` | | `BatchDetail` | |
 | `POST /v1/uploads/complete` | `CompleteUploadsRequest` | `CompleteUploadsResponse` | Answers 200 with a result per id; one bad id never fails the others. A video is queued once every clip and B-roll file it was created with is in. |
 | `POST /v1/uploads/targets` | `ReissueUploadsRequest` | `ReissueUploadsResponse` | Fresh upload targets for files not yet in, after a target expired. |
@@ -96,14 +96,14 @@ Base path `/v1`. JSON in and out. Bodies are the zod schemas in `packages/edl/sr
 | `POST /v1/videos/:id/broll` | `AddBrollRequest` | `AddBrollResponse` | Files added after analysis are ingested on `uploads/complete`; placement waits for a replan. |
 | `DELETE /v1/videos/:id/broll/:assetId` | | 204 | Also removes overlays that use it. |
 | `POST /v1/videos/:id/replan` | `ReplanRequest` | `VideoSummary` | Status goes to `analyzing`, then back to `ready_for_review`. |
-| `POST /v1/videos/:id/renders` | `CreateRenderRequest` | `CreateRenderResponse` | `final` sets the video to `rendering`, then `done` when every final render finishes. `preview` does not change video status. |
+| `POST /v1/videos/:id/renders` | `CreateRenderRequest` | `CreateRenderResponse` | `final` sets the video to `rendering`, then `done` when every final render finishes. `preview` does not change video status. A request for a cut whose render of the same revision and quality is still queued or running gets that render back. |
 | `GET /v1/renders/:id` | | `RenderView` | |
 | `POST /v1/videos/:id/posted` | `MarkPostedRequest` | `VideoSummary` | Counts toward the weekly goal. |
 | `GET /v1/goal` / `PUT /v1/goal` | `UpdateGoalRequest` | `GoalView` | |
 | `GET /v1/styles` | | `ListStylesResponse` | |
 | `POST /v1/styles`, `PUT /v1/styles/:id` | `SaveStyleRequest` | `Style` | |
 | `DELETE /v1/styles/:id` | | 204 | |
-| `POST /v1/devices` | `RegisterDeviceRequest` | 204 | |
+| `POST /v1/devices` | `RegisterDeviceRequest` | 204 | A token registered to another account is not moved. |
 | `DELETE /v1/devices` | `UnregisterDeviceRequest` | 204 | Called on sign-out. Only removes a token registered to the caller. |
 
 Local storage driver only: `PUT /v1/local/upload/:token` (raw bytes) and `GET /v1/local/file/:token` (supports `Range`). These are the URLs the driver hands out as upload targets and signed downloads.
@@ -129,14 +129,29 @@ Rules the server enforces, which the app must expect:
 - A B-roll asset that is not yet `ready` has null width, height and duration and an empty description.
 - `sizeBytes` must be the file's exact size. A declared size over `KILO_MAX_UPLOAD_BYTES` (default 2 GiB) is refused at creation; a body larger than declared is stopped with 413 `file_too_large`; `uploads/complete` answers 400 and deletes the object when the stored size does not match.
 - Overlays in a saved EDL must satisfy `checkOverlayRules` from `@kilo/edl`: on the base cut no two overlays overlap and no B-roll starts in the first two seconds (the hook stays on the speaker). Overlays that belong to a variant, such as its hook title, are not checked. A save that breaks this answers 400. Deciders and the app's overlay editor use the same function.
-- On save the server keeps `videoId`, `fps`, `settings` and `decidedBy` from the stored EDL; a client cannot change them.
+- A save may change only: each segment's `keep`, `userOverride`, `zoom` and `transitionIn`; the overlays; the captions; and each variant's `segmentOrder` and overlays. Segment ids, clips and times must match the stored EDL exactly, and everything else (`videoId`, `fps`, `settings`, `decidedBy`, segment text and reasons, variant ids and labels) is copied from the stored EDL. Anything else answers 400.
+- A saved EDL holds at most 4000 segments, 40 overlays, 5 variants and 10 overlays per variant, and a variant may list a segment only once.
+- File types. Clips: `mp4`, `mov`, `m4v`, `webm`, `mkv`, `3gp`. B-roll: those, plus `jpg`, `jpeg`, `png`, `webp`, `heic`. Anything else answers 400 `unsupported_file_type`.
+- JSON request bodies over `KILO_MAX_BODY_BYTES` (default 2 MiB) answer 413 `body_too_large`.
+- Per-user limits answer 429: `too_many_active_videos` (`KILO_MAX_ACTIVE_VIDEOS`, default 150 uploading, queued or analysing), `too_many_renders` (`KILO_MAX_QUEUED_RENDERS`, default 30 queued or rendering), `too_many_replans` (`KILO_MAX_REPLANS_PER_HOUR`, default 12 per video), `too_many_batches` (`KILO_MAX_BATCHES_PER_DAY`, default 40). Setting one to 0 turns it off.
+- Jobs are queued so users take turns: a 30-video batch does not hold up another user's single video.
+- `VideoSummary.notice` carries a short message when the video was analysed but something is worth telling the user, such as no speech being heard; null otherwise.
+- A failed clip or render carries the pipeline's own user message (unsupported file, or took too long) rather than a generic one.
+- Deleting a video stops its jobs and removes its files. Storage left with no matching video is swept after `KILO_SWEEP_GRACE_SEC` (default 6 hours).
 
 ### Auth
 
 `Authorization: Bearer <token>`.
 
-- `KILO_AUTH=supabase`: the token is a Supabase access token. Tokens signed with asymmetric keys are verified against the project's JWKS at `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`; HS256 tokens are verified with `SUPABASE_JWT_SECRET` when it is set. Either variable is enough to start. The user id is the `sub` claim.
+`KILO_AUTH` must be set; there is no default (`npm run dev` sets `dev`).
+
+- `KILO_AUTH=supabase`: the token is a Supabase access token. Tokens signed with asymmetric keys are verified against the project's JWKS at `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`; HS256 tokens are verified with `SUPABASE_JWT_SECRET` when it is set. Either variable is enough to start. The token must carry `aud: authenticated` and the project's issuer. The user id is the `sub` claim.
 - `KILO_AUTH=dev`: the token is `dev:<user id>`. For local runs and tests only; the server refuses to start in this mode when `NODE_ENV=production`.
+- A bad or expired token answers 401. When the server cannot check a token (the JWKS could not be fetched) it answers 503 `auth_unavailable`; the app signs out only on 401.
+
+The app uses Supabase only to sign in. Every read and write goes through this API, which connects as the table owner. Migration `005_lockdown.sql` removes every privilege and policy the Supabase client roles (`anon`, `authenticated`) have on the tables, so the anon key the app ships cannot read or forge rows.
+
+In production (`NODE_ENV=production`) the server also refuses to start with local storage and no chosen `KILO_LOCAL_SIGNING_SECRET`, or with a stand-in transcriber, decider or pipeline unless `KILO_ALLOW_STAND_INS=1`. It logs which providers are in use at startup, without keys.
 
 ### Storage
 
@@ -159,7 +174,20 @@ URLs in API responses are signed and expire; the app refetches the video rather 
 
 `DATABASE_URL`, `PORT` (default 8787), `KILO_PUBLIC_URL`, `KILO_AUTH`, `KILO_STORAGE`, `KILO_STORAGE_DIR`, `KILO_BUCKET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`, `EXPO_ACCESS_TOKEN`, plus the provider variables in section 4.
 
-Tuning, all optional: `KILO_PIPELINE` (`real` or `fake`), `KILO_PUSH` (`expo` or `log`), `KILO_WORK_DIR`, `KILO_ANALYZE_CONCURRENCY`, `KILO_RENDER_CONCURRENCY`, `KILO_JOB_RETRY_LIMIT`, `KILO_LOCAL_SIGNING_SECRET`, `KILO_URL_TTL_SEC`. `server/.env.example` is the full list.
+Optional, with defaults. `server/.env.example` is the full list for the server.
+
+| Area | Variables |
+|---|---|
+| API | `KILO_CORS_ORIGINS` (browser origins allowed, default any), `KILO_MAX_BODY_BYTES`, `KILO_MAX_UPLOAD_BYTES`, `KILO_URL_TTL_SEC`, `KILO_LOCAL_SIGNING_SECRET` |
+| Per-user limits | `KILO_MAX_ACTIVE_VIDEOS`, `KILO_MAX_QUEUED_RENDERS`, `KILO_MAX_REPLANS_PER_HOUR`, `KILO_MAX_BATCHES_PER_DAY` |
+| Worker | `KILO_PIPELINE` (`real` or `fake`), `KILO_PUSH` (`expo` or `log`), `KILO_WORK_DIR`, `KILO_ANALYZE_CONCURRENCY`, `KILO_RENDER_CONCURRENCY`, `KILO_JOB_RETRY_LIMIT`, `KILO_JOB_EXPIRE_SEC` (a job with no heartbeat for this long is retried, default 90), `KILO_STOP_GRACE_MS`, `KILO_SWEEP_GRACE_SEC`, `KILO_ALLOW_STAND_INS` |
+| Analysis | `KILO_DEEPGRAM_MODEL`, `DEEPGRAM_BASE_URL`, `KILO_OPENAI_TRANSCRIBE_MODEL`, `KILO_OPENAI_MAX_UPLOAD_BYTES` |
+| ffmpeg | `KILO_FFMPEG`, `KILO_FFPROBE` (binary paths), `KILO_FFMPEG_THREADS`, `KILO_RENDER_THREADS`, `KILO_RENDER_PRESET`, and the time limit on one ffmpeg run: `KILO_MEDIA_TIMEOUT_SEC` (a fixed limit), or `KILO_MEDIA_TIMEOUT_FLOOR_SEC` (default 180) and `KILO_MEDIA_TIMEOUT_FACTOR` (seconds allowed per second of media, default 10) |
+| Motion graphics | `KILO_TEMPLATES_CACHE_DIR`, `KILO_TEMPLATES_CACHE_MAX_MB`, `KILO_TEMPLATES_CACHE_MAX_AGE_DAYS`, `KILO_CHROMIUM_PATH`, `REMOTION_LICENSE_KEY` |
+
+### Worker
+
+A worker sends a heartbeat for each running job. A job whose worker died is picked up by another after `KILO_JOB_EXPIRE_SEC`. On SIGTERM a worker takes no new jobs and hands back, without spending a retry, anything still running after `KILO_STOP_GRACE_MS`. On start and every five minutes, videos and renders left mid-work with no live job are queued again, at most three times, then failed.
 
 ### App environment
 
