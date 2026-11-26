@@ -115,6 +115,17 @@ uploading ─► queued ─► analyzing ─► ready_for_review ─► renderin
 any state ─► failed ─► (retry) ─► queued
 ```
 
+Rules the server enforces, which the app must expect:
+
+- Creating something answers 201.
+- The EDL can be saved only while the video is `ready_for_review` or `done`; otherwise 409 `invalid_state`.
+- A replan stores its result as revision + 1, so a client holding the older revision gets 409 on its next save and must refetch.
+- A failed final render sets the video to `failed`; retrying re-runs analysis (finished steps are skipped) and lands on `ready_for_review`. A failed preview render changes nothing on the video.
+- Marking posted needs a finished final render. A video counts once per week toward the goal whatever the platform.
+- B-roll cannot be added to a `failed` video or removed while `analyzing` or `rendering`.
+- `VideoSummary.progress` is 0..1 while `queued` or `analyzing` and null otherwise. `clipCount` is known from creation.
+- A B-roll asset that is not yet `ready` has null width, height and duration and an empty description.
+
 ### Auth
 
 `Authorization: Bearer <token>`.
@@ -141,7 +152,9 @@ URLs in API responses are signed and expire; the app refetches the video rather 
 
 ### Server environment
 
-`DATABASE_URL`, `PORT` (default 8787), `KILO_PUBLIC_URL`, `KILO_AUTH`, `KILO_STORAGE`, `KILO_STORAGE_DIR`, `KILO_BUCKET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `EXPO_ACCESS_TOKEN`, plus the provider variables in section 4.
+`DATABASE_URL`, `PORT` (default 8787), `KILO_PUBLIC_URL`, `KILO_AUTH`, `KILO_STORAGE`, `KILO_STORAGE_DIR`, `KILO_BUCKET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`, `EXPO_ACCESS_TOKEN`, plus the provider variables in section 4.
+
+Tuning, all optional: `KILO_PIPELINE` (`real` or `fake`), `KILO_PUSH` (`expo` or `log`), `KILO_WORK_DIR`, `KILO_ANALYZE_CONCURRENCY`, `KILO_RENDER_CONCURRENCY`, `KILO_JOB_RETRY_LIMIT`, `KILO_LOCAL_SIGNING_SECRET`, `KILO_URL_TTL_SEC`. `server/.env.example` is the full list.
 
 ### App environment
 

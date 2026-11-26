@@ -130,6 +130,10 @@ export const VideoSummary = z.object({
   status: VideoStatus,
   createdAt: z.string(),
   updatedAt: z.string(),
+  /** Clips the video was created with, whether or not they have been ingested yet. */
+  clipCount: z.number().int().nonnegative(),
+  /** 0..1 through upload-complete to ready while `queued` or `analyzing`; null in every other status. */
+  progress: z.number().min(0).max(1).nullable(),
   thumbnailUrl: z.string().nullable(),
   /** Null until analysis finishes. */
   keptSec: z.number().nullable(),
@@ -145,7 +149,13 @@ export type VideoSummary = z.infer<typeof VideoSummary>;
 export const BrollAssetStatus = z.enum(['uploading', 'processing', 'ready', 'failed']);
 export type BrollAssetStatus = z.infer<typeof BrollAssetStatus>;
 
+/** Width, height and duration are null, and description is empty, until the asset is `ready`. */
 export const BrollAssetView = BrollAsset.extend({
+  width: z.number().int().positive().nullable(),
+  height: z.number().int().positive().nullable(),
+  durationSec: z.number().positive().nullable(),
+  /** The name of the file the creator picked. */
+  filename: z.string(),
   status: BrollAssetStatus,
   url: z.string().nullable(),
   thumbnailUrl: z.string().nullable(),

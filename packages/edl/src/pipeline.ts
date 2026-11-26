@@ -16,7 +16,8 @@ import type { GraphicTheme, TemplateId } from './templates.js';
 /**
  * A normalised clip: H.264 yuv420p, 1080x1920 (centre-cropped to 9:16, rotation
  * baked in), constant frame rate at the clip's nominal rate (24/25/30/50/60),
- * AAC 48 kHz stereo (silent track added if the source has no audio), +faststart.
+ * AAC 48 kHz stereo (silent track added if the source has no audio), a keyframe at
+ * least every second (so the renderer can seek cheaply), +faststart.
  */
 export interface IngestedClip {
   info: ClipInfo;
@@ -88,8 +89,9 @@ export interface AnalyzeApi {
   decideEdit(input: DecideInput): Promise<Edl>;
 
   /**
-   * Re-runs the named passes on an existing EDL. Never changes `keep` on any
-   * segment, and keeps the revision as given.
+   * Re-runs the named passes on an existing EDL. Never changes `keep`, `start` or
+   * `end` on any segment, and returns the revision as given; the server stores the
+   * result as revision + 1.
    */
   replan(input: DecideInput & { edl: Edl; passes: ReplanPass[] }): Promise<Edl>;
 

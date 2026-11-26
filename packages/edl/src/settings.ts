@@ -13,6 +13,7 @@ export type Pacing = z.infer<typeof Pacing>;
 export const EditSettings = z.object({
   mode: Mode,
   cutDeadAir: z.boolean(),
+  /** Also covers false starts and off-script chatter ("hold on", "was that okay?"). */
   removeRetakes: z.boolean(),
   removeFillers: z.boolean(),
   /** Punch in on cuts, a small set of transitions, slow pan on stills. */
@@ -83,6 +84,9 @@ export const MODE_PRESETS: Record<Mode, ModePreset> = {
       'A TikTok Shop product video. Product on screen within three seconds. Prefer demonstrations over claims. Use the price-tag graphic when a price is spoken. End by pointing at the shop link.',
   },
 };
+
+/** Highlight colour for the current word in `karaoke` captions. Chosen to read on any footage. */
+export const CAPTION_HIGHLIGHT = '#FFE94A';
 
 export const DEFAULT_SETTINGS: EditSettings = MODE_PRESETS.general.settings;
 
