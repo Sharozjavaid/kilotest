@@ -198,7 +198,7 @@ function ExportBody({ video }: { video: VideoDetail }) {
         </Card>
       ) : null}
 
-      <Card padding={0} style={{ paddingHorizontal: 16 }}>
+      <Card padding={0} paddingHorizontal={16}>
         <InfoRow label="Format" value="1080 × 1920, vertical" />
         <InfoRow divider label="Frame rate" value={`${Math.round(edl.fps)} fps, same as recorded`} />
         <InfoRow divider label="Captions" value={edl.captions.enabled ? 'Burned in' : 'Off, add in the app you post to'} />

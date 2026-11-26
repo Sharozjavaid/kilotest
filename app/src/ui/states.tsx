@@ -43,7 +43,7 @@ export function SkeletonRows({ count = 3 }: { count?: number }) {
 /** An error with the message and a retry button. */
 export function ErrorState({ error, onRetry, title = "Couldn't load this" }: { error: unknown; onRetry?: () => void; title?: string }) {
   return (
-    <Card gap={12} style={styles.center} accessibilityLabel={title}>
+    <Card gap={12} padding={24} style={styles.center} accessibilityLabel={title}>
       <Icon name="alert" size={28} color={color.cut} />
       <Text variant="bodyLg" center>
         {title}
@@ -69,7 +69,7 @@ export function EmptyState({
   action?: { label: string; onPress: () => void };
 }) {
   return (
-    <Card gap={10} style={styles.center}>
+    <Card gap={10} padding={24} style={styles.center}>
       <View style={styles.emptyIcon}>
         <Icon name={icon} size={24} color={color.accent} />
       </View>
@@ -98,7 +98,7 @@ export function LoadingBlock({ label = 'Loading' }: { label?: string }) {
 }
 
 const styles = StyleSheet.create({
-  center: { alignItems: 'center', paddingVertical: 24 },
+  center: { alignItems: 'center' },
   skelRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64 },
   emptyIcon: {
     width: 48,

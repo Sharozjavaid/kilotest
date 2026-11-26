@@ -1,4 +1,4 @@
-import type { UploadTarget } from '@kilo/edl';
+import type { CompleteUploadsRequest, UploadTarget } from '@kilo/edl';
 import { UploadQueue, progressByVideo, type NewUploadJob, type QueueStore, type TransportCallbacks, type UploadJob, type UploadTransport } from './queue';
 
 const target = (kind: 'put' | 'tus' = 'put'): UploadTarget => ({ kind, url: 'https://up.example/x', headers: {}, objectKey: 'k', bucket: 'kilo' });
@@ -38,7 +38,7 @@ describe('UploadQueue', () => {
 
   it('uploads with limited concurrency, reports progress, and completes files as they finish', async () => {
     const { transport, calls } = manualTransport();
-    const complete = jest.fn(async () => ({ startedVideoIds: ['v1'] }));
+    const complete = jest.fn(async (_b: CompleteUploadsRequest) => ({ startedVideoIds: ['v1'] }));
     const onStarted = jest.fn();
     const q = new UploadQueue({ transport, store: memoryStore(), complete, concurrency: 2, onStarted });
     await q.enqueue([job('c1', 'v1'), job('c2', 'v1'), job('a1', 'v1', 'broll'), job('c3', 'v2')]);
@@ -62,7 +62,7 @@ describe('UploadQueue', () => {
     calls[3]!.resolve();
     await flush();
     await flush();
-    const ids = complete.mock.calls.flatMap((c) => [...(c[0] as { clipIds: string[] }).clipIds, ...(c[0] as { assetIds: string[] }).assetIds]);
+    const ids = complete.mock.calls.flatMap((c) => [...c[0].clipIds, ...c[0].assetIds]);
     expect(new Set(ids)).toEqual(new Set(['c1', 'c2', 'a1', 'c3']));
     expect(q.getJobs().every((j) => j.status === 'done')).toBe(true);
     expect(q.idle).toBe(true);

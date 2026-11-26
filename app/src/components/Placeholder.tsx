@@ -23,7 +23,7 @@ export function Placeholder({
   return (
     <Screen bottomInset={!tab}>
       <Header title={title} noBack={tab} />
-      <Card gap={10} style={{ alignItems: 'center', paddingVertical: 28 }}>
+      <Card gap={10} padding={24} style={{ alignItems: 'center' }}>
         <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: color.skyTint, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name={icon} size={24} color={color.accent} />
         </View>

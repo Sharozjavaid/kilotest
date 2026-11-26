@@ -274,7 +274,7 @@ export class MockKiloApi implements KiloApi {
     return clone({ edl: v.edl });
   }
 
-  async addBroll(videoId: string, body: { assets: Array<{ filename: string; kind: 'video' | 'image' }> }) {
+  async addBroll(videoId: string, body: Parameters<KiloApi['addBroll']>[1]) {
     await this.delay();
     const v = this.mustVideo(videoId);
     const out = body.assets.map((a) => {
@@ -362,7 +362,7 @@ export class MockKiloApi implements KiloApi {
     return clone(r);
   }
 
-  async markPosted(videoId: string) {
+  async markPosted(videoId: string, _body?: Parameters<KiloApi['markPosted']>[1]) {
     await this.delay();
     const v = this.mustVideo(videoId);
     if (!v.summary.postedAt) {

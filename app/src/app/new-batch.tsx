@@ -114,7 +114,7 @@ export default function NewBatchScreen() {
         <SegmentedControl segments={MODES} value={settings.mode} onChange={setMode} accessibilityLabel="Kind of video" />
       </View>
 
-      <Card padding={0} style={styles.listCard}>
+      <Card padding={0} paddingHorizontal={16}>
         <Row minHeight={52} title="Cut dead air" right={<Toggle value={settings.cutDeadAir} onValueChange={(v) => set('cutDeadAir', v)} accessibilityLabel="Cut dead air" />} />
         <Row divider title="Remove retakes" subtitle="Keeps the last good take of each line" right={<Toggle value={settings.removeRetakes} onValueChange={(v) => set('removeRetakes', v)} accessibilityLabel="Remove retakes" />} />
         <Row divider title="Zooms and transitions" subtitle="Punch in on cuts, slow pan on photos" right={<Toggle value={settings.zoomAndTransitions} onValueChange={(v) => set('zoomAndTransitions', v)} accessibilityLabel="Zooms and transitions" />} />
@@ -133,7 +133,7 @@ export default function NewBatchScreen() {
         <PillButton variant="secondary" label="Add clips" height={44} onPress={onAddBroll} accessibilityLabel="Add B-roll clips" style={styles.dropButton} />
       </View>
 
-      <Card padding={0} flat style={[styles.listCard, styles.hookCard]}>
+      <Card padding={0} paddingHorizontal={16} flat>
         <Row
           minHeight={60}
           title="Hook variations"
@@ -200,8 +200,6 @@ function VideoStrip({ videos, onPick, onOpen, onSample }: { videos: DraftVideo[]
 
 const styles = StyleSheet.create({
   block: { gap: 6 },
-  listCard: { paddingHorizontal: 16 },
-  hookCard: {},
   drop: {
     borderWidth: 1.5,
     borderStyle: 'dashed',

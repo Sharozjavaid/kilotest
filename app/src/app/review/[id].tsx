@@ -26,7 +26,6 @@ import {
   SegmentedControl,
   Text,
   color,
-  radius,
   shadow,
 } from '@/ui';
 
@@ -72,7 +71,7 @@ function NotReady({ video, position }: { video: VideoDetail; position?: string }
   return (
     <Screen>
       <Header title={video.title} meta={position} />
-      <Card gap={12} style={{ alignItems: 'center', paddingVertical: 24 }}>
+      <Card gap={12} padding={24} style={{ alignItems: 'center' }}>
         <Icon name={failed ? 'alert' : 'sparkle'} size={28} color={failed ? color.cut : color.accent} />
         <Text variant="bodyLg" center>
           {failed ? "Kilo couldn't edit this video" : `${statusLabel(video.status)}…`}
@@ -235,6 +234,14 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
             <Text variant="secondary" tone="muted" testID="recorded-length">
               from {formatDuration(stats.totalSec)} recorded
             </Text>
+            <PreviewLink
+              busy={previewBusy}
+              progress={preview.data?.progress ?? 0}
+              failed={preview.data?.status === 'failed' || !!previewError}
+              error={previewError ?? preview.data?.error}
+              ready={previewReady}
+              onPress={previewReady ? () => setPreviewOpen(true) : requestPreview}
+            />
           </View>
           <View style={{ gap: 6 }}>
             <Legend kept />
@@ -273,7 +280,6 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
         onScrollEndDrag={() => setTimeout(() => (userScrolling.current = false), 1500)}
         testID="transcript"
       >
-        <PreviewLine busy={previewBusy} progress={preview.data?.progress ?? 0} failed={preview.data?.status === 'failed' || !!previewError} error={previewError ?? preview.data?.error} ready={previewReady} onPress={previewReady ? () => setPreviewOpen(true) : requestPreview} />
         {rows.map((row) => (
           <View key={row.segmentId} onLayout={(e) => rowY.current.set(row.segmentId, e.nativeEvent.layout.y)}>
             <TranscriptRowView row={row} active={row.segmentId === activeId} onToggle={onToggle} onSeek={onSeek} />
@@ -295,34 +301,33 @@ function Legend({ kept, count }: { kept?: boolean; count?: number }) {
   );
 }
 
-/** "Preview with effects": zooms, B-roll and graphics are not in the skip-player, so render a preview. */
-function PreviewLine({ busy, progress, failed, error, ready, onPress }: { busy: boolean; progress: number; failed: boolean; error: unknown; ready: boolean; onPress: () => void }) {
-  const label = busy
-    ? `Preparing preview with effects, ${Math.round(progress * 100)}%`
-    : ready
-      ? 'Watch preview with effects'
-      : failed
-        ? "Preview didn't render. Tap to try again"
-        : 'Preview with effects';
+/**
+ * "Preview with effects": the skip-player shows cuts only; zooms, B-roll and
+ * graphics need a rendered preview.
+ */
+function PreviewLink({ busy, progress, failed, error, ready, onPress }: { busy: boolean; progress: number; failed: boolean; error: unknown; ready: boolean; onPress: () => void }) {
+  const label = busy ? `Preview ${Math.round(progress * 100)}%` : ready ? 'Watch with effects' : failed ? 'Preview failed, retry' : 'Preview with effects';
+  const spoken = busy
+    ? `Preparing a preview with zooms, B-roll and graphics, ${Math.round(progress * 100)} percent`
+    : failed
+      ? `Preview failed: ${errorMessage(error)}. Tap to try again`
+      : `${label}. Zooms, B-roll and graphics only show in a rendered preview`;
   return (
-    <Pressable onPress={busy ? undefined : onPress} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ busy }} style={({ pressed }) => [styles.previewLine, pressed && { opacity: 0.7 }]} testID="preview-effects">
-      <Icon name="sparkle" size={18} color={failed ? color.cut : color.accent} />
+    <Pressable
+      onPress={busy ? undefined : onPress}
+      accessibilityRole="button"
+      accessibilityLabel={spoken}
+      accessibilityState={{ busy }}
+      style={({ pressed }) => [styles.previewLink, pressed && { opacity: 0.6 }]}
+      testID="preview-effects"
+    >
+      <Icon name="sparkle" size={16} color={failed ? color.cut : color.accent} />
       <View style={{ flex: 1, gap: 4 }}>
-        <Text variant="secondary" weight={600} tone={failed ? 'cut' : 'accent'}>
+        <Text variant="secondary" weight={600} tone={failed ? 'cut' : 'accent'} numberOfLines={1}>
           {label}
         </Text>
-        {busy ? <ProgressBar value={progress} height={4} /> : null}
-        {failed && error ? (
-          <Text variant="label" tone="muted">
-            {errorMessage(error)}
-          </Text>
-        ) : !busy && !ready ? (
-          <Text variant="label" tone="muted">
-            {`Zooms, B-roll and graphics only show in a rendered preview.`}
-          </Text>
-        ) : null}
+        {busy ? <ProgressBar value={progress} height={3} /> : null}
       </View>
-      {!busy ? <Icon name="chevronRight" size={16} color={color.muted} /> : null}
     </Pressable>
   );
 }
@@ -338,14 +343,5 @@ const styles = StyleSheet.create({
   swatch: { width: 12, height: 12, borderRadius: 3 },
   list: { flex: 1, minHeight: 0 },
   actions: { flexDirection: 'row', gap: 10 },
-  previewLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    minHeight: 48,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: radius.row,
-    backgroundColor: 'rgba(31,94,255,0.06)',
-  },
+  previewLink: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, marginTop: 2 },
 });

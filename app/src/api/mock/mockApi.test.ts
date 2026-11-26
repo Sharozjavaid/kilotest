@@ -35,7 +35,7 @@ function checkVideo(d: VideoDetail) {
   if (d.edl) {
     expect(validateEdl(d.edl, d.clips)).toEqual([]);
     for (const o of [...d.edl.overlays, ...d.edl.variants.flatMap((v) => v.overlays)]) {
-      if (o.type === 'graphic') strictParse(TemplatePropsSchemas[o.template as TemplateId], o.props);
+      if (o.type === 'graphic') expect(TemplatePropsSchemas[o.template as TemplateId].safeParse(o.props).success).toBe(true);
       if (o.type === 'broll') expect(d.broll.some((b) => b.id === o.assetId)).toBe(true);
     }
     expect(d.proxy).not.toBeNull();
