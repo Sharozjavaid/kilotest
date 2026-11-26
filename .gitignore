@@ -18,3 +18,6 @@ fixtures/out/
 app/ios/
 app/android/
 app/web-build/
+
+# committed media
+!app/assets/**

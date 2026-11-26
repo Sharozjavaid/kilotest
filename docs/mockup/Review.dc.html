@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review the edit</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+button{font-family:inherit;cursor:pointer}
+a{color:#1F5EFF}a:hover{color:#1747C8}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: linear-gradient(180deg, #D9E8FF 0%, #F5F8FC 36%, #F5F8FC 100%); color: #0B1220; font-family: Inter, system-ui, sans-serif; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+
+<div style="display: flex; align-items: center; gap: 8px; height: 44px">
+<a href="Main.dc.html" aria-label="Back" style="width: 44px; height: 44px; margin-left: -12px; display: flex; align-items: center; justify-content: center; color: #0B1220">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+</a>
+<div style="flex-grow: 1; font-weight: 600; font-size: 20px; letter-spacing: -0.4px">Morning routine</div>
+<div style="font-size: 13px; color: #566074">1 of 30</div>
+</div>
+
+<div style="display: flex; gap: 14px; align-items: stretch">
+<div style="width: 118px; height: 210px; border-radius: 16px; background: #2B3038; box-shadow: 0 12px 28px rgba(31,94,255,0.18); flex-shrink: 0; display: flex; align-items: center; justify-content: center">
+<button aria-label="Play preview" style="width: 48px; height: 48px; border-radius: 24px; border: 0; background: #FFFFFF; color: #0B1220; display: flex; align-items: center; justify-content: center">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l12 7-12 7z"/></svg>
+</button>
+</div>
+<div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: space-between">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="font-size: 13px; color: #566074">Final length</div>
+<div style="font-weight: 700; font-size: 40px; line-height: 1; letter-spacing: -1.5px">{{keptTime}}</div>
+<div style="font-size: 13px; color: #566074">from {{totalTime}} recorded</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px">
+<div style="display: flex; align-items: center; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 3px; background: #1F5EFF"></span>Kept</div>
+<div style="display: flex; align-items: center; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 3px; background: #FFFFFF; border: 1px solid #B4441E; box-sizing: border-box"></span>Cut ({{cutCount}})</div>
+<div style="color: #566074">Tap a line to put it back or cut it.</div>
+</div>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="position: relative; height: 36px; display: flex; gap: 3px; align-items: center">
+<sc-for list="{{lines}}" as="s" hint-placeholder-count="7">
+<sc-if value="{{s.kept}}" hint-placeholder-val="{{ true }}"><div style="flex: {{s.w}} 1 0; height: 28px; border-radius: 5px; background: #1F5EFF"></div></sc-if>
+<sc-if value="{{s.cut}}" hint-placeholder-val="{{ false }}"><div style="flex: {{s.w}} 1 0; height: 28px; border-radius: 5px; background: #FFFFFF; border: 1px solid #B4441E; box-sizing: border-box"></div></sc-if>
+</sc-for>
+<div style="position: absolute; left: 34%; top: 0; width: 3px; height: 36px; border-radius: 2px; background: #0B1220"></div>
+</div>
+<div style="display: flex; justify-content: space-between; font-size: 12px; color: #566074">
+<div>0:00</div><div>Drag to scrub</div><div>{{totalTime}}</div>
+</div>
+</div>
+
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px">
+<sc-for list="{{lines}}" as="s" hint-placeholder-count="7">
+<sc-if value="{{s.kept}}" hint-placeholder-val="{{ true }}">
+<button onClick="{{ s.toggle }}" aria-pressed="true" style="min-height: 48px; border-radius: 14px; border: 1px solid rgba(12,24,48,0.08); background: rgba(255,255,255,0.85); color: #0B1220; padding: 8px 12px; text-align: left; font-size: 14px; line-height: 1.35; display: flex; align-items: center; gap: 10px">
+<span style="width: 4px; align-self: stretch; border-radius: 2px; background: #1F5EFF; flex-shrink: 0"></span>
+<span style="flex-grow: 1">{{s.text}}</span>
+</button>
+</sc-if>
+<sc-if value="{{s.cut}}" hint-placeholder-val="{{ false }}">
+<button onClick="{{ s.toggle }}" aria-pressed="false" style="min-height: 48px; border-radius: 14px; border: 1px dashed #9AA6B8; background: transparent; color: #566074; padding: 8px 12px; text-align: left; font-size: 14px; line-height: 1.35; display: flex; align-items: center; gap: 10px">
+<span style="flex-grow: 1; text-decoration: line-through">{{s.text}}</span>
+<span style="flex-shrink: 0; font-size: 12px; font-weight: 600; color: #B4441E">{{s.reason}}</span>
+</button>
+</sc-if>
+</sc-for>
+</div>
+
+<div style="display: flex; gap: 10px">
+<a href="Broll.dc.html" style="flex: 1 1 0; height: 52px; border-radius: 26px; border: 1px solid rgba(12,24,48,0.14); background: #FFFFFF; color: #0B1220; font-weight: 600; font-size: 15px; text-decoration: none; display: flex; align-items: center; justify-content: center">B-roll</a>
+<a href="Export.dc.html" style="flex: 2 1 0; height: 52px; border-radius: 26px; background: linear-gradient(180deg, #2A66FF 0%, #1A52E8 100%); box-shadow: 0 8px 20px rgba(31,94,255,0.28), inset 0 1px 0 rgba(255,255,255,0.35); color: #FFFFFF; font-weight: 600; font-size: 15px; text-decoration: none; display: flex; align-items: center; justify-content: center">Looks good</a>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+var data = [
+{ id: 1, w: 3, text: "Okay so I've been, uh, hold on.", reason: 'False start', cut: true },
+{ id: 2, w: 4, text: "Okay, I've used this every morning for two weeks.", reason: 'Cut', cut: false },
+{ id: 3, w: 2, text: '(silence, 1.8 seconds)', reason: 'Dead air', cut: true },
+{ id: 4, w: 3, text: "Here's what nobody tells you about it.", reason: 'Cut', cut: false },
+{ id: 5, w: 4, text: "It's, um, it's really, like...", reason: 'Retake', cut: true },
+{ id: 6, w: 4, text: 'It takes ten seconds and it actually works.', reason: 'Cut', cut: false },
+{ id: 7, w: 3, text: "Link's below if you want to try it.", reason: 'Cut', cut: false }
+];
+var overrides = (this.state && this.state.overrides) || {};
+var self = this;
+var kept = 0, total = 0, cutCount = 0;
+var lines = data.map(function (d) {
+var isCut = overrides[d.id] === undefined ? d.cut : overrides[d.id];
+total += d.w;
+if (isCut) { cutCount += 1; } else { kept += d.w; }
+return {
+w: d.w, text: d.text, reason: d.reason, cut: isCut, kept: !isCut,
+toggle: function () {
+var next = Object.assign({}, overrides);
+next[d.id] = !isCut;
+self.setState({ overrides: next });
+}
+};
+});
+function fmt(s) { return '0:' + (s < 10 ? '0' + s : '' + s); }
+return { lines: lines, keptTime: fmt(kept), totalTime: fmt(total), cutCount: cutCount };
+}
+}
+</script>
+</body>
+</html>
