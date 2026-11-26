@@ -1,10 +1,20 @@
+node_modules/
+dist/
+.expo/
 .env
 .env.*
 !.env.example
-__pycache__/
-*.pyc
-.venv/
-venv/
+*.log
 .DS_Store
-agent_state.json
-index.html
+coverage/
+# generated media
+fixtures/out/
+**/.work/
+*.mp4
+*.mov
+*.wav
+*.webm
+!fixtures/keep/**
+app/ios/
+app/android/
+app/web-build/

@@ -1,0 +1,35 @@
+{
+  "id": "unboxing",
+  "title": "Unboxing",
+  "mode": "ugc_ad",
+  "script": [
+    "Stop scrolling if your desk is a mess.",
+    "This little organizer showed up yesterday.",
+    "Everything has a place now, and it took two minutes.",
+    "It's nineteen dollars, down from thirty four.",
+    "Tap the link and grab one."
+  ],
+  "clips": [
+    { "name": "line1_take1", "fps": 60, "scriptLineIndex": 0, "takeNumber": 1, "units": [
+      { "say": "Stop scrolling if your desk is a mess.", "line": 0 } ] },
+    { "name": "line2_take1", "fps": 60, "scriptLineIndex": 1, "takeNumber": 1, "units": [
+      { "say": "This little organizer showed up", "keep": false, "reason": "false_start", "group": "l2" },
+      { "pause": 1.2 },
+      { "say": "This little organizer showed up yesterday.", "line": 1, "group": "l2" } ] },
+    { "name": "line3_take1", "fps": 60, "scriptLineIndex": 2, "takeNumber": 1, "units": [
+      { "say": "Everything has a place now and it took, wait, how long", "keep": false, "reason": "retake", "group": "l3" } ] },
+    { "name": "line3_take2", "fps": 60, "scriptLineIndex": 2, "takeNumber": 2, "units": [
+      { "say": "Everything has a place now, and it took two minutes.", "line": 2, "group": "l3" } ] },
+    { "name": "line4_take1", "fps": 60, "scriptLineIndex": 3, "takeNumber": 1, "units": [
+      { "filler": "um" },
+      { "say": "It's nineteen dollars, down from thirty four.", "line": 3 } ] },
+    { "name": "line5_take1", "fps": 60, "scriptLineIndex": 4, "takeNumber": 1, "units": [
+      { "say": "Tap the link and grab one.", "line": 4 },
+      { "pause": 1.5 },
+      { "say": "Was that okay?", "keep": false, "reason": "off_script" } ] }
+  ],
+  "broll": [
+    { "file": "desk_before.jpg", "kind": "image", "label": "messy desk before", "color": "0x7D3535" },
+    { "file": "organizer.mp4", "kind": "video", "label": "organizer on desk", "durationSec": 5 }
+  ]
+}

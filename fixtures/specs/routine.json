@@ -1,0 +1,33 @@
+{
+  "id": "routine",
+  "title": "Morning routine",
+  "mode": "general",
+  "clips": [
+    {
+      "name": "clip1",
+      "fps": 60,
+      "size": "720x1280",
+      "units": [
+        { "say": "Okay so I've been", "keep": false, "reason": "false_start", "group": "open" },
+        { "filler": "uh" },
+        { "say": "hold on", "keep": false, "reason": "off_script" },
+        { "pause": 1.4 },
+        { "say": "Okay, I've used this every morning for two weeks.", "group": "open" },
+        { "pause": 1.8 },
+        { "say": "Here's what nobody tells you about it." },
+        { "pause": 0.9 },
+        { "say": "It's, it's really", "keep": false, "reason": "false_start", "group": "works" },
+        { "filler": "um" },
+        { "pause": 1.1 },
+        { "say": "It takes ten seconds and it actually works.", "group": "works" },
+        { "filler": "um" },
+        { "say": "Link's below if you want to try it." }
+      ]
+    }
+  ],
+  "broll": [
+    { "file": "shelf.mp4", "kind": "video", "label": "bathroom shelf close-up", "durationSec": 4 },
+    { "file": "stopwatch.jpg", "kind": "image", "label": "stopwatch on counter", "color": "0x355C7D" },
+    { "file": "product.jpg", "kind": "image", "label": "product bottle in hand", "color": "0x6C5B7B", "size": "1600x1200" }
+  ]
+}

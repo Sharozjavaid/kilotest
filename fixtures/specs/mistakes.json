@@ -1,0 +1,36 @@
+{
+  "id": "mistakes",
+  "title": "Three mistakes",
+  "mode": "tiktok_shop",
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 30,
+      "size": "1280x720",
+      "units": [
+        { "say": "Three mistakes everyone makes with sunscreen.", "group": "hook" },
+        { "pause": 1.0 },
+        { "say": "Three mistakes that, no", "keep": false, "reason": "false_start", "group": "hook2" },
+        { "pause": 0.8 },
+        { "say": "Number one, you use too little.", "group": "one" },
+        { "filler": "uh" },
+        { "say": "Number two, you forget your ears.", "group": "two" },
+        { "pause": 2.2 },
+        { "say": "Number three, you never reapply." }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 60,
+      "size": "720x1280",
+      "units": [
+        { "say": "Ninety percent of people skip this step.", "keep": false, "reason": "retake", "group": "stat" },
+        { "pause": 1.3 },
+        { "say": "Ninety percent of people skip this step.", "group": "stat" },
+        { "say": "This one is twelve dollars today." },
+        { "pause": 1.6 },
+        { "say": "Check the shop link." }
+      ]
+    }
+  ]
+}
