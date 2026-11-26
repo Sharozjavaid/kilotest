@@ -86,7 +86,14 @@ async function checkFiles(plan: RenderPlan): Promise<void> {
   }
 }
 
+/** Where the time of the last render in this process went, in milliseconds (for timing reports). */
+export const renderTimings: { last: { audioMs: number; graphicsMs: number; videoMs: number; muxMs: number; totalMs: number; chunks: number } | null } = {
+  last: null,
+};
+
 async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Promise<RenderOutput> {
+  const t0 = performance.now();
+  const mark = { audio: 0, graphics: 0, video: 0 };
   const { format: fmt } = plan;
   const F = fmt.fps;
   const edl = input.edl;
@@ -144,6 +151,7 @@ async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Pr
     { cwd: tmp, durationSec: plan.durationSec, onProgress: (f) => audioStage(0.7 + 0.3 * f) },
   );
 
+  mark.audio = performance.now();
   // 2. Graphics, at the output's real frame size and rate.
   if (graphics.length) {
     const gStage = progress.stage(weights.graphics);
@@ -178,6 +186,7 @@ async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Pr
     }
   }
 
+  mark.graphics = performance.now();
   // 3. Captions.
   let cues: ReturnType<typeof groupCues> = [];
   if (edl.captions.enabled) {
@@ -223,6 +232,7 @@ async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Pr
     videoFiles.push(out);
   }
 
+  mark.video = performance.now();
   // 5. Join and mux.
   const muxStage = progress.stage(weights.mux);
   const vlist = join(tmp, 'video.txt');
@@ -240,6 +250,15 @@ async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Pr
     { cwd: tmp, durationSec: plan.durationSec, onProgress: muxStage },
   );
   progress.emit(1);
+  const end = performance.now();
+  renderTimings.last = {
+    audioMs: mark.audio - t0,
+    graphicsMs: mark.graphics - mark.audio,
+    videoMs: mark.video - mark.graphics,
+    muxMs: end - mark.video,
+    totalMs: end - t0,
+    chunks: plan.chunks.length,
+  };
   return { outPath: input.outPath, durationSec: plan.durationSec, width: fmt.width, height: fmt.height, fps: F };
 }
 

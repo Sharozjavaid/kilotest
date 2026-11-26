@@ -89,6 +89,7 @@ describe('analysis progress and scratch cleanup', () => {
   const seen: { step: string; progress: number }[] = [];
   let failDecide = false;
   const dirsAtFailure: boolean[] = [];
+  const workDirs: string[] = [];
 
   beforeAll(async () => {
     const fake = createFakePipeline();
@@ -101,6 +102,7 @@ describe('analysis progress and scratch cleanup', () => {
       analyze: {
         ...fake.analyze,
         ingestClip: async (i) => {
+          workDirs.push(i.workDir);
           await record('ingest');
           return fake.analyze.ingestClip(i);
         },
@@ -130,6 +132,8 @@ describe('analysis progress and scratch cleanup', () => {
     const ingest = seen.filter((s) => s.step === 'ingest').map((s) => s.progress);
     const decide = seen.filter((s) => s.step === 'decide').map((s) => s.progress);
     expect(ingest).toHaveLength(6);
+    // Ingest writes fixed file names, so every clip needs its own directory.
+    expect(new Set(workDirs).size).toBe(6);
     for (let i = 1; i < ingest.length; i++) expect(ingest[i]!).toBeGreaterThan(ingest[i - 1]!);
     expect(ingest[0]!).toBeLessThan(0.1);
     expect(decide).toHaveLength(1);

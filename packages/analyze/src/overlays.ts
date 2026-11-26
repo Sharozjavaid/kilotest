@@ -206,13 +206,16 @@ function graphicCandidate(
   props: Record<string, unknown>,
   at: number,
   priority: number,
-  opts: { duration?: number; slack?: number; dedupe?: string } = {},
+  opts: { duration?: number; slack?: number; dedupe?: string; maxLateSec?: number } = {},
 ): Candidate | null {
   try {
     parseTemplateProps(template, props);
   } catch {
     return null;
   }
+  // A graphic shows what is being said: if the hook protection would push it too far past
+  // its words, it would land after them, so it is not placed at all.
+  if (opts.maxLateSec !== undefined && HOOK_PROTECT_SEC - at > opts.maxLateSec) return null;
   const spec = getTemplate(template);
   const duration = Math.min(spec.maxDurationSec, Math.max(spec.minDurationSec, opts.duration ?? spec.defaultDurationSec));
   return {
@@ -266,7 +269,9 @@ function listCandidates(lines: Line[], priority: number): Candidate[] {
       j++;
     }
     if (run.length >= 2) {
-      const prev = lines[i - 1];
+      // The title comes from the line before the list, skipping a cut line the creator restored by
+      // hand (a false start or retake that happens to sit there): it is never a heading.
+      const prev = [lines[i - 1], lines[i - 2]].find((l) => l && l.segment.reason === 'speech');
       let title: string | undefined;
       if (prev) {
         const t = tokens(prev.text);
@@ -325,7 +330,7 @@ export function findPrice(line: Line): { price: string; compareAt?: string; labe
   return null;
 }
 
-const LEAD_IN = new Set(['okay', 'ok', 'so', 'and', 'but', 'well', 'now', 'like', 'honestly', 'basically']);
+export const LEAD_IN = new Set(['okay', 'ok', 'so', 'and', 'but', 'well', 'now', 'like', 'honestly', 'basically']);
 const TRAIL = new Set(['for', 'in', 'of', 'about', 'at', 'to', 'than', 'by', 'around', 'like', 'under', 'over', 'within', 'after', 'only', 'just', 'takes', 'the', 'a', 'and']);
 
 const STAT_UNITS: Record<string, string> = {
@@ -376,6 +381,11 @@ const EMPHASIS = new Set([
   'honestly', 'must', 'perfect', 'guaranteed', 'favorite', 'favourite',
 ]);
 
+const WEAK_END = new Set([
+  'a', 'an', 'the', 'and', 'or', 'but', 'so', 'for', 'to', 'of', 'in', 'on', 'at', 'with', 'from', 'by', 'about', 'as', 'into',
+  'my', 'your', 'our', 'their', 'his', 'her', 'its', 'is', 'are', 'was', 'were', 'be', 'it', 'that', 'this', 'than', 'if', 'i', 'you', 'we',
+]);
+
 export function findEmphasis(line: Line): { words: string[]; at: number } | null {
   const ws = line.words;
   for (let i = 0; i < ws.length; i++) {
@@ -391,6 +401,8 @@ export function findEmphasis(line: Line): { words: string[]; at: number } | null
       .filter(Boolean)
       .slice(0, 4)
       .map((w) => (w.length > 18 ? w.slice(0, 18) : w));
+    // Never end on a word that needs the next one ("Everyone makes with").
+    while (words.length > 1 && WEAK_END.has(norm(words[words.length - 1]!))) words.pop();
     if (!words.length) continue;
     return { words: [capitalize(words[0]!), ...words.slice(1)], at: ws[i]!.outStart };
   }
@@ -407,7 +419,7 @@ export function graphicCandidates(lines: Line[], settings: EditSettings): Candid
     const price = findPrice(l);
     if (price) {
       const { at, ...props } = price;
-      const c = graphicCandidate('price-tag', props, at - 0.1, shop ? 92 : 60, { dedupe: `price:${props.price}` });
+      const c = graphicCandidate('price-tag', props, at - 0.1, shop ? 92 : 60, { dedupe: `price:${props.price}`, maxLateSec: 1.0 });
       if (c) out.push(c);
       continue;
     }
@@ -415,13 +427,13 @@ export function graphicCandidates(lines: Line[], settings: EditSettings): Candid
     const stat = findStat(l);
     if (stat) {
       const { at, ...props } = stat;
-      const c = graphicCandidate('stat-callout', props, at - 0.1, 65, { dedupe: `stat:${props.value}` });
+      const c = graphicCandidate('stat-callout', props, at - 0.1, 65, { dedupe: `stat:${props.value}`, maxLateSec: 1.0 });
       if (c) out.push(c);
       continue;
     }
     const emph = findEmphasis(l);
     if (emph) {
-      const c = graphicCandidate('keyword-pop', { words: emph.words }, emph.at, 30, { slack: 0.5, dedupe: `kw:${l.index}` });
+      const c = graphicCandidate('keyword-pop', { words: emph.words }, emph.at, 30, { slack: 0.5, dedupe: `kw:${l.index}`, maxLateSec: 0.25 });
       if (c) out.push(c);
     }
   }

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { BrollAsset, Edl, GraphicOverlay, Segment } from '@kilo/edl';
-import { Edl as EdlSchema, PACING_PARAMS, TEMPLATES, getTemplate, parseTemplateProps, resolveTimeline, validateEdl } from '@kilo/edl';
+import { Edl as EdlSchema, PACING_PARAMS, TEMPLATES, getTemplate, parseTemplateProps, resolveTimeline, toggleSegment, validateEdl } from '@kilo/edl';
 import { createAnalyze } from '../src/analyze.js';
-import { OVERLAY_SPACING_SEC } from '../src/overlays.js';
+import { OVERLAY_SPACING_SEC, findEmphasis } from '../src/overlays.js';
+import { buildLines } from '../src/lines.js';
 import { buildChunks, prepareClipWords } from '../src/chunks.js';
 import { heuristicCuts } from '../src/heuristic.js';
 import { ASSETS, decideInput, richClips, synthClip, type SynthClip } from './helpers.js';
@@ -360,5 +361,67 @@ describe('determinism', () => {
       expect(kinds.some((k) => k === 'price-tag' || k === 'stat-callout'), `${mode}: ${kinds}`).toBe(true);
       expectOverlaysSound(edl, assets);
     }
+  });
+});
+
+describe('a cut line restored by hand', () => {
+  it('is never used as a list title or a hook, and keyword pops never end on a function word', async () => {
+    const clips = [
+      synthClip('c', 0, [
+        { say: 'Three mistakes everyone makes with sunscreen.' },
+        { pause: 1.0 },
+        { say: 'Three mistakes that, no' },
+        { pause: 0.8 },
+        { say: 'Number one, you use too little.' },
+        { say: 'Number two, you forget your ears.' },
+        { pause: 1.0 },
+        { say: 'Number three, you never reapply.' },
+        { pause: 0.6 },
+        { say: 'Ninety percent of people skip this step.' },
+      ]),
+    ];
+    const input = decideInput(clips, { mode: 'tiktok_shop', hookVariations: 3 });
+    const edl = await analyze.decideEdit(input);
+    const falseStart = edl.segments.find((s) => s.text.startsWith('Three mistakes that'))!;
+    expect(falseStart.keep).toBe(false);
+    const restored = toggleSegment(edl, falseStart.id);
+    const out = await analyze.replan({ ...input, edl: restored, passes: ['graphics', 'variants'] });
+    const list = out.overlays.find((o): o is GraphicOverlay => o.type === 'graphic' && o.template === 'numbered-list')!;
+    expect(list.props.title).toBe('Three mistakes everyone makes'); // the schema allows 40 characters
+    for (const v of out.variants) {
+      expect(v.segmentOrder[0]).not.toBe(falseStart.id);
+      for (const o of v.overlays) if (o.type === 'graphic') expect(String(o.props.text)).not.toMatch(/that, no/);
+    }
+    const lines = buildLines(out, input.transcripts);
+    const emph = findEmphasis(lines[0]!)!;
+    expect(emph.words).toEqual(['Everyone', 'makes']);
+  });
+});
+
+describe('graphic timing', () => {
+  it('never places a graphic long after the words it shows (the hook keeps the first seconds clear)', async () => {
+    const clips = [
+      synthClip('c', 0, [
+        { say: 'Honestly everyone gets this wrong.' },
+        { say: 'Here is how to fix it in a few easy steps today.' },
+        { pause: 0.4 },
+        { say: 'It is so simple and it actually works every time.' },
+        { pause: 0.4 },
+        { say: 'I never skip it now, not even once this year.' },
+      ]),
+    ];
+    const input = decideInput(clips, { mode: 'general', hookVariations: 1 });
+    const edl = await analyze.decideEdit(input);
+    const lines = buildLines(edl, input.transcripts);
+    const tl = resolveTimeline(edl);
+    for (const { overlay, outStart } of tl.overlays) {
+      if (overlay.type !== 'graphic' || overlay.template !== 'keyword-pop') continue;
+      const first = String((overlay.props.words as string[])[0]).toLowerCase();
+      const word = lines.flatMap((l) => l.words).find((w) => w.text.toLowerCase().replace(/[^a-z']/g, '') === first && w.outStart <= outStart + 0.6)!;
+      expect(word, `keyword pop "${first}" at ${outStart}`).toBeDefined();
+      expect(outStart - word.outStart).toBeLessThanOrEqual(0.5 + 0.25 + 1e-6);
+    }
+    // "everyone" is said at about 0.6 s, inside the protected opening: no pop for it.
+    expect(tl.overlays.some((o) => o.overlay.type === 'graphic' && JSON.stringify(o.overlay.props).includes('Everyone'))).toBe(false);
   });
 });

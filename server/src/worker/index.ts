@@ -167,7 +167,8 @@ export class Worker {
             clipId: clip.id,
             order: clip.ord,
             inputPath: input,
-            workDir: join(dir, 'ingest'),
+            // One directory per clip: ingest writes fixed file names (normalized.mp4, audio.wav, thumb.jpg).
+            workDir: join(dir, 'ingest', clip.id),
             ...(clip.script_line_index !== null ? { scriptLineIndex: clip.script_line_index } : {}),
             ...(clip.take_number !== null ? { takeNumber: clip.take_number } : {}),
           });
@@ -325,7 +326,8 @@ export class Worker {
     const result = await this.analyze.ingestBroll({
       assetId: asset.id,
       inputPath: input,
-      workDir: join(dir, 'broll'),
+      // One directory per asset: ingest writes fixed file names (normalized.jpg, thumb.jpg).
+      workDir: join(dir, 'broll', asset.id),
       source: asset.source,
       filename: asset.filename,
     });

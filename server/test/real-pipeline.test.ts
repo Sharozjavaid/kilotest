@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -8,6 +9,7 @@ import {
   CreateRenderResponse,
   Edl,
   MODE_PRESETS,
+  PACING_PARAMS,
   RenderView,
   SaveEdlResponse,
   VideoDetail,
@@ -88,15 +90,49 @@ function instrument(p: Pipeline): Pipeline {
     renderGraphicStill: p.templates.renderGraphicStill.bind(p.templates),
   };
   const render: RenderApi = {
-    renderVideo: timed('render.renderVideo', (input) => p.render.renderVideo({ ...input, renderGraphic: templates.renderGraphic })),
+    renderVideo: timed('render.renderVideo', async (input) => {
+      const t0 = performance.now();
+      const g0 = current['templates.renderGraphic']?.ms ?? 0;
+      const out = await p.render.renderVideo({ ...input, renderGraphic: templates.renderGraphic });
+      const stages = (renderModule?.renderTimings.last ?? null) as Record<string, number> | null;
+      renderLog.push({
+        quality: input.quality,
+        variantId: input.variantId ?? null,
+        sec: (performance.now() - t0) / 1000,
+        graphicsSec: ((current['templates.renderGraphic']?.ms ?? 0) - g0) / 1000,
+        stagesSec: stages ? Object.fromEntries(Object.entries(stages).map(([k, v]) => [k.replace(/Ms$/, ''), k === 'chunks' ? v : Math.round(v) / 1000])) : null,
+      });
+      return out;
+    }),
   };
   return { analyze, render, templates };
 }
 
+interface RenderLogEntry {
+  quality: string;
+  variantId: string | null;
+  sec: number;
+  graphicsSec: number;
+  stagesSec: Record<string, number> | null;
+}
+let renderLog: RenderLogEntry[] = [];
+let renderModule: { renderTimings: { last: unknown } } | null = null;
+
+const execFileP = promisify(execFile);
+
+/** A keep-alive connection closed by the server just as a request goes out: worth one more try. */
+const transient = (err: unknown) => /ECONNRESET|socket hang up|fetch failed/.test(`${(err as Error)?.message} ${String((err as { cause?: unknown })?.cause)}`);
+
 async function poll<T>(fn: () => Promise<T | null | undefined | false>, what: string, timeoutMs: number, everyMs = 250): Promise<T> {
   const start = Date.now();
   for (;;) {
-    const v = await fn();
+    let v: T | null | undefined | false;
+    try {
+      v = await fn();
+    } catch (err) {
+      if (!transient(err)) throw err;
+      v = null;
+    }
     if (v) return v;
     if (Date.now() - start > timeoutMs) throw new Error(`Timed out waiting for ${what}`);
     await new Promise((r) => setTimeout(r, everyMs));
@@ -128,8 +164,10 @@ interface Probed {
   audioRate?: number;
 }
 
-function probe(path: string): Probed {
-  const json = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-count_frames', '-show_streams', '-show_format', '-of', 'json', path]).toString());
+// Media checks run as async child processes: the API and worker share this process, and a
+// blocked event loop would stall them.
+async function probe(path: string): Promise<Probed> {
+  const json = JSON.parse((await execFileP('ffprobe', ['-v', 'error', '-count_frames', '-show_streams', '-show_format', '-of', 'json', path], { maxBuffer: 1 << 26 })).stdout);
   const v = json.streams.find((s: { codec_type: string }) => s.codec_type === 'video');
   const a = json.streams.find((s: { codec_type: string }) => s.codec_type === 'audio');
   const [n, d] = String(v.r_frame_rate).split('/').map(Number);
@@ -144,21 +182,39 @@ function probe(path: string): Probed {
   };
 }
 
-function loudness(path: string): number {
-  const r = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-threads', '2', '-i', path, '-af', 'ebur128', '-f', 'null', '-'], { encoding: 'utf8', maxBuffer: 1 << 28 });
-  const summary = r.stderr.slice(r.stderr.lastIndexOf('Summary:'));
+async function loudness(path: string): Promise<number> {
+  const stderr = await new Promise<string>((resolve, reject) => {
+    const child = spawn('ffmpeg', ['-hide_banner', '-nostats', '-threads', '2', '-i', path, '-af', 'ebur128', '-f', 'null', '-'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = '';
+    child.stderr.on('data', (d: Buffer) => {
+      err += d.toString();
+      if (err.length > 4_000_000) err = err.slice(-1_000_000);
+    });
+    child.on('error', reject);
+    child.on('close', () => resolve(err));
+  });
+  const summary = stderr.slice(stderr.lastIndexOf('Summary:'));
   return Number(/I:\s+(-?[\d.]+) LUFS/.exec(summary)?.[1]);
 }
 
 /**
+ * The fixtures paint an orange band over every cut unit, including pauses ("CUT
+ * dead_air (silence)"). A natural edit keeps a little of each pause (cut padding and
+ * breathing room between lines), so orange frames on kept pause are expected; the
+ * check is that no frame shows a cut *line*, traced through the timeline, and that
+ * the pixels agree with that tracing.
+ *
  * Per frame, the share of the lower part of the picture that is the fixtures' orange
  * cut band (#B4441E at 90% over the dark ground). The band sits at 0.62..0.88 of the
  * source height; a punch-in moves it, so the whole lower half is searched.
  */
-function orangeShares(path: string, w = 54, h = 96): number[] {
-  const raw = execFileSync('ffmpeg', ['-v', 'error', '-threads', '2', '-i', path, '-vf', `scale=${w}:${h}:flags=area`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], {
-    maxBuffer: 1 << 30,
-  });
+async function orangeShares(path: string, w = 54, h = 96): Promise<number[]> {
+  const raw = (
+    await execFileP('ffmpeg', ['-v', 'error', '-threads', '2', '-i', path, '-vf', `scale=${w}:${h}:flags=area`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], {
+      maxBuffer: 1 << 30,
+      encoding: 'buffer',
+    })
+  ).stdout;
   const size = w * h * 3;
   const out: number[] = [];
   for (let f = 0; f + size <= raw.length; f += size) {
@@ -204,7 +260,10 @@ interface FixtureResult {
   restored: { segmentId: string; reason: string; text: string };
   replanSec: number;
   preview: { sec: number; width: number; height: number; fps: number };
-  finals: Array<{ variantId: string | null; renderSec: number; width: number; height: number; fps: number; durationSec: number; expectedSec: number; lufs: number; orangeFrames: number; orangeInRestored: number; frames: number }>;
+  finals: Array<{
+    variantId: string | null; renderSec: number; graphicsSec: number; stagesSec: Record<string, number> | null; width: number; height: number; fps: number; durationSec: number; expectedSec: number; lufs: number;
+    frames: number; cutSpeechFrames: number; orangeOnKeptPause: number; orangeInRestored: number; keptPauseFrames: number; longestKeptPauseSec: number;
+  }>;
   renderSteps: Timings;
 }
 
@@ -212,15 +271,27 @@ const results: FixtureResult[] = [];
 
 describe.skipIf(!process.env.KILO_TEST_REAL)('acceptance: the real pipeline end to end on every fixture', () => {
   let env: TestEnv;
+  let warmUpSec = 0;
   beforeAll(async () => {
     mkdirSync(OUT, { recursive: true });
+    // A cache of our own, emptied of graphics, so every graphic is rendered cold and timed.
+    process.env.KILO_TEMPLATES_CACHE_DIR = join(OUT, 'templates-cache');
+    rmSync(join(OUT, 'templates-cache', 'graphics'), { recursive: true, force: true });
+    rmSync(join(OUT, 'templates-cache', 'stills'), { recursive: true, force: true });
+    const spec = (name: string): string => name; // variable specifiers: these packages are not typechecked here
+    renderModule = (await import(spec('@kilo/render'))) as typeof renderModule;
+    const templatesModule = (await import(spec('@kilo/templates'))) as { warmUp(): Promise<void> };
+    // Bundling the templates (first run only) and starting Chromium happen once per worker process.
+    const tw = performance.now();
+    await templatesModule.warmUp();
+    warmUpSec = (performance.now() - tw) / 1000;
     env = await createEnv({ pipeline: instrument(await loadRealPipeline()) });
   }, 180_000);
   afterAll(async () => {
     await env?.stop();
     if (results.length) {
-      writeFileSync(join(OUT, 'results.json'), JSON.stringify(results, null, 2));
-      const lines = ['', 'fixture     analysis  replan  preview  finals (s, each)          LUFS          kept units  cut units  clipped'];
+      writeFileSync(join(OUT, 'results.json'), JSON.stringify({ templatesWarmUpSec: warmUpSec, fixtures: results }, null, 2));
+      const lines = ['', `templates warm-up (bundle + Chromium start, once per process): ${warmUpSec.toFixed(1)}s`, 'fixture     analysis  replan  preview  finals (s, each)          LUFS          kept units  cut units  clipped'];
       for (const r of results) {
         lines.push(
           `${r.fixture.padEnd(11)} ${r.analysisSec.toFixed(1).padStart(7)}s ${r.replanSec.toFixed(1).padStart(6)}s ${r.preview.sec.toFixed(1).padStart(7)}s  ` +
@@ -235,7 +306,7 @@ describe.skipIf(!process.env.KILO_TEST_REAL)('acceptance: the real pipeline end 
   for (const id of ['routine', 'unboxing', 'mistakes']) {
     it(`${id}: analyse, score, edit, replan, render, check every frame`, async () => {
       current = {};
-      const m = manifest(id) as ReturnType<typeof manifest> & { mode: Mode; clips: FixtureClip[] };
+      const m = manifest(id) as unknown as { mode: Mode; clips: FixtureClip[]; broll: unknown[]; script: string[] | null };
       const mode = m.mode;
       const settings: EditSettings = { ...MODE_PRESETS[mode].settings, broll: true, graphics: true, captions: true, hookVariations: 3 };
       const user = env.as(newUser());
@@ -319,6 +390,7 @@ describe.skipIf(!process.env.KILO_TEST_REAL)('acceptance: the real pipeline end 
 
       // ---- preview ----------------------------------------------------------------------
       current = {};
+      renderLog = [];
       const waitRender = async (renderId: string) => {
         let startedAt = 0;
         const done = await poll(async () => {
@@ -341,7 +413,7 @@ describe.skipIf(!process.env.KILO_TEST_REAL)('acceptance: the real pipeline end 
       expect((await user.ok(VideoSummary, 'GET', `/v1/videos/${video.videoId}`)).status).toBe('ready_for_review');
       const pvPath = join(dir, 'preview.mp4');
       await download(pvDone.done.url!, pvPath);
-      const pvProbe = probe(pvPath);
+      const pvProbe = await probe(pvPath);
       expect([pvProbe.width, pvProbe.height, pvProbe.fps]).toEqual([540, 960, Math.min(edl.fps, 30)]);
 
       // ---- finals of every variant ------------------------------------------------------
@@ -353,7 +425,7 @@ describe.skipIf(!process.env.KILO_TEST_REAL)('acceptance: the real pipeline end 
         const { done, sec } = await waitRender(r.id);
         const path = join(dir, `final-${r.variantId}.mp4`);
         await download(done.url!, path);
-        const p = probe(path);
+        const p = await probe(path);
         const tl = resolveTimeline(edl, r.variantId);
         expect(p.width).toBe(1080);
         expect(p.height).toBe(1920);
@@ -361,19 +433,48 @@ describe.skipIf(!process.env.KILO_TEST_REAL)('acceptance: the real pipeline end 
         expect(Math.abs(p.duration - tl.durationSec), `${r.variantId} duration`).toBeLessThanOrEqual(1 / edl.fps + 1e-6);
         expect(p.audioCodec).toBe('aac');
         expect(p.audioRate).toBe(48000);
-        const lufs = loudness(path);
+        const lufs = await loudness(path);
         expect(Math.abs(lufs - -14), `${r.variantId} loudness ${lufs}`).toBeLessThanOrEqual(1.5);
-        // No orange band in any frame, except while the restored segment plays.
-        const item = tl.items.find((i) => i.segment.id === restoredSeg.id)!;
-        const allowed: [number, number] = [Math.floor(item.outStart * edl.fps) - 1, Math.ceil(item.outEnd * edl.fps) + 1];
-        const shares = orangeShares(path);
+        // Every frame, traced back to the fixture unit it shows. No frame may show a cut line
+        // (speech, filler, false start, retake, chatter) except the restored segment.
+        const unitOf = new Map(m.clips.map((c) => [clipIdOf.get(c.name)!, c.units]));
+        const classify = (f: number): 'kept' | 'restored' | 'pause' | 'cut_speech' | 'none' => {
+          const t = (f + 0.5) / edl.fps;
+          const it = tl.items.find((i) => t >= i.outStart && t < i.outEnd) ?? tl.items[tl.items.length - 1]!;
+          if (it.segment.id === restoredSeg.id) return 'restored';
+          const src = it.segment.start + (t - it.outStart);
+          const u = unitOf.get(it.segment.clipId)!.find((x) => src >= x.start && src < x.end);
+          if (!u) return 'none';
+          if (u.keep) return 'kept';
+          return u.kind === 'pause' ? 'pause' : 'cut_speech';
+        };
+        const classes = Array.from({ length: p.frames }, (_, f) => classify(f));
+        expect(classes.filter((c) => c === 'cut_speech').length, `${id} ${r.variantId}: frames of cut lines`).toBe(0);
+        // Kept pause (breathing room and cut padding) is short wherever it occurs.
+        const pauseRuns: number[] = [];
+        classes.forEach((c, f) => {
+          if (c !== 'pause') return;
+          if (f > 0 && classes[f - 1] === 'pause') pauseRuns[pauseRuns.length - 1]! += 1;
+          else pauseRuns.push(1);
+        });
+        const maxPause = PACING_PARAMS[edl.settings.pacing].keptPauseSec + 2 * PACING_PARAMS[edl.settings.pacing].cutPaddingSec + 2 / edl.fps;
+        for (const run of pauseRuns) expect(run / edl.fps, `${id} ${r.variantId}: kept pause`).toBeLessThanOrEqual(maxPause + 1e-6);
+        // The pixels agree: the orange band shows only on kept pause or the restored segment.
+        const shares = await orangeShares(path);
         expect(shares.length).toBe(p.frames);
-        const orange = shares.map((s, f) => [s, f] as const).filter(([s]) => s > 0.03);
-        const outside = orange.filter(([, f]) => f < allowed[0] || f > allowed[1]);
-        expect(outside.map(([s, f]) => `frame ${f} (${(f / edl.fps).toFixed(2)}s) ${(s * 100).toFixed(0)}%`), `${id} ${r.variantId}`).toEqual([]);
-        // The detector does see the band where it should be (unless an overlay covers that line).
-        const inRestored = orange.length - outside.length;
-        finals.push({ variantId: r.variantId, renderSec: sec, width: p.width, height: p.height, fps: p.fps, durationSec: p.duration, expectedSec: tl.durationSec, lufs, orangeFrames: outside.length, orangeInRestored: inRestored, frames: p.frames });
+        const near = (f: number, ok: (c: string) => boolean) => [f - 1, f, f + 1].some((g) => g >= 0 && g < classes.length && ok(classes[g]!));
+        const orange = shares.map((sh, f) => [sh, f] as const).filter(([sh]) => sh > 0.03);
+        const unexpected = orange.filter(([, f]) => !near(f, (c) => c === 'pause' || c === 'restored'));
+        expect(unexpected.map(([sh, f]) => `frame ${f} (${(f / edl.fps).toFixed(2)}s, ${classes[f]}) ${(sh * 100).toFixed(0)}%`), `${id} ${r.variantId}`).toEqual([]);
+        const inRestored = orange.filter(([, f]) => classes[f] === 'restored').length;
+        const pauseOrange = orange.length - inRestored;
+        void sec;
+        const logged = renderLog.find((e) => e.quality === 'final' && e.variantId === r.variantId);
+        finals.push({
+          variantId: r.variantId, renderSec: logged?.sec ?? NaN, graphicsSec: logged?.graphicsSec ?? NaN, stagesSec: logged?.stagesSec ?? null, width: p.width, height: p.height, fps: p.fps, durationSec: p.duration, expectedSec: tl.durationSec, lufs,
+          frames: p.frames, cutSpeechFrames: 0, orangeOnKeptPause: pauseOrange, orangeInRestored: inRestored,
+          keptPauseFrames: pauseRuns.reduce((a, b) => a + b, 0), longestKeptPauseSec: Math.max(0, ...pauseRuns) / edl.fps,
+        });
       }
       expect(finals.some((f) => f.orangeInRestored > 0), 'the orange detector never fired on the restored segment').toBe(true);
       const after = await user.ok(VideoSummary, 'GET', `/v1/videos/${video.videoId}`);
@@ -397,7 +498,7 @@ describe.skipIf(!process.env.KILO_TEST_REAL)('acceptance: the real pipeline end 
         },
         restored: { segmentId: restoredSeg.id, reason: restoredSeg.reason, text: restoredSeg.text },
         replanSec,
-        preview: { sec: pvDone.sec, width: pvProbe.width, height: pvProbe.height, fps: pvProbe.fps },
+        preview: { sec: renderLog.find((e) => e.quality === 'preview')?.sec ?? pvDone.sec, width: pvProbe.width, height: pvProbe.height, fps: pvProbe.fps },
         finals,
         renderSteps: current,
       });

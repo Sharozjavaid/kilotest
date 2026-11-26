@@ -136,7 +136,8 @@ export async function runEdit(args: EditArgs, pipeline: Pipeline, print: (line: 
       const clipId = `clip${order + 1}`;
       names.set(clipId, basename(file));
       print(`ingest   ${basename(file)}`);
-      const clip = await analyze.ingestClip({ clipId, order, inputPath: resolve(file), workDir: join(work, 'ingest') });
+      // One directory per clip: ingest writes fixed file names (normalized.mp4, audio.wav, thumb.jpg).
+      const clip = await analyze.ingestClip({ clipId, order, inputPath: resolve(file), workDir: join(work, 'ingest', clipId) });
       ingested.push(clip);
       transcripts.push({ ...(await analyze.transcribeClip({ clipId, audioPath: clip.audioPath, durationSec: clip.info.durationSec })), clipId });
       silences.push(...(await analyze.detectSilence({ clipId, audioPath: clip.audioPath })));
@@ -144,10 +145,12 @@ export async function runEdit(args: EditArgs, pipeline: Pipeline, print: (line: 
     const broll: { asset: BrollAsset; path: string }[] = [];
     for (const [i, file] of args.broll.entries()) {
       print(`b-roll   ${basename(file)}`);
+      const assetId = `broll${i + 1}`;
+      // One directory per asset: ingest writes fixed file names (normalized.jpg, thumb.jpg).
       const result = await analyze.ingestBroll({
-        assetId: `broll${i + 1}`,
+        assetId,
         inputPath: resolve(file),
-        workDir: join(work, 'broll'),
+        workDir: join(work, 'broll', assetId),
         source: 'user',
         filename: basename(file),
       });

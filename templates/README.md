@@ -16,13 +16,21 @@ await templates.renderGraphic({ template: 'stat-callout', props: { value: '10 se
 - Remotion captures each frame as a transparent PNG in headless Chromium; the frames are piped in order into the system `ffmpeg`, which encodes ProRes 4444 with the `prores_aw` encoder (same stream as `prores_ks`, about 2.5x faster; set `KILO_TEMPLATES_PRORES_ENCODER=prores_ks` to switch). Capture and encoding overlap.
 - The Remotion project is bundled once per code version into the cache directory and reused by every later process. One headless browser is shared by all renders and closes itself after 15 s idle (`shutdown()` closes it at once).
 - Text is measured in the page with the bundled fonts and wrapped into balanced lines by our own fitter (`src/remotion/fit.ts`), then drawn line by line, so what is measured is what is drawn. Every template auto-sizes to fit its schema's longest values inside the platform safe area (top 12%, bottom 22%, right 14% of the lower half).
-- Output is cached on disk by a hash of the validated request plus a hash of the template sources, fonts and Remotion version. Identical requests return in milliseconds; identical concurrent requests share one render; concurrent renders are limited by a semaphore. Writes are atomic (temp file + rename).
+- **Durations outside the catalog range** (`minDurationSec`..`maxDurationSec` in `@kilo/edl`) are clamped to it, and the file has `round(clampedDuration * fps)` frames: timings are never squeezed below what a template was designed for. `@kilo/analyze` only asks within the range; `@kilo/render` clamps too (a graphic cut short by the end of a video is rendered at its minimum and trimmed).
+- **Held frames are captured once.** Every template reads time only through `progress()` (`src/remotion/motion.ts`), so the values it returns fully determine a frame. `src/holds.ts` draws the template in Node (stub text measurer; the number of `progress()` calls depends on the props, not on widths) to get those values for every frame in a few milliseconds; runs of at least `max(12, fps/4)` identical frames are captured once in Chromium, sent to ffmpeg once, and repeated after colour conversion (`setpts` + `fps`). `test/holds.test.ts` checks the output is identical, frame for frame, to a full capture for every template; it saves 10 to 45% of the render time depending on how long the graphic holds (a 6 s list: 3.6 s to 2.0 s; a 3.5 s list at 1080x1920@60: 6.4 s to 5.6 s). `KILO_TEMPLATES_SKIP_HOLDS=0` turns it off.
+- Output is cached on disk by a hash of the validated request plus a hash of the template sources, fonts and Remotion version, and the Chromium build (`chrome-headless-shell --version`). Identical requests return in milliseconds; identical concurrent requests share one render; concurrent renders are limited by a semaphore. Writes are atomic (temp file + rename).
+- **The cache is pruned** at most once a minute after a render: rendered graphics and stills unused for `KILO_TEMPLATES_CACHE_MAX_AGE_DAYS` (default 14) go first, then the least recently used until the total is under `KILO_TEMPLATES_CACHE_MAX_MB` (default 2048); a cache hit counts as a use, entries used in the last 10 minutes are never removed, and bundles of other code versions go a day after their last change. `pruneCache()` runs it by hand.
+- Every ffmpeg runs with two threads (`KILO_FFMPEG_THREADS`).
 
 ## Environment
 
 | Variable | Default | |
 |---|---|---|
-| `KILO_TEMPLATES_CACHE_DIR` | `$TMPDIR/kilo-templates-cache` | bundles, rendered graphics and stills. Not pruned automatically. |
+| `KILO_TEMPLATES_CACHE_DIR` | `$TMPDIR/kilo-templates-cache` | bundles, rendered graphics and stills |
+| `KILO_TEMPLATES_CACHE_MAX_MB` | 2048 | size cap for rendered graphics and stills |
+| `KILO_TEMPLATES_CACHE_MAX_AGE_DAYS` | 14 | entries unused this long are removed |
+| `KILO_TEMPLATES_SKIP_HOLDS` | 1 | `0` captures every frame |
+| `KILO_FFMPEG_THREADS` | 2 | threads per ffmpeg |
 | `KILO_CHROMIUM_PATH` | first `chromium_headless_shell-*` under `/opt/pw-browsers` or `~/.cache/ms-playwright` | Remotion downloads a browser only if none is found. |
 | `KILO_TEMPLATES_PARALLEL` | 2 | graphics rendered at the same time |
 | `KILO_TEMPLATES_CONCURRENCY` | min(4, cores) | browser tabs per graphic |
@@ -32,7 +40,7 @@ await templates.renderGraphic({ template: 'stat-callout', props: { value: '10 se
 
 ## Scripts
 
-- `npm test`: renders every template and checks the files with ffprobe (codec, profile, pixel format, size, rate, exact frame count), transparency or opacity at mid-hold, the safe area on the longest/shortest text cases, prop validation, cache, determinism and concurrency.
+- `npm test`: renders every template and checks the files with ffprobe (codec, profile, pixel format, size, rate, exact frame count), transparency or opacity at mid-hold, the safe area on the longest/shortest text cases, prop validation, cache, determinism and concurrency; held-frame skipping against full captures, duration clamping and cache pruning.
 - `npm run preview`: contact sheets in `.work/preview/<template>.png` (six moments across the duration, three themes, longest/shortest text) over a footage-like background with the safe-area guides in red. `-- --full` renders at 1080x1920@60, `-- --only=<id>` limits to one template.
 
 ## Licences

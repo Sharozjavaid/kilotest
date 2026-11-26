@@ -1,8 +1,8 @@
 import type { Edl, Overlay, Variant } from '@kilo/edl';
 import { getTemplate, parseTemplateProps } from '@kilo/edl';
 import type { Line } from './lines.js';
-import { findEmphasis, findPrice, findStat, ordinalAt } from './overlays.js';
-import { capitalize, clampWords, displayText, tokens } from './text.js';
+import { LEAD_IN, findEmphasis, findPrice, findStat, ordinalAt } from './overlays.js';
+import { capitalize, clampWords, displayText, norm, tokens } from './text.js';
 
 /** A hook choice: play the natural order, open cold on a later line, or put a title over the opening. */
 export type HookPlan =
@@ -30,9 +30,18 @@ function lineText(line: Line): string {
   return displayText(line.words.map((w) => w.text)) || line.text;
 }
 
-function titleFrom(text: string): string {
-  return capitalize(clampWords(text.replace(/[.!?]+$/, ''), 40));
+/** A title card's text: the line without its spoken lead-in ("Okay, so ..."), at most 40 characters. */
+export function titleFrom(text: string): string {
+  const words = text.replace(/[.!?]+$/, '').split(/\s+/).filter(Boolean);
+  while (words.length > 3 && LEAD_IN.has(norm(words[0]!))) words.shift();
+  const full = words.join(' ').replace(/^[,;:\s]+/, '');
+  const clamped = clampWords(full, 50).split(' ');
+  // A shortened title never ends on a word that needs the next one ("... every morning for").
+  if (clamped.join(' ') !== full) while (clamped.length > 2 && TRAILING.has(norm(clamped[clamped.length - 1]!))) clamped.pop();
+  return capitalize(clamped.join(' ').replace(/[,;:]+$/, ''));
 }
+
+const TRAILING = new Set(['a', 'an', 'the', 'and', 'or', 'but', 'for', 'to', 'of', 'in', 'on', 'at', 'with', 'my', 'your', 'our', 'is', 'are', 'it', 'that', 'this']);
 
 /** Heuristic hooks: natural, then cold opens on the strongest later lines, then titles. */
 export function heuristicHooks(lines: Line[], edl: Edl, count: number): HookPlan[] {
@@ -43,14 +52,16 @@ export function heuristicHooks(lines: Line[], edl: Edl, count: number): HookPlan
       .filter((o) => o.type === 'broll' || getTemplate(o.template).placement === 'fullscreen')
       .map((o) => o.anchorSegmentId),
   );
+  // A cut line the creator restored by hand (reason is not `speech`) is never a hook.
+  const spoken = (l: Line) => l.segment.reason === 'speech';
   const cold = lines
     .slice(1)
-    .filter((l) => !anchored.has(l.segment.id) && !ordinalAt(l.words.map((w) => w.text)))
+    .filter((l) => spoken(l) && !anchored.has(l.segment.id) && !ordinalAt(l.words.map((w) => w.text)))
     .map((l) => ({ l, s: hookScore(l) }))
     .filter((x) => x.s >= 2)
     .sort((a, b) => b.s - a.s || a.l.index - b.l.index)
     .map((x) => x.l);
-  const titleSources = [lines[0], ...cold, ...lines.slice(1)].filter((l): l is Line => !!l);
+  const titleSources = [lines[0], ...cold, ...lines.slice(1)].filter((l): l is Line => !!l && spoken(l));
   const plans: HookPlan[] = [{ kind: 'natural' }];
   const usedTitles = new Set<string>();
   let ci = 0;
