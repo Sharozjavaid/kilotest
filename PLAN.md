@@ -100,6 +100,20 @@ Each phase ends with something a creator can use.
 
 Phases 3 to 5 are the likely paid tier. The free tier is cut, review and export.
 
+### Where each phase stands
+
+Everything below is built and passes its checks on synthetic recordings, in a browser, against stand-ins for the outside services. None of it has run on a phone or against a real account yet.
+
+| Phase | Built | Still to prove |
+|---|---|---|
+| 0 | The `kilo edit` command and the full pipeline. On the synthetic recordings: no clipped words, every retake group keeps the right take. | The "done when" test itself: 10 real recordings. Short fillers between words that touch are sometimes left in. |
+| 1 | Sign-in, upload queue, batch screen, review with scrubbing and tap-to-fix, export, push registration. | A device build: background uploads, saving to the camera roll, the share sheet, push delivery. Supabase sign-in and storage on a real project. |
+| 2 | Script entry, teleprompter, one clip per line with keep or delete, 60 fps capture request. | 60 fps capture on real phones (the browser version is what was tested). |
+| 3 | B-roll bin, descriptions, placement, slow pan, swap and remove. | Claude's descriptions and placement with a real key; the offline decider was used in tests. |
+| 4 | Five templates in three themes. | Remotion licence terms for the company. |
+| 5 | Hook variations, three modes, optional burned-in captions. | Whether the variations read as distinct on real footage. |
+| 6 | Weekly goal, reminders, stock B-roll lookup. | Direct posting is not built: it needs the platforms' app review. Export goes to the camera roll and the share sheet. |
+
 ## 5. Design
 
 Light and calm, in the spirit of the reference the brief named, with Kilo's own wordmark and no third-party assets.
