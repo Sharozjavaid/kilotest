@@ -28,7 +28,9 @@ function Player({ url, title, onClose }: { url: string; title: string; onClose: 
           <IconButton icon="close" label="Close player" onPress={onClose} />
         </View>
       </View>
-      <VideoView player={player} style={styles.video} contentFit="contain" nativeControls />
+      <View style={styles.video}>
+        <VideoView player={player} style={styles.fill} contentFit="contain" nativeControls />
+      </View>
     </View>
   );
 }
@@ -38,4 +40,5 @@ const styles = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   close: { backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 22 },
   video: { flex: 1, borderRadius: 16, overflow: 'hidden' },
+  fill: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' },
 });

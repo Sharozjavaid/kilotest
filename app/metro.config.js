@@ -14,8 +14,5 @@ config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(edlRoot, 'node_modules'),
 ];
-config.resolver.unstable_enableSymlinks = true;
-// The mock proxy video ships as an asset.
-config.resolver.assetExts = Array.from(new Set([...config.resolver.assetExts, 'mp4']));
 
 module.exports = config;

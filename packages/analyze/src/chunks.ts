@@ -117,6 +117,25 @@ interface Piece {
   interrupted: boolean;
 }
 
+/**
+ * Index where a run starts saying its own opening again ("the trick is to apply it on
+ * the trick is to apply it on damp skin"): three matching words, or two after a pause.
+ */
+export function restartIndex(run: readonly ClipWord[]): number {
+  const idx = run.map((w, i) => ({ w, i })).filter((x) => !x.w.filler);
+  const ks = idx.map((x) => key(x.w.text));
+  if (ks.length < 4) return -1;
+  for (let p = 2; p + 1 < ks.length; p++) {
+    const n3 = p + 2 < ks.length && ks[p] === ks[0] && ks[p + 1] === ks[1] && ks[p + 2] === ks[2];
+    const prevWord = idx[p - 1]!.w;
+    const here = idx[p]!.w;
+    const paused = here.start - prevWord.end >= 0.2 || run[idx[p]!.i - 1]?.filler === true || endsClause(prevWord.text);
+    const n2 = paused && ks[p] === ks[0] && ks[p + 1] === ks[1];
+    if (n3 || n2) return idx[p]!.i;
+  }
+  return -1;
+}
+
 /** Splits one clip's words into chunks. */
 function chunkClip(cw: ClipWords, punctuated: boolean): Piece[] {
   // 1. Runs split at sentence ends and pauses.
@@ -131,6 +150,20 @@ function chunkClip(cw: ClipWords, punctuated: boolean): Piece[] {
     cur.push(w);
   }
   if (cur.length) runs.push(cur);
+
+  // 1b. A run that restarts on its own opening words is two takes: split at the restart.
+  const split: ClipWord[][] = [];
+  for (const run of runs) {
+    let rest = run;
+    for (;;) {
+      const at = restartIndex(rest);
+      if (at <= 0) break;
+      split.push(rest.slice(0, at));
+      rest = rest.slice(at);
+    }
+    split.push(rest);
+  }
+  runs.splice(0, runs.length, ...split);
 
   // 2. Off-script phrases inside a run become their own pieces.
   const pieces: Piece[] = [];

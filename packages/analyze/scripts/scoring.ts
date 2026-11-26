@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -85,6 +86,26 @@ export interface ScoreReport {
   };
 }
 
+/**
+ * Generates every spec in fixtures/specs that has no output yet into this package's
+ * own .work/fixtures (never into fixtures/out, which others read). Needs espeak-ng.
+ */
+export function ensureGenerated(): string[] {
+  const specDir = join(REPO, 'fixtures/specs');
+  const made: string[] = [];
+  if (!existsSync(specDir)) return made;
+  for (const f of readdirSync(specDir).filter((x) => x.endsWith('.json')).sort()) {
+    const id = (JSON.parse(readFileSync(join(specDir, f), 'utf8')) as { id: string }).id;
+    const have = FIXTURE_ROOTS.some((root) => existsSync(join(root, id, 'manifest.json')));
+    const own = join(FIXTURE_ROOTS[1]!, id, 'manifest.json');
+    const stale = existsSync(own) && statSync(join(specDir, f)).mtimeMs > statSync(own).mtimeMs;
+    if (have && !stale) continue;
+    execFileSync('node', [join(REPO, 'fixtures/generate.mjs'), '--only', id, '--out', FIXTURE_ROOTS[1]!], { stdio: 'ignore' });
+    made.push(id);
+  }
+  return made;
+}
+
 export function findFixtures(): string[] {
   const dirs: string[] = [];
   for (const root of FIXTURE_ROOTS) {
@@ -136,7 +157,45 @@ function overlap(a0: number, a1: number, b0: number, b1: number): number {
   return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
 }
 
-export async function scoreFixture(dir: string): Promise<FixtureScore> {
+/** Seeded PRNG so jittered runs are repeatable. */
+function rng(seed: number): () => number {
+  let x = seed >>> 0 || 1;
+  return () => {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    return ((x >>> 0) % 1_000_000) / 1_000_000;
+  };
+}
+
+/**
+ * Simulates speech-to-text timing error: word starts move up to +-`sec`, word ends
+ * up to `sec` early or half that late (providers tend to end words early).
+ */
+export function jitterTranscript(t: Transcript, sec: number, seed: number): Transcript {
+  const r = rng(seed);
+  const words = t.words.map((w) => {
+    const start = Math.max(0, w.start + (r() * 2 - 1) * sec);
+    const end = Math.max(start + 0.02, w.end + (r() * 1.5 - 1) * sec);
+    return { ...w, start, end };
+  });
+  for (let i = 1; i < words.length; i++) {
+    if (words[i]!.start < words[i - 1]!.end) {
+      const mid = (words[i]!.start + words[i - 1]!.end) / 2;
+      words[i - 1]!.end = Math.max(words[i - 1]!.start + 0.01, mid);
+      words[i]!.start = Math.max(words[i - 1]!.end, mid);
+      words[i]!.end = Math.max(words[i]!.end, words[i]!.start + 0.01);
+    }
+  }
+  return { ...t, words };
+}
+
+export interface ScoreOptions {
+  /** Perturb the decider's word timings by up to this many seconds. */
+  jitterSec?: number;
+}
+
+export async function scoreFixture(dir: string, opts: ScoreOptions = {}): Promise<FixtureScore> {
   const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Manifest;
   const fixture = manifest.id;
   const ingested: IngestedClip[] = [];
@@ -144,7 +203,8 @@ export async function scoreFixture(dir: string): Promise<FixtureScore> {
   const transcripts: Transcript[] = [];
   const silences: SilenceGap[] = [];
   for (const ic of ingested) {
-    transcripts.push(await analyze.transcribeClip({ clipId: ic.info.id, audioPath: ic.audioPath, durationSec: ic.info.durationSec }));
+    const t = await analyze.transcribeClip({ clipId: ic.info.id, audioPath: ic.audioPath, durationSec: ic.info.durationSec });
+    transcripts.push(opts.jitterSec ? jitterTranscript(t, opts.jitterSec, transcripts.length + 7) : t);
     silences.push(...(await analyze.detectSilence({ clipId: ic.info.id, audioPath: ic.audioPath })));
   }
   const broll: BrollAsset[] = [];
@@ -248,9 +308,10 @@ export async function scoreFixture(dir: string): Promise<FixtureScore> {
   return score;
 }
 
-export async function runScore(): Promise<ScoreReport> {
+export async function runScore(opts: ScoreOptions = {}): Promise<ScoreReport> {
+  ensureGenerated();
   const fixtures: FixtureScore[] = [];
-  for (const dir of findFixtures()) fixtures.push(await scoreFixture(dir));
+  for (const dir of findFixtures()) fixtures.push(await scoreFixture(dir, opts));
   const sum = (f: (s: FixtureScore) => number) => fixtures.reduce((n, s) => n + f(s), 0);
   return {
     fixtures,

@@ -10,13 +10,7 @@
     "backgroundColor": "#F5F8FC",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.kilo.editor",
-      "infoPlist": {
-        "UIBackgroundModes": [
-          "fetch",
-          "remote-notification"
-        ]
-      }
+      "bundleIdentifier": "app.kilo.editor"
     },
     "android": {
       "package": "app.kilo.editor",

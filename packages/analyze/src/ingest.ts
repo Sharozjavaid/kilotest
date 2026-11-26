@@ -65,7 +65,11 @@ export async function ingestClip(input: {
   if (!video) throw new Error(`No video stream in ${input.inputPath}`);
   const audio = src.streams.find((s) => s.codec_type === 'audio');
   const { fps } = nominalFps(video);
-  const sourceDuration = durationOf(src, 'video') || durationOf(src);
+  // The longer of picture and sound: speech after the last frame must survive (the
+  // picture holds its last frame), and nothing is ever trimmed from the start.
+  const videoDuration = durationOf(src, 'video') || durationOf(src);
+  const audioDuration = audio ? Number(audio.duration) || 0 : 0;
+  const sourceDuration = Math.max(videoDuration, audioDuration);
   if (!(sourceDuration > 0)) throw new Error(`Cannot read the duration of ${input.inputPath}`);
 
   const normalizedPath = join(input.workDir, 'normalized.mp4');
@@ -82,7 +86,7 @@ export async function ingestClip(input: {
   args.push(
     '-map', '0:v:0',
     '-map', audio ? '0:a:0' : '1:a:0',
-    '-vf', `${CROP_9x16},fps=${fps},format=yuv420p`,
+    '-vf', `${CROP_9x16},tpad=stop_mode=clone:stop_duration=${(sourceDuration - videoDuration + 0.5).toFixed(3)},fps=${fps},format=yuv420p`,
     '-af', 'aresample=48000:async=1000:first_pts=0,apad',
     '-t', sourceDuration.toFixed(6),
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-profile:v', 'high', '-pix_fmt', 'yuv420p',

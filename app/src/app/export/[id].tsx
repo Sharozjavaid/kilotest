@@ -135,7 +135,7 @@ function ExportBody({ video }: { video: VideoDetail }) {
     else router.replace(`/batch/${next.batchId}`);
   };
 
-  const headline = n > 1 ? `${WORDS[n] ?? n} versions of ${video.title}` : `${video.title} is ${allDone ? 'ready' : 'exporting'}`;
+  const headline = n > 1 ? `${n} versions of ${video.title}` : `${video.title} is ${allDone ? 'ready' : 'exporting'}`;
   const headline2 = n > 1 ? `Same body, ${WORDS[n] ?? n} different openings.` : allDone ? 'Your final cut, ready to post.' : 'Rendering at full quality. This takes a minute.';
 
   return (
@@ -154,9 +154,6 @@ function ExportBody({ video }: { video: VideoDetail }) {
             <PillButton variant="secondary" label="Send to TikTok" style={{ flex: 1 }} disabled={!current.render?.url} loading={busy === 'tiktok'} onPress={() => void send('tiktok')} />
             <PillButton variant="secondary" label="Send to Instagram" style={{ flex: 1 }} disabled={!current.render?.url} loading={busy === 'instagram'} onPress={() => void send('instagram')} />
           </View>
-          <Text variant="label" tone="muted" center>
-            Sends {n > 1 ? `${current.label} ` : ''}through your phone's share sheet. Pick the app there; Kilo doesn't post for you.
-          </Text>
           <PillButton variant="text" label={next ? `Next video, ${idx + 2} of ${list.length}` : 'Back to home'} onPress={goNext} />
         </>
       }
@@ -203,6 +200,10 @@ function ExportBody({ video }: { video: VideoDetail }) {
         <InfoRow divider label="Frame rate" value={`${Math.round(edl.fps)} fps, same as recorded`} />
         <InfoRow divider label="Captions" value={edl.captions.enabled ? 'Burned in' : 'Off, add in the app you post to'} />
       </Card>
+
+      <Text variant="secondary" tone="muted">
+        Send to TikTok or Instagram opens your phone's share sheet with {n > 1 ? current.label : 'this video'}. You pick the app and post from there; Kilo doesn't post for you.
+      </Text>
 
       {sharedTo || video.postedAt ? (
         <Card gap={8}>

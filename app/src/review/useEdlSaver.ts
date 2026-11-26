@@ -21,6 +21,8 @@ export function useEdlSaver(videoId: string, edl: Edl | null) {
       save: async (body, baseRevision) => {
         const res = await getApi().saveEdl(videoId, { edl: body, baseRevision });
         qc.setQueryData<VideoDetail>(keys.video(videoId), (old) => (old ? { ...old, edl: res.edl } : old));
+        // Saving can move a finished video back to review on the server; refetch its status.
+        void qc.invalidateQueries({ queryKey: keys.video(videoId) });
         void qc.invalidateQueries({ queryKey: keys.home });
         return res.edl;
       },

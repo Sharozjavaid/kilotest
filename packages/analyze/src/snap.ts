@@ -34,17 +34,38 @@ const frameCeil = (t: number, fps: number) => Math.ceil(t * fps - 1e-6) / fps;
 const frameFloor = (t: number, fps: number) => Math.floor(t * fps + 1e-6) / fps;
 const frameRound = (t: number, fps: number) => Math.round(t * fps) / fps;
 
-/** Where speech really ends after a word: the start of the silence that follows, if later. */
+/**
+ * How far a word's reported time may be from the real edge of its audio. Speech-to-text
+ * providers are usually within ~100 ms; a silence edge further away than this is not
+ * this word's edge, so it is not used to move the boundary.
+ */
+export const MAX_TIMING_ERROR_SEC = 0.35;
+
+/** Where speech really ends after a word: the start of the silence that follows, if a little later. */
 function speechEndAfter(w: ClipWord, nextStart: number, silences: SilenceGap[]): number {
   const s = silences.find((g) => g.start >= w.end - SILENCE_SLOP && g.start < nextStart && g.end > w.end);
-  return s ? Math.min(nextStart, Math.max(w.end, s.start)) : w.end;
+  if (!s) return w.end;
+  return Math.min(nextStart, Math.max(w.end, Math.min(s.start, w.end + MAX_TIMING_ERROR_SEC)));
 }
 
-/** Where speech really starts before a word: the end of the silence before it, if earlier. */
+/** Where speech really starts before a word: the end of the silence before it, if a little earlier. */
 function speechStartBefore(w: ClipWord, prevEnd: number, silences: SilenceGap[]): number {
   let found: SilenceGap | undefined;
   for (const g of silences) if (g.end <= w.start + SILENCE_SLOP && g.end > prevEnd && g.start < w.start) found = g;
-  return found ? Math.max(prevEnd, Math.min(w.start, found.end)) : w.start;
+  if (!found) return w.start;
+  return Math.max(prevEnd, Math.min(w.start, Math.max(found.end, w.start - MAX_TIMING_ERROR_SEC)));
+}
+
+/** Joins silences separated by a blip too short to be speech. */
+export function mergeSilences(gaps: SilenceGap[], maxBlipSec = 0.06): SilenceGap[] {
+  const sorted = [...gaps].sort((a, b) => a.start - b.start);
+  const out: SilenceGap[] = [];
+  for (const g of sorted) {
+    const last = out[out.length - 1];
+    if (last && last.clipId === g.clipId && g.start - last.end <= maxBlipSec) last.end = Math.max(last.end, g.end);
+    else out.push({ ...g });
+  }
+  return out;
 }
 
 function mergeCuts(cuts: Cut[]): Cut[] {
@@ -71,7 +92,7 @@ export function planClipCuts(input: {
   const p = PACING_PARAMS[settings.pacing];
   const pad = p.cutPaddingSec;
   const minLen = MIN_FRAMES / fps;
-  const silences = [...input.silences].sort((a, b) => a.start - b.start);
+  const silences = mergeSilences(input.silences);
   const cuts: Cut[] = [];
 
   if (!states.length) {

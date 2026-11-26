@@ -240,6 +240,17 @@ describe('utterances and retake detection', () => {
     ]);
   });
 
+  it('splits a restart inside one utterance and keeps the finished take', () => {
+    const clips = [synthClip('c', 0, [{ say: 'The trick is to apply it on The trick is to apply it on damp skin.' }])];
+    const cw = prepareClipWords(clips.map((c) => c.info), clips.map((c) => c.transcript));
+    const chunks = buildChunks(cw);
+    const d = heuristicCuts({ chunks, clipWords: cw, settings: decideInput(clips).settings });
+    expect(chunks.map((c) => [c.text, d.get(c.id)?.keep])).toEqual([
+      ['The trick is to apply it on', false],
+      ['The trick is to apply it on damp skin.', true],
+    ]);
+  });
+
   it('does not treat a list of similar sentences as retakes', () => {
     const clips = [synthClip('c', 0, [
       { say: 'Number one, you use too little.' }, { say: 'Number two, you forget your ears.' }, { pause: 1 }, { say: 'Number three, you never reapply.' },

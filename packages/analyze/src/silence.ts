@@ -108,5 +108,13 @@ export async function detectSilence(input: { clipId: string; audioPath: string }
     '-af', `silencedetect=noise=${profile.thresholdDb}dB:d=${MIN_SILENCE_SEC}`,
     '-f', 'null', '-',
   ]);
-  return parseSilenceDetect(stderr, input.clipId, durationSec);
+  // A click or breath of a few milliseconds can split one pause in two; join them.
+  const gaps = parseSilenceDetect(stderr, input.clipId, durationSec);
+  const merged: SilenceGap[] = [];
+  for (const g of gaps) {
+    const last = merged[merged.length - 1];
+    if (last && g.start - last.end <= 0.06) last.end = Math.max(last.end, g.end);
+    else merged.push({ ...g });
+  }
+  return merged;
 }

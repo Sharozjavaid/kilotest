@@ -107,8 +107,10 @@ export class UploadQueue {
     if (!this.loaded) {
       const stored = await this.d.store.load().catch(() => [] as UploadJob[]);
       const known = new Set(this.jobs.map((j) => j.id));
-      // Anything that was mid-upload when the app stopped starts again.
-      const restored = stored.filter((j) => !known.has(j.id)).map((j) => (j.status === 'uploading' ? { ...j, status: 'pending' as const } : j));
+      // Finished jobs are dropped; anything that was mid-upload when the app stopped starts again.
+      const restored = stored
+        .filter((j) => !known.has(j.id) && j.status !== 'done')
+        .map((j) => (j.status === 'uploading' ? { ...j, status: 'pending' as const } : j));
       this.jobs = [...restored, ...this.jobs];
       this.loaded = true;
     }

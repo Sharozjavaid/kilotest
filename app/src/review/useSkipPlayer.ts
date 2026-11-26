@@ -48,7 +48,8 @@ export function useSkipPlayer(url: string | null, ranges: PlaybackRange[]): Skip
       primed.current = true;
       const first = controller.getRanges()[0];
       if (first && player.currentTime < first.proxyStart) {
-        player.currentTime = controller.seekToOutput(0);
+        // A hair past the start, so the poster frame is the first kept frame rather than the last cut one.
+        player.currentTime = controller.seekToOutput(0.05);
         setSnapshot(controller.snapshot());
       }
     }

@@ -201,7 +201,7 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
 
       <View style={styles.top}>
         <View style={[styles.player, shadow.player]}>
-          <VideoView player={sp.player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
+          <VideoView player={sp.player} style={styles.video} contentFit="cover" nativeControls={false} />
           <Pressable
             onPress={sp.toggle}
             accessibilityRole="button"
@@ -335,6 +335,8 @@ function PreviewLink({ busy, progress, failed, error, ready, onPress }: { busy: 
 const styles = StyleSheet.create({
   top: { flexDirection: 'row', gap: 14, alignItems: 'stretch' },
   player: { width: 118, height: 210, borderRadius: 16, backgroundColor: color.player, overflow: 'hidden', flexShrink: 0 },
+  // Explicit size: on web the <video> otherwise takes its intrinsic size.
+  video: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' },
   playHit: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   playButton: { width: 48, height: 48, borderRadius: 24, backgroundColor: color.white, alignItems: 'center', justifyContent: 'center' },
   auditionTag: { position: 'absolute', left: 6, right: 6, bottom: 6, borderRadius: 8, backgroundColor: 'rgba(180,68,30,0.9)', paddingVertical: 4, alignItems: 'center' },

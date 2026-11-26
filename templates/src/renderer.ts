@@ -1,3 +1,4 @@
+import { spawn, execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -6,12 +7,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { RenderGraphicRequest, RenderGraphicResult, TemplatesApi } from '@kilo/edl';
 import { bundle } from '@remotion/bundler';
-import { openBrowser, renderMedia, renderStill, selectComposition } from '@remotion/renderer';
+import { openBrowser, renderFrames, renderStill, selectComposition } from '@remotion/renderer';
 import type { HeadlessBrowser } from '@remotion/renderer';
 import { normalizeRequest, TemplateRequestError, type NormalizedRequest } from './request.js';
 
 /** Bump when the output format or render settings change, to invalidate caches. */
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = 2;
 const COMPOSITION_ID = 'graphic';
 
 export const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -273,6 +274,111 @@ async function renderWithRetry<T>(fn: (serveUrl: string, browser: HeadlessBrowse
 
 const licenseKey = () => process.env.REMOTION_LICENSE_KEY || null;
 
+// ---- encoding ---------------------------------------------------------------
+
+const FFMPEG = () => process.env.KILO_FFMPEG || 'ffmpeg';
+
+let encoderMemo: { name: string; profile: string } | null = null;
+/**
+ * ProRes 4444 encoder. ffmpeg's `prores` (Anatoliy) encoder writes the same
+ * ap4h/yuva444p10le stream as `prores_ks` about 2.5x faster, so it is used when
+ * present. Override with KILO_TEMPLATES_PRORES_ENCODER=prores_ks.
+ */
+function proresEncoder(): { name: string; profile: string } {
+  if (encoderMemo) return encoderMemo;
+  const wanted = process.env.KILO_TEMPLATES_PRORES_ENCODER;
+  let list = '';
+  try {
+    list = execFileSync(FFMPEG(), ['-hide_banner', '-encoders'], { encoding: 'utf8' });
+  } catch {
+    /* fall through to prores_ks */
+  }
+  const has = (n: string) => new RegExp(`^\\s*V\\S*\\s+${n}\\s`, 'm').test(list);
+  const name = wanted ?? (has('prores_aw') ? 'prores_aw' : has('prores') ? 'prores' : 'prores_ks');
+  encoderMemo = { name, profile: name === 'prores_ks' ? '4444' : '4' };
+  return encoderMemo;
+}
+
+/**
+ * Captures every frame as a transparent PNG with Remotion and pipes them, in
+ * order, into ffmpeg. Capture and encoding overlap.
+ */
+async function captureAndEncode(
+  serveUrl: string,
+  browser: HeadlessBrowser,
+  composition: Composition,
+  props: Record<string, unknown>,
+  n: NormalizedRequest,
+  outPath: string,
+): Promise<void> {
+  const enc = proresEncoder();
+  const ff = spawn(
+    FFMPEG(),
+    [
+      '-v', 'error', '-y',
+      '-f', 'image2pipe', '-c:v', 'png', '-framerate', String(n.fps), '-i', 'pipe:0',
+      '-vf', 'scale=out_color_matrix=bt709:out_range=tv,format=yuva444p10le',
+      '-c:v', enc.name, '-profile:v', enc.profile, '-pix_fmt', 'yuva444p10le',
+      '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
+      '-vendor', 'apl0', '-an', '-frames:v', String(n.frames), '-f', 'mov', outPath,
+    ],
+    { stdio: ['pipe', 'ignore', 'pipe'] },
+  );
+  let stderr = '';
+  ff.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
+  const exited = new Promise<number>((resolve, reject) => {
+    ff.on('error', reject);
+    ff.on('close', (code) => resolve(code ?? -1));
+  });
+  ff.stdin.on('error', () => undefined); // surfaced through the exit code
+
+  const pending = new Map<number, Buffer>();
+  let next = 0;
+  let chain: Promise<void> = Promise.resolve();
+  const flush = async () => {
+    while (pending.has(next)) {
+      const buf = pending.get(next)!;
+      pending.delete(next);
+      next++;
+      if (!ff.stdin.write(buf)) await new Promise<void>((r) => ff.stdin.once('drain', () => r()));
+    }
+  };
+
+  try {
+    await renderFrames({
+      serveUrl,
+      composition,
+      inputProps: props,
+      imageFormat: 'png',
+      outputDir: null,
+      onStart: () => undefined,
+      onFrameUpdate: () => undefined,
+      onFrameBuffer: (buf, frame) => {
+        pending.set(frame, buf);
+        chain = chain.then(flush);
+        return chain;
+      },
+      puppeteerInstance: browser,
+      browserExecutable: findBrowserExecutable(),
+      chromiumOptions: chromiumOptions(),
+      concurrency: envInt('KILO_TEMPLATES_CONCURRENCY', Math.max(1, Math.min(4, os.cpus().length))),
+      muted: true,
+      logLevel: 'error',
+      timeoutInMilliseconds: 60000,
+    });
+    await chain;
+  } catch (err) {
+    ff.kill('SIGKILL');
+    await exited.catch(() => undefined);
+    throw err;
+  } finally {
+    ff.stdin.end();
+  }
+  const code = await exited;
+  if (code !== 0) throw new Error(`ffmpeg failed encoding ${outPath} (exit ${code}): ${stderr.trim()}`);
+  if (next !== n.frames) throw new Error(`Captured ${next} of ${n.frames} frames`);
+}
+
 async function renderMovToCache(n: NormalizedRequest, key: string): Promise<string> {
   const dir = path.join(cacheRoot(), 'graphics');
   const final = path.join(dir, `${key}.mov`);
@@ -283,26 +389,7 @@ async function renderMovToCache(n: NormalizedRequest, key: string): Promise<stri
     await jobs.run(() =>
       renderWithRetry(async (serveUrl, browser, base) => {
         const props = inputProps(n);
-        await renderMedia({
-          serveUrl,
-          composition: { ...base, width: n.width, height: n.height, fps: n.fps, durationInFrames: n.frames, props },
-          inputProps: props,
-          codec: 'prores',
-          proResProfile: '4444',
-          pixelFormat: 'yuva444p10le',
-          imageFormat: 'png',
-          outputLocation: tmp,
-          overwrite: true,
-          puppeteerInstance: browser,
-          browserExecutable: findBrowserExecutable(),
-          chromiumOptions: chromiumOptions(),
-          concurrency: envInt('KILO_TEMPLATES_CONCURRENCY', Math.max(1, Math.min(4, os.cpus().length))),
-          muted: true,
-          enforceAudioTrack: false,
-          logLevel: 'error',
-          timeoutInMilliseconds: 60000,
-          licenseKey: licenseKey(),
-        });
+        await captureAndEncode(serveUrl, browser, { ...base, width: n.width, height: n.height, fps: n.fps, durationInFrames: n.frames, props }, props, n, tmp);
       }),
     );
     await fs.rename(tmp, final);
