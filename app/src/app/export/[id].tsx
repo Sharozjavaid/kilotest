@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Image } from 'expo-image';
 import { Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -99,11 +100,19 @@ function ExportBody({ video }: { video: VideoDetail }) {
   const n = versions.length;
   const current = versions[Math.min(selected, n - 1)]!;
 
+  /** Render links are signed and expire; the screen may have been open a while, so sign them again. */
+  const freshUrls = async (): Promise<Map<string, string>> => {
+    const v = await getApi().getVideo(video.id);
+    qc.setQueryData(keys.video(video.id), v);
+    return new Map(v.renders.flatMap((r) => (r.url ? [[r.id, r.url] as const] : [])));
+  };
+
   const saveAll = async () => {
     setBusy('save');
     try {
-      const count = await saveToCameraRoll(versions.map((x) => ({ url: x.render!.url!, name: `${video.title} ${x.label}` })));
-      notify('Saved', `${plural(count, 'video')} saved to your camera roll.`);
+      const urls = await freshUrls();
+      const count = await saveToCameraRoll(versions.map((x) => ({ url: urls.get(x.render!.id) ?? x.render!.url!, name: `${video.title} ${x.label}` })));
+      notify('Saved', Platform.OS === 'web' ? `${plural(count, 'video')} downloaded.` : `${plural(count, 'video')} saved to your camera roll.`);
     } catch (e) {
       notify("Couldn't save", errorMessage(e));
     } finally {
@@ -115,7 +124,8 @@ function ExportBody({ video }: { video: VideoDetail }) {
     if (!current.render?.url) return;
     setBusy(platform);
     try {
-      await shareVideo(current.render.url, `${video.title} ${current.label}`, platform === 'tiktok' ? 'Send to TikTok' : 'Send to Instagram');
+      const url = (await freshUrls()).get(current.render.id) ?? current.render.url;
+      await shareVideo(url, `${video.title} ${current.label}`, platform === 'tiktok' ? 'Send to TikTok' : 'Send to Instagram');
       setSharedTo(platform);
     } catch (e) {
       notify("Couldn't open the share sheet", errorMessage(e));
@@ -144,7 +154,7 @@ function ExportBody({ video }: { video: VideoDetail }) {
       footer={
         <>
           <PillButton
-            label={n > 1 ? `Save all ${n} to camera roll` : 'Save to camera roll'}
+            label={Platform.OS === 'web' ? (n > 1 ? `Download all ${n}` : 'Download') : n > 1 ? `Save all ${n} to camera roll` : 'Save to camera roll'}
             icon="download"
             onPress={saveAll}
             disabled={!allDone}
@@ -174,6 +184,7 @@ function ExportBody({ video }: { video: VideoDetail }) {
             version={x}
             selected={i === selected}
             single={n === 1}
+            thumbnailUrl={video.thumbnailUrl}
             onPress={() => {
               setSelected(i);
               if (x.render?.status === 'done' && x.render.url) setPlaying(x);
@@ -238,7 +249,7 @@ function ExportBody({ video }: { video: VideoDetail }) {
   );
 }
 
-function VersionTile({ version, selected, single, onPress }: { version: Version; selected: boolean; single: boolean; onPress: () => void }) {
+function VersionTile({ version, selected, single, thumbnailUrl, onPress }: { version: Version; selected: boolean; single: boolean; thumbnailUrl: string | null; onPress: () => void }) {
   const r = version.render;
   const done = r?.status === 'done';
   const progress = r ? r.progress : 0;
@@ -252,6 +263,12 @@ function VersionTile({ version, selected, single, onPress }: { version: Version;
       style={styles.tileWrap}
     >
       <View style={[styles.tile, selected && !single && [styles.tileSelected, shadow.selected]]}>
+        {thumbnailUrl ? (
+          <>
+            <Image source={{ uri: thumbnailUrl }} style={styles.tileImage} contentFit="cover" accessibilityIgnoresInvertColors />
+            <View style={styles.tileVeil} />
+          </>
+        ) : null}
         {done ? (
           <View style={styles.playBadge}>
             <Icon name="play" size={14} />
@@ -264,9 +281,12 @@ function VersionTile({ version, selected, single, onPress }: { version: Version;
             <ProgressBar value={progress} height={4} tone={r?.status === 'failed' ? 'cut' : 'accent'} />
           </View>
         )}
-        <Text variant="label" weight={600} style={{ lineHeight: 15 }} numberOfLines={5}>
-          {version.hookText ? `"${version.hookText}"` : ''}
-        </Text>
+        {/* In a View so it stacks above the absolutely positioned picture on web. */}
+        <View>
+          <Text variant="label" weight={600} style={{ lineHeight: 15 }} numberOfLines={5}>
+            {version.hookText ? `"${version.hookText}"` : ''}
+          </Text>
+        </View>
       </View>
       <Text variant="secondary" weight={selected ? 600 : 400} tone={selected ? 'ink' : 'muted'}>
         {version.label} · {formatDuration(version.durationSec)}
@@ -300,8 +320,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     borderWidth: 2,
     borderColor: 'transparent',
+    overflow: 'hidden',
   },
   tileSelected: { borderColor: color.accent },
+  tileImage: { ...StyleSheet.absoluteFill, borderRadius: radius.row - 2 },
+  // Keeps the hook text readable over any frame.
+  tileVeil: { ...StyleSheet.absoluteFill, borderRadius: radius.row - 2, backgroundColor: 'rgba(255,255,255,0.62)' },
   playBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center' },
   info: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 48 },
   divider: { borderTopWidth: 1, borderTopColor: color.hairline },

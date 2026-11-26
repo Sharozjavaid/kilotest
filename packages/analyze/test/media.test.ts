@@ -45,6 +45,10 @@ beforeAll(() => {
   // Sound that runs on 1 s past the last frame.
   ff(['-f', 'lavfi', '-t', '2', '-i', 'testsrc2=s=720x1280:r=30', '-f', 'lavfi', '-t', '3', '-i', 'sine=frequency=300:sample_rate=48000',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', join(WORK, 'longaudio.mp4')]);
+  // What a browser's MediaRecorder writes: WebM (VP8 + Opus) with no duration in the header and a gap in the frames.
+  ff(['-f', 'lavfi', '-i', 'testsrc=size=360x640:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '2.5',
+    '-vf', "select='not(between(n,20,29))'", '-fps_mode', 'vfr', '-c:v', 'libvpx', '-deadline', 'realtime', '-b:v', '300k', '-c:a', 'libopus',
+    '-live', '1', '-f', 'webm', join(WORK, 'take.webm')]);
   // B-roll sources.
   ff(['-f', 'lavfi', '-i', 'color=c=0x355C7D:s=1600x1200', '-frames:v', '1', join(WORK, 'stopwatch_on_counter.jpg')]);
   ff(['-f', 'lavfi', '-i', 'color=c=0x6C5B7B:s=3000x1000', '-frames:v', '1', join(WORK, 'wide.png')]);
@@ -97,6 +101,17 @@ describe('ingestClip', () => {
     expect(Number(ws.duration)).toBeCloseTo(r.info.durationSec, 2);
   }, 60_000);
 
+  it('ingests a browser recording: WebM with no duration in the file and a variable frame rate', async () => {
+    const src = await probe(join(WORK, 'take.webm'));
+    expect(src.format.duration).toBeUndefined();
+    const r = await analyze.ingestClip({ clipId: 'webm', order: 0, inputPath: join(WORK, 'take.webm'), workDir: join(WORK, 'webm'), scriptLineIndex: 0, takeNumber: 1 });
+    expect(r.info.fps).toBe(30);
+    expect(Math.abs(r.info.durationSec - 2.5)).toBeLessThan(0.1);
+    const p = await probe(r.normalizedPath);
+    expect(p.streams.find((s) => s.codec_type === 'video')!.avg_frame_rate).toBe('30/1');
+    expect(Number((await probe(r.audioPath)).streams[0]!.duration)).toBeCloseTo(r.info.durationSec, 2);
+  }, 60_000);
+
   it('writes the fixture sidecar from the comment tag and keeps 50 fps', async () => {
     const r = await analyze.ingestClip({ clipId: 'tag', order: 2, inputPath: join(WORK, 'tagged.mp4'), workDir: join(WORK, 'tag') });
     expect(r.info.fps).toBe(50);
@@ -125,12 +140,14 @@ describe('ingestClip', () => {
     expect(gaps.every((g) => g.clipId === 'b' && g.end > g.start)).toBe(true);
   }, 60_000);
 
-  it('builds the review proxy with offsets equal to clipOffsets()', async () => {
+  it('builds the review proxy with offsets where each clip really starts', async () => {
     const a = JSON.parse(JSON.stringify(await analyze.ingestClip({ clipId: 'p1', order: 1, inputPath: join(WORK, 'tagged.mp4'), workDir: join(WORK, 'p1') })));
     const b = await analyze.ingestClip({ clipId: 'p0', order: 0, inputPath: join(WORK, 'vfr.mp4'), workDir: join(WORK, 'p0') });
     const proxy = await analyze.buildConcatProxy({ clips: [a, b], outPath: join(WORK, 'proxy', 'proxy.mp4') });
-    expect(proxy.clipOffsets).toEqual(clipOffsets([a.info, b.info]));
+    // The first clip takes whole proxy frames: its duration rounded up at 30 fps.
     expect(proxy.clipOffsets.p0).toBe(0);
+    expect(proxy.clipOffsets.p1).toBeCloseTo(Math.ceil(b.info.durationSec * 30 - 1e-6) / 30, 9);
+    expect(proxy.clipOffsets.p1! - clipOffsets([a.info, b.info]).p1!).toBeLessThan(1 / 30);
     const p = await probe(proxy.path);
     const v = p.streams.find((s) => s.codec_type === 'video')!;
     expect([v.width, v.height]).toEqual([540, 960]);

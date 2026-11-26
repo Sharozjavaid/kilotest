@@ -107,7 +107,18 @@ export async function startServer(options: StartOptions): Promise<RunningServer>
     worker,
     http,
     async stop() {
-      if (http) await new Promise<void>((resolve) => http!.close(() => resolve()));
+      worker?.beginStop();
+      if (http) {
+        // close() waits for every open connection; browsers keep idle ones alive, and an
+        // upload in flight would hold shutdown for as long as it takes. Drop idle ones now
+        // and cut the rest after a grace period (the app's upload queue retries).
+        const node = http as unknown as { closeIdleConnections?: () => void; closeAllConnections?: () => void };
+        const closed = new Promise<void>((resolve) => http!.close(() => resolve()));
+        node.closeIdleConnections?.();
+        const force = setTimeout(() => node.closeAllConnections?.(), 3000);
+        await closed;
+        clearTimeout(force);
+      }
       await queue.stop();
       await sql.end({ timeout: 5 });
     },

@@ -24,7 +24,7 @@ export interface SkipPlayer {
  * made by PlaybackController (pure, unit-tested); this hook only connects it to an
  * expo-video player with a frame loop while playing.
  */
-export function useSkipPlayer(url: string | null, ranges: PlaybackRange[]): SkipPlayer {
+export function useSkipPlayer(url: string | null, ranges: PlaybackRange[], opts: { onError?: () => void } = {}): SkipPlayer {
   const player = useVideoPlayer(url ? { uri: url } : null, (p) => {
     p.loop = false;
     p.timeUpdateEventInterval = 0;
@@ -43,7 +43,24 @@ export function useSkipPlayer(url: string | null, ranges: PlaybackRange[]): Skip
   // Start the paused player on the first kept frame, not on the cut opening.
   const { status } = useEvent(player, 'statusChange', { status: player.status });
   const primed = useRef(false);
+  // A new source (a renewed link) reloads the file: come back to where the player was.
+  const resumeAt = useRef<{ time: number; play: boolean } | null>(null);
+  const lastUrl = useRef(url);
+  if (lastUrl.current !== url) {
+    if (lastUrl.current !== null) resumeAt.current = { time: player.currentTime, play: player.playing };
+    lastUrl.current = url;
+  }
+  const onError = useRef(opts.onError);
+  onError.current = opts.onError;
   useEffect(() => {
+    if (status === 'error') onError.current?.();
+    if (status === 'readyToPlay' && resumeAt.current) {
+      const r = resumeAt.current;
+      resumeAt.current = null;
+      player.currentTime = r.time;
+      if (r.play) player.play();
+      return;
+    }
     if (status === 'readyToPlay' && !primed.current) {
       primed.current = true;
       const first = controller.getRanges()[0];

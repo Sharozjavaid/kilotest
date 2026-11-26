@@ -87,7 +87,7 @@ export default function RecordFinishScreen() {
       void qc.invalidateQueries({ queryKey: keys.home });
       router.dismissAll();
       router.push(`/batch/${res.batch.id}`);
-      // The takes stay on disk: the upload queue reads them.
+      // The takes stay on disk until the upload queue has them on the server; it deletes them then.
       endSession({ deleteTakes: false });
     } catch (e) {
       notify("Couldn't start the edit", errorMessage(e));

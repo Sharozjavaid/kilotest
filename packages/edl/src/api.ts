@@ -168,6 +168,8 @@ export const VideoSummary = z.object({
   postedAt: z.string().nullable(),
   /** Set when status is `failed`. Safe to show to the user. */
   error: z.string().nullable(),
+  /** Something the user should know about a video that did not fail, e.g. that no speech was heard so nothing was cut. */
+  notice: z.string().nullable().default(null),
 });
 export type VideoSummary = z.infer<typeof VideoSummary>;
 

@@ -127,6 +127,8 @@ function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refe
   const [sheet, setSheet] = useState<{ line: SpokenLine; overlay: Overlay | null } | null>(null);
   const [adding, setAdding] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  /** Clips that were waiting when the creator asked Kilo to place them. */
+  const [askedToPlace, setAskedToPlace] = useState<string[]>([]);
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: keys.video(video.id) });
@@ -181,6 +183,7 @@ function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refe
     setActionError(null);
     try {
       await saver?.flush();
+      if (pass === 'broll') setAskedToPlace(unplacedReady.map((a) => a.id));
       await getApi().replan(video.id, { passes: [pass] });
       refresh();
     } catch (e) {
@@ -263,6 +266,12 @@ function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refe
       {actionError ? (
         <Text variant="secondary" tone="cut" testID="broll-error">
           {actionError}
+        </Text>
+      ) : null}
+
+      {!busy && askedToPlace.some((id) => unplacedReady.some((a) => a.id === id)) ? (
+        <Text variant="secondary" tone="muted" testID="not-placed-note">
+          Kilo found no free line for {plural(askedToPlace.filter((id) => unplacedReady.some((a) => a.id === id)).length, 'clip')}: the video already has as much on screen as it can carry. Tap Add on a line, or swap an overlay, to use it.
         </Text>
       ) : null}
 

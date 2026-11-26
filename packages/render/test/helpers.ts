@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Edl, Segment } from '@kilo/edl';
-import { DEFAULT_SETTINGS, EDL_VERSION } from '@kilo/edl';
+import { DEFAULT_SETTINGS, EDL_VERSION, resolveTimeline } from '@kilo/edl';
 import { fixtureInputs, type FixtureInputs } from '../src/dev/fixtures.js';
 
 export const ROOT = resolve(import.meta.dirname, '..');
@@ -203,4 +203,31 @@ export function baseEdl(segments: Segment[], fps: number, extra: Partial<Edl> = 
     decidedBy: 'heuristic',
     ...extra,
   };
+}
+
+/**
+ * How much longer than resolveTimeline a render may be: these EDLs are cut on the
+ * fixtures' unit times, off the frame grid, and the renderer then lets each kept run
+ * reach its full end (under one output frame per cut). Decider EDLs are on the grid,
+ * where this is zero (plan.test.ts).
+ */
+export function slack(edl: Edl, variantId: string | null, F: number): number {
+  const items = resolveTimeline(edl, variantId).items;
+  let s = 0;
+  items.forEach(({ segment }, k) => {
+    const prev = items[k - 1]?.segment;
+    const continues = prev && prev.clipId === segment.clipId && Math.abs(prev.end - segment.start) < 1e-6 && segment.transitionIn === 'cut';
+    if (continues) return;
+    // The run starting here: its exact length versus whole output frames.
+    let end = k;
+    while (end + 1 < items.length) {
+      const a = items[end]!.segment;
+      const b = items[end + 1]!.segment;
+      if (a.clipId === b.clipId && Math.abs(a.end - b.start) < 1e-6 && b.transitionIn === 'cut') end++;
+      else break;
+    }
+    const len = items[end]!.segment.end - segment.start;
+    s += Math.ceil(len * F - 1e-6) / F - len;
+  });
+  return s;
 }

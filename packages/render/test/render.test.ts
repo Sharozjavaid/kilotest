@@ -19,6 +19,7 @@ import {
   rmsDb,
   rowColor,
   seg,
+  slack,
   topLevelBoxes,
   WORK,
   type Frames,
@@ -64,7 +65,7 @@ describe('ground truth cut', () => {
     const progress: number[] = [];
     const path = out('routine_final.mp4');
     const res = await renderVideo(input(routine, routine.edl, { quality: 'final', outPath: path, onProgress: (p) => progress.push(p) }));
-    const resolved = resolveTimeline(routine.edl).durationSec;
+    const resolved = resolveTimeline(routine.edl).durationSec + slack(routine.edl, null, 60);
     const p = probeOut(path);
     expect(p.video).toMatchObject({ codec: 'h264', profile: 'High', width: 1080, height: 1920, fps: 60, pixFmt: 'yuv420p' });
     expect(p.audio).toMatchObject({ codec: 'aac', sampleRate: 48000, channels: 2 });
@@ -98,7 +99,7 @@ describe('ground truth cut', () => {
     await renderVideo(input(mistakes, mistakes.edl, { outPath: path }));
     const p = probeOut(path);
     expect(p.video).toMatchObject({ width: 540, height: 960, fps: 30, profile: 'High' });
-    const resolved = resolveTimeline(mistakes.edl).durationSec;
+    const resolved = resolveTimeline(mistakes.edl).durationSec + slack(mistakes.edl, null, 30);
     expect(Math.abs(p.video.duration - resolved)).toBeLessThanOrEqual(1 / 30 + 1e-6);
     const strip = bands(decodeFrames(path));
     expect(strip).not.toContain('O');
@@ -207,7 +208,7 @@ describe('picture effects', () => {
     const a = probeOut(cutPath);
     const b = probeOut(path);
     expect(b.video.frames).toBe(a.video.frames);
-    expect(Math.abs(b.video.duration - resolveTimeline(edl).durationSec)).toBeLessThanOrEqual(1 / 30 + 1e-6);
+    expect(Math.abs(b.video.duration - resolveTimeline(edl).durationSec - slack(edl, null, 30))).toBeLessThanOrEqual(1 / 30 + 1e-6);
 
     // Same samples: the transitions are picture-only.
     const sa = decodeAudio(cutPath);
@@ -422,7 +423,7 @@ describe('variants', () => {
     const plan = buildPlan({ edl, variantId: 'v2', quality: 'preview', clips: unboxing.clips, broll: {} });
     expect(plan.items.map((i) => i.segment.id)).toEqual(['line5_take1-u0', 'line1_take1-u0', 'line2_take1-u2']);
     const p = probeOut(path);
-    expect(Math.abs(p.video.duration - resolveTimeline(edl, 'v2').durationSec)).toBeLessThanOrEqual(1 / 30 + 1e-6);
+    expect(Math.abs(p.video.duration - resolveTimeline(edl, 'v2').durationSec - slack(edl, 'v2', 30))).toBeLessThanOrEqual(1 / 30 + 1e-6);
     const fr = decodeFrames(path);
     const dominant = (f: number) => {
       const [r, g, b] = rowColor(fr, f, 0.4);
@@ -461,7 +462,7 @@ describe('clips without sound', () => {
     const path = out('no_audio.mp4');
     const res = await renderVideo(input(routine, edl, { quality: 'final', outPath: path, clips }));
     const p = probeOut(path);
-    const resolved = resolveTimeline(edl).durationSec;
+    const resolved = resolveTimeline(edl).durationSec + slack(edl, null, 60);
     expect(Math.abs(p.video.duration - resolved)).toBeLessThanOrEqual(1 / 60 + 1e-6);
     expect(Math.abs(p.audio.duration - p.video.duration)).toBeLessThan(0.025);
     expect(res.durationSec).toBeCloseTo(resolved, 1);

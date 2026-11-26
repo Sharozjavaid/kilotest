@@ -48,7 +48,11 @@ export interface PlanItem {
   /** Source frames shown: [srcStartFrame, srcEndFrame) at clipFps. */
   srcStartFrame: number;
   srcEndFrame: number;
-  /** Source time the item's audio and picture start at (a source frame boundary). */
+  /**
+   * Source time the item's sound starts at, and output frame 0 stands for. The picture
+   * starts at srcStartFrame, the first source frame at or after it (the same time on the
+   * frame grid).
+   */
   srcStart: number;
   /** Output frames: [frameStart, frameStart + frames). */
   frameStart: number;
@@ -164,24 +168,35 @@ export function buildPlan(input: PlanInput, limits: ChunkLimits = DEFAULT_LIMITS
     }
   }
 
+  // A kept segment never starts later or ends earlier than the EDL says. After a cut, an
+  // item's sound starts exactly at the segment start (sample accurate) and it runs for
+  // enough output frames to reach the segment end; its picture is the source frames
+  // whose timestamps lie inside the segment, the last one held if needed, so no frame
+  // of cut material is shown. An item that continues the previous one (same clip,
+  // contiguous) picks up exactly where that one stopped, so nothing plays twice. For an
+  // EDL on its clips' frame grids (what the decider writes) with an output rate that is a
+  // multiple of each clip's, every rounding here is exact and the output is exactly as
+  // long as resolveTimeline says; off the grid it can grow by under a frame per cut.
   const items: PlanItem[] = [];
   for (const t of timeline.items) {
     const seg = t.segment;
     const clip = input.clips[seg.clipId]!;
     const cf = clip.info.fps;
-    const frameStart = Math.round(t.outStart * F + EPS);
-    const frameEnd = Math.round(t.outEnd * F + EPS);
-    const frames = frameEnd - frameStart;
-    if (frames <= 0) continue;
-    // Source frames whose timestamps fall inside [start, end).
     const clipFrames = Math.max(1, Math.floor(clip.info.durationSec * cf + EPS));
-    let srcStartFrame = Math.min(Math.ceil(seg.start * cf - EPS), clipFrames - 1);
-    let srcEndFrame = Math.min(Math.ceil(seg.end * cf - EPS), clipFrames);
+    const segEnd = Math.min(seg.end, clip.info.durationSec);
+    const prev = items[items.length - 1];
+    const continues =
+      prev !== undefined && prev.clipId === seg.clipId && Math.abs(prev.segment.end - seg.start) < EPS && seg.transitionIn === 'cut';
+    const srcStart = continues ? prev.srcStart + prev.frames / F : seg.start;
+    if (segEnd - srcStart <= EPS) continue; // already played by the item before
+    const frames = Math.max(1, Math.ceil((segEnd - srcStart) * F - EPS));
+    // Picture: source frames whose timestamps fall inside [srcStart, end).
+    let srcStartFrame = Math.min(Math.ceil(srcStart * cf - EPS), clipFrames - 1);
+    let srcEndFrame = Math.min(Math.ceil(segEnd * cf - EPS), clipFrames);
     if (srcEndFrame <= srcStartFrame) {
-      srcStartFrame = Math.min(Math.floor(seg.start * cf + EPS), clipFrames - 1);
+      srcStartFrame = Math.min(Math.floor(srcStart * cf + EPS), clipFrames - 1);
       srcEndFrame = srcStartFrame + 1;
     }
-    const prev = items[items.length - 1];
     const transition: Transition = prev ? seg.transitionIn : 'cut';
     let transitionFrames = 0;
     if (transition !== 'cut') {
@@ -197,8 +212,8 @@ export function buildPlan(input: PlanInput, limits: ChunkLimits = DEFAULT_LIMITS
       clipDurationSec: clip.info.durationSec,
       srcStartFrame,
       srcEndFrame,
-      srcStart: srcStartFrame / cf,
-      frameStart,
+      srcStart,
+      frameStart: 0,
       frames,
       zoom: seg.zoom ?? 1,
       transition: transitionFrames > 0 ? transition : 'cut',
@@ -213,18 +228,14 @@ export function buildPlan(input: PlanInput, limits: ChunkLimits = DEFAULT_LIMITS
       );
       item.held = { clipPath: prev.clipPath, clipFps: prev.clipFps, srcTime: lastShown / prev.clipFps, zoom: prev.zoom };
     }
-    if (prev && prev.clipId === item.clipId) {
-      const prevSrcEnd = prev.srcStart + prev.frames / F;
+    if (prev && continues) {
       // Same clip, continuing where the previous item stopped: no cut to hide.
-      if (Math.abs(prevSrcEnd - item.srcStart) < 0.5 / F && item.transition === 'cut') {
-        prev.fadeOut = false;
-        item.fadeIn = false;
-      }
+      prev.fadeOut = false;
+      item.fadeIn = false;
     }
     items.push(item);
   }
   if (items.length === 0) throw new RenderInputError('Nothing to render: every kept segment is shorter than a frame');
-  // Re-pack frames so the items tile the output exactly (dropped sub-frame items leave no hole).
   let cursor = 0;
   for (const it of items) {
     it.frameStart = cursor;
@@ -232,10 +243,15 @@ export function buildPlan(input: PlanInput, limits: ChunkLimits = DEFAULT_LIMITS
   }
   const totalFrames = cursor;
 
+  // Overlays are anchored to segments: place them from the frame their anchor item starts on.
+  const startFrameOf = new Map<string, number>();
+  for (const it of items) if (!startFrameOf.has(it.segment.id)) startFrameOf.set(it.segment.id, it.frameStart);
   const overlays: PlanOverlay[] = [];
   for (const o of timeline.overlays) {
-    const frameStart = Math.round(o.outStart * F + EPS);
-    const frameEnd = Math.min(Math.round(o.outEnd * F + EPS), totalFrames);
+    const anchor = startFrameOf.get(o.overlay.anchorSegmentId);
+    if (anchor === undefined) continue;
+    const frameStart = anchor + Math.round(o.overlay.offsetSec * F + EPS);
+    const frameEnd = Math.min(frameStart + Math.round((o.outEnd - o.outStart) * F + EPS), totalFrames);
     const frames = frameEnd - frameStart;
     if (frames <= 0) continue;
     if (o.overlay.type === 'broll') {

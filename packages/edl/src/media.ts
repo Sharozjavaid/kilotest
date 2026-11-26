@@ -20,6 +20,8 @@ export const Transcript = z.object({
   language: z.string().default('en'),
   durationSec: z.number().nonnegative(),
   words: z.array(Word),
+  /** True when no transcript could be produced at all (as opposed to a clip with no speech). */
+  unavailable: z.boolean().optional(),
 });
 export type Transcript = z.infer<typeof Transcript>;
 

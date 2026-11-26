@@ -158,7 +158,11 @@ export function batchRoutes(deps: AppDeps): Hono<Env> {
         }
       }
     });
-    const body: CompleteUploadsResponse = { startedVideoIds: started };
+    // Every id got this far only if all were accepted (a bad one answers 400 above); per-id failures are the hardening pass's.
+    const body: CompleteUploadsResponse = {
+      startedVideoIds: started,
+      results: [...clipIds.map((id) => ({ id, kind: 'clip' as const, ok: true })), ...assetIds.map((id) => ({ id, kind: 'asset' as const, ok: true }))],
+    };
     return c.json(body);
   });
 

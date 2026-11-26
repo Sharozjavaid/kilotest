@@ -82,8 +82,15 @@ function kbInternal(kb: KenBurns, fmt: OutputFormat): { w: number; h: number } {
   return { w: even(fmt.width * k), h: even(fmt.height * k) };
 }
 
+/**
+ * How to open a file as an input: forced demuxer and whitelists, then `-i file:<path>`
+ * (see safety.ts). The renderer checks every file once before building any graph.
+ */
+export type InputResolver = (path: string) => string[];
+
 export interface VideoChunkOptions {
   fmt: OutputFormat;
+  input: InputResolver;
   chunk: Chunk;
   /** ASS file name relative to the ffmpeg working directory. */
   assFile?: string;
@@ -101,7 +108,7 @@ export function videoChunkArgs(o: VideoChunkOptions): string[] {
 
   const segLabels: string[] = [];
   for (const it of chunk.items) {
-    const label = segmentChain(it, fmt, inputs, graph);
+    const label = segmentChain(it, fmt, inputs, graph, o.input);
     segLabels.push(label);
   }
   let cur = 'base';
@@ -113,7 +120,7 @@ export function videoChunkArgs(o: VideoChunkOptions): string[] {
     (a, b) => (a.overlay.kind === b.overlay.kind ? a.localStart - b.localStart : a.overlay.kind === 'broll' ? -1 : 1),
   );
   pieces.forEach((p, n) => {
-    const ov = overlayChain(p, fmt, inputs, graph, n);
+    const ov = overlayChain(p, fmt, inputs, graph, n, o.input);
     const next = `ov${n}`;
     graph.push(`[${cur}][${ov}]overlay=x=0:y=0:eof_action=pass:repeatlast=0:format=yuv420[${next}]`);
     cur = next;
@@ -139,12 +146,13 @@ export function videoChunkArgs(o: VideoChunkOptions): string[] {
   ];
 }
 
-function segmentChain(it: PlanItem, fmt: OutputFormat, inputs: Inputs, graph: string[]): string {
+function segmentChain(it: PlanItem, fmt: OutputFormat, inputs: Inputs, graph: string[], input: InputResolver): string {
   const F = fmt.fps;
   const cf = it.clipFps;
   const srcDur = (it.srcEndFrame - it.srcStartFrame) / cf;
-  const { args, rel } = seekArgs(it.srcStart, Math.max(srcDur, it.frames / F));
-  const k = inputs.add(['-threads', '1', ...args, '-an', '-i', it.clipPath]);
+  // The picture starts on its first source frame (srcStart can sit between frames).
+  const { args, rel } = seekArgs(it.srcStartFrame / cf, Math.max(srcDur, it.frames / F));
+  const k = inputs.add(['-threads', '1', ...args, '-an', ...input(it.clipPath)]);
   const half = 0.5 / cf;
   const trim = `trim=start=${num(Math.max(0, rel - half))}:end=${num(rel + srcDur - half)}`;
   const label = `s${it.index}`;
@@ -157,7 +165,7 @@ function segmentChain(it: PlanItem, fmt: OutputFormat, inputs: Inputs, graph: st
   const T = it.transitionFrames;
   const held = it.held;
   const hs = seekArgs(held.srcTime, 1 / held.clipFps);
-  const hk = inputs.add(['-threads', '1', ...hs.args, '-an', '-i', held.clipPath]);
+  const hk = inputs.add(['-threads', '1', ...hs.args, '-an', ...input(held.clipPath)]);
   const hhalf = 0.5 / held.clipFps;
   graph.push(
     `[${hk}:v]trim=start=${num(Math.max(0, hs.rel - hhalf))},setpts=PTS-STARTPTS,trim=end_frame=1,` +
@@ -171,7 +179,7 @@ function segmentChain(it: PlanItem, fmt: OutputFormat, inputs: Inputs, graph: st
   return label;
 }
 
-function overlayChain(p: OverlayPiece, fmt: OutputFormat, inputs: Inputs, graph: string[], n: number): string {
+function overlayChain(p: OverlayPiece, fmt: OutputFormat, inputs: Inputs, graph: string[], n: number, input: InputResolver): string {
   const F = fmt.fps;
   const W = fmt.width;
   const H = fmt.height;
@@ -188,7 +196,7 @@ function overlayChain(p: OverlayPiece, fmt: OutputFormat, inputs: Inputs, graph:
     if (!ov.path) throw new Error(`Graphic overlay ${ov.overlay.id} was not rendered`);
     const at = p.offsetFrames / F;
     const args = at > 0 ? ['-ss', num(at)] : [];
-    const k = inputs.add(['-threads', '1', ...args, '-t', num(p.frames / F + 0.5), '-i', ov.path]);
+    const k = inputs.add(['-threads', '1', ...args, '-t', num(p.frames / F + 0.5), ...input(ov.path)]);
     // Templates animate their own entrance and exit; only a graphic cut short gets a fade to hide the cut.
     const cutShort = p.fadeOut && (ov.renderedFrames ?? ov.frames) > ov.frames;
     const out = cutShort ? `,fade=t=out:st=${num((p.frames - OVERLAY_FADE_FRAMES) / F)}:d=${fd}:alpha=1` : '';
@@ -210,7 +218,7 @@ function overlayChain(p: OverlayPiece, fmt: OutputFormat, inputs: Inputs, graph:
   }
   if (ov.asset.kind === 'image') {
     // Scale the still once, then repeat that frame.
-    const k = inputs.add(['-i', ov.path]);
+    const k = inputs.add([...input(ov.path)]);
     const rep = `loop=loop=${p.frames - 1}:size=1:start=0,setpts=N/(${F}*TB),fps=${F}`;
     graph.push(`[${k}:v]${picture.replace('PLACEHOLDER', rep)},format=yuva420p,${framesTail(p.frames, F)}${fadeStr},${shift}[${label}]`);
   } else {
@@ -218,7 +226,7 @@ function overlayChain(p: OverlayPiece, fmt: OutputFormat, inputs: Inputs, graph:
     let at = ov.overlay.sourceStartSec + p.offsetFrames / F;
     if (dur !== undefined) at = Math.max(0, Math.min(at, dur - 0.1));
     const args = at > 0 ? ['-ss', num(at)] : [];
-    const k = inputs.add(['-threads', '1', ...args, '-t', num(p.frames / F + 0.5), '-an', '-i', ov.path]);
+    const k = inputs.add(['-threads', '1', ...args, '-t', num(p.frames / F + 0.5), '-an', ...input(ov.path)]);
     graph.push(
       `[${k}:v]setpts=PTS-STARTPTS,fps=${F},${picture.replace('PLACEHOLDER', 'null')},format=yuva420p,${framesTail(p.frames, F)}${fadeStr},${shift}[${label}]`,
     );
@@ -234,6 +242,7 @@ export function sampleBounds(frameStart: number, frames: number, F: number): { s
 
 export interface AudioChunkOptions {
   fmt: OutputFormat;
+  input: InputResolver;
   chunk: Chunk;
   /** Clip ids that have no audio stream: they get silence. */
   silentClips: Set<string>;
@@ -260,7 +269,7 @@ export function audioChunkArgs(o: AudioChunkOptions): string[] {
       graph.push(`anullsrc=r=${AUDIO_RATE}:cl=stereo,atrim=end_sample=${count},${fmtStr}[${label}]`);
     } else {
       const { args, rel } = seekArgs(it.srcStart, count / AUDIO_RATE);
-      const k = inputs.add(['-threads', '1', ...args, '-vn', '-i', it.clipPath]);
+      const k = inputs.add(['-threads', '1', ...args, '-vn', ...o.input(it.clipPath)]);
       graph.push(
         `[${k}:a]aresample=${AUDIO_RATE},${fmtStr},atrim=start=${num(rel)},asetpts=PTS-STARTPTS,` +
           `apad=whole_len=${count},atrim=end_sample=${count}${fadeStr}[${label}]`,

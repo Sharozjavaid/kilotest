@@ -7,6 +7,7 @@ import { getApi } from '@/api/client';
 import { keys } from '@/api/queries';
 import { UploadQueue, type QueueStore, type UploadJob } from './queue';
 import { createTransport } from './transports';
+import { deleteTakeFile } from '@/recorder/files';
 
 const STORAGE_KEY = 'kilo.uploads.v1';
 
@@ -33,6 +34,7 @@ export function getUploadQueue(): UploadQueue {
       concurrency: 3,
       maxAttempts: 5,
       onStarted: (ids) => onStarted(ids),
+      discard: deleteTakeFile,
     });
   }
   return queue;

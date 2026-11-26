@@ -6,7 +6,16 @@ import type { CutDecisions } from './heuristic.js';
 /**
  * Snapping is code, never the model. Every cut boundary sits in a silence gap where
  * one exists, otherwise between words, with padding, never inside a kept word, on
- * the frame grid of the EDL, and the segments partition each clip exactly.
+ * the frame grid of the clip it cuts (so the renderer, which shows whole source
+ * frames, plays exactly what the EDL says), and the segments partition each clip
+ * exactly.
+ *
+ * Padding always goes to the kept word. Where a cut word touches a kept one with no
+ * pause between them ("so um this"), the boundary moves into the cut word: by the
+ * pacing's padding, and by at least UNCONFIRMED_EDGE_SEC when no silence confirms
+ * where the kept word really ends or starts. Transcript word edges are routinely
+ * 50-150 ms off, and clipping the start or end of a kept word is far worse than
+ * leaving a sliver of a filler (a filler too short to cut that way stays).
  */
 
 /** Slivers shorter than this many frames are merged away. */
@@ -41,19 +50,38 @@ const frameRound = (t: number, fps: number) => Math.round(t * fps) / fps;
  */
 export const MAX_TIMING_ERROR_SEC = 0.35;
 
+/**
+ * Headroom for a kept word whose edge no silence confirms (it touches the next or
+ * previous word, as in "so um this"): the upper end of how far speech-to-text word
+ * edges are routinely off. The pacing's padding is used where it is larger.
+ */
+export const UNCONFIRMED_EDGE_SEC = 0.15;
+
+interface Edge {
+  t: number;
+  /** A silence starts (or ends) right at this word: its edge is measured, not just reported. */
+  confirmed: boolean;
+}
+
 /** Where speech really ends after a word: the start of the silence that follows, if a little later. */
-function speechEndAfter(w: ClipWord, nextStart: number, silences: SilenceGap[]): number {
+function speechEndAfter(w: ClipWord, nextStart: number, silences: SilenceGap[]): Edge {
   const s = silences.find((g) => g.start >= w.end - SILENCE_SLOP && g.start < nextStart && g.end > w.end);
-  if (!s) return w.end;
-  return Math.min(nextStart, Math.max(w.end, Math.min(s.start, w.end + MAX_TIMING_ERROR_SEC)));
+  if (!s) return { t: w.end, confirmed: false };
+  return {
+    t: Math.min(nextStart, Math.max(w.end, Math.min(s.start, w.end + MAX_TIMING_ERROR_SEC))),
+    confirmed: s.start <= w.end + MAX_TIMING_ERROR_SEC,
+  };
 }
 
 /** Where speech really starts before a word: the end of the silence before it, if a little earlier. */
-function speechStartBefore(w: ClipWord, prevEnd: number, silences: SilenceGap[]): number {
+function speechStartBefore(w: ClipWord, prevEnd: number, silences: SilenceGap[]): Edge {
   let found: SilenceGap | undefined;
   for (const g of silences) if (g.end <= w.start + SILENCE_SLOP && g.end > prevEnd && g.start < w.start) found = g;
-  if (!found) return w.start;
-  return Math.max(prevEnd, Math.min(w.start, Math.max(found.end, w.start - MAX_TIMING_ERROR_SEC)));
+  if (!found) return { t: w.start, confirmed: false };
+  return {
+    t: Math.max(prevEnd, Math.min(w.start, Math.max(found.end, w.start - MAX_TIMING_ERROR_SEC))),
+    confirmed: found.end >= w.start - MAX_TIMING_ERROR_SEC,
+  };
 }
 
 /** Joins silences separated by a blip too short to be speech. */
@@ -116,14 +144,21 @@ export function planClipCuts(input: {
     const lastCut = firstCut === -1 ? -1 : (nextKept === -1 ? states.length : nextKept) - 1;
     const A = prevKept >= 0 ? words[prevKept]! : null;
     const B = nextKept >= 0 ? words[nextKept]! : null;
-    const aEnd = A ? speechEndAfter(A, nextStart(prevKept), silences) : 0;
-    const bStart = B ? speechStartBefore(B, prevEnd(nextKept), silences) : D;
+    const aEdge = A ? speechEndAfter(A, nextStart(prevKept), silences) : { t: 0, confirmed: true };
+    const bEdge = B ? speechStartBefore(B, prevEnd(nextKept), silences) : { t: D, confirmed: true };
+    const aEnd = aEdge.t;
+    const bStart = bEdge.t;
+    // Padding for each kept side: the pacing's, or more where no silence confirms the edge.
+    const padA = aEdge.confirmed ? pad : Math.max(pad, UNCONFIRMED_EDGE_SEC);
+    const padB = bEdge.confirmed ? pad : Math.max(pad, UNCONFIRMED_EDGE_SEC);
 
     if (firstCut >= 0) {
       const fc = words[firstCut]!;
       const lc = words[lastCut]!;
-      let start = A ? Math.min(aEnd + pad, fc.start) : 0;
-      let end = B ? Math.max(bStart - pad, lc.end) : D;
+      // The kept word's padding comes first: from the pause after it when there is one,
+      // otherwise out of the cut word it touches.
+      let start = A ? aEnd + padA : 0;
+      let end = B ? bStart - padB : D;
       if (!settings.cutDeadAir) {
         // Keep the natural pauses: cut only the unwanted words plus padding.
         start = Math.max(start, fc.start - pad);
@@ -131,15 +166,18 @@ export function planClipCuts(input: {
       }
       if (A) start = Math.max(start, A.end);
       if (B) end = Math.min(end, B.start);
-      cuts.push({ start, end });
+      // A cut word shorter than the padding on both sides stays: never trade a kept word's edge for it.
+      if (end > start) cuts.push({ start, end });
     } else if (settings.cutDeadAir) {
-      if (!A && B) cuts.push({ start: 0, end: Math.max(0, bStart - pad) });
-      else if (A && !B) cuts.push({ start: Math.min(D, aEnd + pad), end: D });
+      if (!A && B) cuts.push({ start: 0, end: Math.max(0, bStart - padB) });
+      else if (A && !B) cuts.push({ start: Math.min(D, aEnd + padA), end: D });
       else if (A && B) {
         const pause = bStart - aEnd;
         if (pause > p.maxSilenceSec) {
           const half = Math.max(pad, p.keptPauseSec / 2);
-          cuts.push({ start: aEnd + half, end: bStart - half });
+          const start = aEnd + Math.max(half, padA);
+          const end = bStart - Math.max(half, padB);
+          if (end > start) cuts.push({ start, end });
         }
       }
     }
@@ -236,7 +274,7 @@ export function snapSegments(input: {
   settings: EditSettings;
   fps: number;
 }): Segment[] {
-  const { settings, fps } = input;
+  const { settings, fps } = input; // fps: the EDL's, used only for a clip that reports none
   const chunkOfWord = new Map<string, Chunk>();
   for (const c of input.chunks) for (const w of c.words) chunkOfWord.set(`${w.clipId}#${w.index}`, c);
   const segments: Segment[] = [];
@@ -253,12 +291,14 @@ export function snapSegments(input: {
         chunkId: chunk?.id ?? -1,
       };
     });
+    // Boundaries go on this clip's own frames: the renderer shows whole source frames.
+    const clipFps = cw.clip.fps > 0 ? cw.clip.fps : fps;
     const cuts = planClipCuts({
       clip: cw.clip,
       states,
       silences: input.silences.filter((g) => g.clipId === cw.clip.id),
       settings,
-      fps,
+      fps: clipFps,
     });
     const D = cw.clip.durationSec;
     const ranges: Array<{ start: number; end: number; keep: boolean }> = [];
@@ -272,8 +312,8 @@ export function snapSegments(input: {
     if (!ranges.length) ranges.push({ start: 0, end: D, keep: true });
     for (const r of ranges) {
       const parts = r.keep
-        ? splitByGroups(r.start, r.end, states.filter((s) => s.keep), (s) => String(s.chunkId), fps)
-        : splitByGroups(r.start, r.end, states.filter((s) => !s.keep), (s) => `${s.chunkId}:${s.reason}`, fps);
+        ? splitByGroups(r.start, r.end, states.filter((s) => s.keep), (s) => String(s.chunkId), clipFps)
+        : splitByGroups(r.start, r.end, states.filter((s) => !s.keep), (s) => `${s.chunkId}:${s.reason}`, clipFps);
       for (const part of parts) {
         segments.push({
           id: '',

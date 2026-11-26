@@ -5,6 +5,7 @@ import {
   TemplatePropsSchemas,
   edlStats,
   getTemplate,
+  checkOverlayRules,
   validateEdl,
   type BatchDetail,
   type BatchSummary,
@@ -225,7 +226,11 @@ export class MockKiloApi implements KiloApi {
         started.push(v.summary.id);
       }
     }
-    return { startedVideoIds: started };
+    const results = [
+      ...(body.clipIds ?? []).map((id) => ({ id, kind: 'clip' as const, ok: true })),
+      ...(body.assetIds ?? []).map((id) => ({ id, kind: 'asset' as const, ok: true })),
+    ];
+    return { startedVideoIds: started, results };
   }
 
   async listVideos(query?: { status?: VideoStatus; batchId?: string }) {
@@ -271,29 +276,35 @@ export class MockKiloApi implements KiloApi {
     return clone(v.summary);
   }
 
+  /** Mirrors the server's PUT /edl: state, then revision, then the EDL's soundness, in that order. */
   async saveEdl(videoId: string, body: { edl: Edl; baseRevision: number }) {
     await this.delay();
     const v = this.mustVideo(videoId);
-    if (!v.edl) throw new KiloApiError(409, 'invalid_state', 'This video has not been analysed yet');
-    if (body.baseRevision !== v.edl.revision) {
-      throw new KiloApiError(409, 'revision_conflict', 'This video was changed somewhere else');
-    }
     const parsed = EdlSchema.safeParse(body.edl);
     if (!parsed.success) throw new KiloApiError(400, 'invalid_request', parsed.error.message);
     if (v.summary.status !== 'ready_for_review' && v.summary.status !== 'done') {
-      throw new KiloApiError(409, 'invalid_state', 'This video is being edited. Try again in a moment.');
+      throw new KiloApiError(409, 'invalid_state', `The edit cannot be saved while the video is ${v.summary.status}`);
     }
-    const issues = validateEdl(parsed.data, v.clips);
-    if (issues.length) throw new KiloApiError(400, 'invalid_edl', issues[0]!.message);
+    if (!v.edl) throw new KiloApiError(409, 'invalid_state', 'The video has no edit yet');
+    if (body.baseRevision !== v.edl.revision) {
+      throw new KiloApiError(409, 'revision_conflict', `The edit has changed since revision ${body.baseRevision}; reload it`);
+    }
+    const problems: string[] = [];
+    if (parsed.data.videoId !== videoId) problems.push('edl.videoId does not match the video');
+    problems.push(...validateEdl(parsed.data, v.clips).map((i) => i.message));
     for (const o of [...parsed.data.overlays, ...parsed.data.variants.flatMap((x) => x.overlays)]) {
       if (o.type === 'graphic' && !TemplatePropsSchemas[o.template].safeParse(o.props).success) {
-        throw new KiloApiError(400, 'invalid_edl', `Overlay ${o.id} does not fit the ${getTemplate(o.template).name} template`);
+        problems.push(`Overlay ${o.id} has invalid props for ${getTemplate(o.template).name}`);
       }
-      if (o.type === 'broll' && !v.broll.some((b) => b.id === o.assetId)) {
-        throw new KiloApiError(400, 'invalid_edl', `Overlay ${o.id} uses an unknown B-roll asset`);
+      if (o.type === 'broll' && !v.broll.some((b) => b.id === o.assetId && b.status === 'ready')) {
+        problems.push(`Overlay ${o.id} uses B-roll that is not ready or does not exist`);
       }
     }
-    v.edl = { ...parsed.data, videoId, revision: v.edl.revision + 1 };
+    problems.push(...checkOverlayRules(parsed.data).map((i) => i.message));
+    if (problems.length) throw new KiloApiError(400, 'invalid_request', problems.slice(0, 5).join('; '));
+    // What a client may not change stays as stored.
+    const stored = v.edl;
+    v.edl = { ...parsed.data, videoId, fps: stored.fps, settings: stored.settings, decidedBy: stored.decidedBy, revision: stored.revision + 1 };
     this.applyStats(v);
     if (v.summary.status === 'done') this.setStatus(v, 'ready_for_review');
     else v.summary.updatedAt = this.iso();

@@ -19,8 +19,17 @@ import {
 import { loadPipeline } from '../pipeline/index.js';
 import type { Pipeline } from '../pipeline/types.js';
 
+/** A recorder-style take: script line (1-based on the command line, stored 0-based), take number, file. */
+export interface TakeArg {
+  lineIndex: number;
+  takeNumber: number;
+  file: string;
+}
+
 export interface EditArgs {
   clips: string[];
+  /** Recorder-style input (`--take`): clips that are takes of script lines, several per line allowed. */
+  takes: TakeArg[];
   out: string;
   mode: Mode;
   captions: boolean;
@@ -35,12 +44,25 @@ export interface EditArgs {
 
 export const USAGE = `usage: kilo edit <clip files...> --out <file> [--mode general|ugc_ad|tiktok_shop] [--captions]
                  [--broll <files...>] [--script <text file>] [--variants <1-5>] [--quality preview|final]
-                 [--pipeline real|fake] [--work <dir>] [--keep-work]`;
+                 [--pipeline real|fake] [--work <dir>] [--keep-work]
+       kilo edit --take <line>:<take>:<file> [--take ...] --script <text file> --out <file> [options]
+         Recorder-style input: each --take is one take of a script line (both counted from 1),
+         as the in-app recorder sends them; a line may have several takes.`;
+
+/** Parses `<line>:<take>:<file>` (the file name may itself contain colons). */
+export function parseTake(value: string): TakeArg {
+  const m = /^(\d+):(\d+):(.+)$/.exec(value);
+  if (!m) throw new Error(`--take needs <line>:<take>:<file>, got "${value}"`);
+  const line = Number(m[1]);
+  const take = Number(m[2]);
+  if (line < 1 || take < 1) throw new Error(`--take line and take numbers start at 1, got "${value}"`);
+  return { lineIndex: line - 1, takeNumber: take, file: m[3]! };
+}
 
 export function parseArgs(argv: string[]): EditArgs {
   const [command, ...rest] = argv;
   if (command !== 'edit') throw new Error(USAGE);
-  const args: EditArgs = { clips: [], out: '', mode: 'general', captions: false, broll: [], quality: 'final', keepWork: false };
+  const args: EditArgs = { clips: [], takes: [], out: '', mode: 'general', captions: false, broll: [], quality: 'final', keepWork: false };
   let list: 'clips' | 'broll' = 'clips';
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!;
@@ -61,6 +83,10 @@ export function parseArgs(argv: string[]): EditArgs {
       }
       case '--captions':
         args.captions = true;
+        break;
+      case '--take':
+        args.takes.push(parseTake(value()));
+        list = 'clips';
         break;
       case '--broll':
         list = 'broll';
@@ -97,7 +123,16 @@ export function parseArgs(argv: string[]): EditArgs {
         args[list].push(a);
     }
   }
-  if (!args.clips.length) throw new Error(`Give at least one clip\n${USAGE}`);
+  if (args.takes.length && args.clips.length) throw new Error(`Give either clip files or --take, not both\n${USAGE}`);
+  if (!args.clips.length && !args.takes.length) throw new Error(`Give at least one clip\n${USAGE}`);
+  const seen = new Set<string>();
+  for (const t of args.takes) {
+    const key = `${t.lineIndex}:${t.takeNumber}`;
+    if (seen.has(key)) throw new Error(`--take ${t.lineIndex + 1}:${t.takeNumber} is given twice`);
+    seen.add(key);
+  }
+  // Takes play in script order, then take order, as the recorder uploads them.
+  args.takes.sort((a, b) => a.lineIndex - b.lineIndex || a.takeNumber - b.takeNumber);
   if (!args.out) throw new Error(`--out is required\n${USAGE}`);
   return args;
 }
@@ -132,12 +167,23 @@ export async function runEdit(args: EditArgs, pipeline: Pipeline, print: (line: 
     const transcripts: Transcript[] = [];
     const silences: SilenceGap[] = [];
     const names = new Map<string, string>();
-    for (const [order, file] of args.clips.entries()) {
+    const inputs: Array<{ file: string; take?: TakeArg }> = args.takes.length ? args.takes.map((t) => ({ file: t.file, take: t })) : args.clips.map((file) => ({ file }));
+    if (script) {
+      const beyond = args.takes.find((t) => t.lineIndex >= script.length);
+      if (beyond) throw new Error(`--take ${beyond.lineIndex + 1}:${beyond.takeNumber}: the script has only ${script.length} lines`);
+    }
+    for (const [order, { file, take }] of inputs.entries()) {
       const clipId = `clip${order + 1}`;
       names.set(clipId, basename(file));
-      print(`ingest   ${basename(file)}`);
+      print(`ingest   ${basename(file)}${take ? `  (line ${take.lineIndex + 1}, take ${take.takeNumber})` : ''}`);
       // One directory per clip: ingest writes fixed file names (normalized.mp4, audio.wav, thumb.jpg).
-      const clip = await analyze.ingestClip({ clipId, order, inputPath: resolve(file), workDir: join(work, 'ingest', clipId) });
+      const clip = await analyze.ingestClip({
+        clipId,
+        order,
+        inputPath: resolve(file),
+        workDir: join(work, 'ingest', clipId),
+        ...(take ? { scriptLineIndex: take.lineIndex, takeNumber: take.takeNumber } : {}),
+      });
       ingested.push(clip);
       transcripts.push({ ...(await analyze.transcribeClip({ clipId, audioPath: clip.audioPath, durationSec: clip.info.durationSec })), clipId });
       silences.push(...(await analyze.detectSilence({ clipId, audioPath: clip.audioPath })));

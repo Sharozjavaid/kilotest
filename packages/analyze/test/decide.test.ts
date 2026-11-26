@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { BrollAsset, Edl, GraphicOverlay, Segment } from '@kilo/edl';
-import { Edl as EdlSchema, PACING_PARAMS, TEMPLATES, getTemplate, parseTemplateProps, resolveTimeline, toggleSegment, validateEdl } from '@kilo/edl';
+import { Edl as EdlSchema, checkOverlayRules, PACING_PARAMS, TEMPLATES, getTemplate, parseTemplateProps, resolveTimeline, toggleSegment, validateEdl } from '@kilo/edl';
 import { createAnalyze } from '../src/analyze.js';
 import { OVERLAY_SPACING_SEC, findEmphasis } from '../src/overlays.js';
 import { buildLines } from '../src/lines.js';
 import { buildChunks, prepareClipWords } from '../src/chunks.js';
 import { heuristicCuts } from '../src/heuristic.js';
-import { overlayRuleProblems } from '../src/rules.js';
 import { ASSETS, decideInput, richClips, synthClip, type SynthClip } from './helpers.js';
 
 const analyze = createAnalyze({ decider: 'heuristic', stock: null, log: () => {} });
@@ -19,7 +18,7 @@ function keptText(edl: Edl): string {
 function expectSound(edl: Edl, clips: SynthClip[]) {
   expect(() => EdlSchema.parse(edl)).not.toThrow();
   expect(validateEdl(edl, clips.map((c) => c.info))).toEqual([]);
-  const minLen = 3 / edl.fps - 1e-6;
+  const minLen = (clipFps: number) => 3 / clipFps - 1e-6;
   for (const c of clips) {
     const segs = edl.segments.filter((s) => s.clipId === c.info.id);
     expect(segs[0]!.start).toBe(0);
@@ -27,9 +26,10 @@ function expectSound(edl: Edl, clips: SynthClip[]) {
     for (let i = 0; i < segs.length; i++) {
       const s = segs[i]!;
       if (i > 0) expect(s.start).toBe(segs[i - 1]!.end);
-      expect(s.end - s.start).toBeGreaterThanOrEqual(minLen);
-      // Interior boundaries sit on the frame grid.
-      if (i > 0) expect(Math.abs(s.start * edl.fps - Math.round(s.start * edl.fps))).toBeLessThan(1e-6);
+      expect(s.end - s.start).toBeGreaterThanOrEqual(minLen(c.info.fps));
+      // Interior boundaries sit on the clip's own frame grid (the renderer shows whole source frames).
+      const f = c.info.fps;
+      if (i > 0) expect(Math.abs(s.start * f - Math.round(s.start * f))).toBeLessThan(1e-6);
       if (s.keep) expect(s.reason).toBe('speech');
     }
     // No kept/cut boundary inside a kept word.
@@ -46,7 +46,7 @@ function expectSound(edl: Edl, clips: SynthClip[]) {
 
 function expectOverlaysSound(edl: Edl, assets: readonly BrollAsset[] = ASSETS) {
   // The server's rules for a saved EDL.
-  expect(overlayRuleProblems(edl)).toEqual([]);
+  expect(checkOverlayRules(edl)).toEqual([]);
   const tl = resolveTimeline(edl);
   const sorted = [...tl.overlays].sort((a, b) => a.outStart - b.outStart);
   for (let i = 1; i < sorted.length; i++) expect(sorted[i]!.outStart).toBeGreaterThanOrEqual(sorted[i - 1]!.outEnd - 1e-6);
@@ -171,7 +171,7 @@ describe('heuristic decideEdit', () => {
           expect(o.type === 'graphic' && o.template === 'bold-title').toBe(true);
         }
         expectOverlaysSound({ ...edl, overlays: [...edl.overlays, ...v.overlays], variants: [] });
-        expect(overlayRuleProblems(edl)).toEqual([]);
+        expect(checkOverlayRules(edl)).toEqual([]);
       }
       const opens = new Set(edl.variants.map((v) => `${v.segmentOrder[0]}|${v.overlays.map((o) => (o.type === 'graphic' ? String(o.props.text) : '')).join()}`));
       expect(opens.size).toBe(n);
@@ -296,7 +296,7 @@ describe('replan', () => {
     const kept = toggled.segments.filter((s) => s.keep).map((s) => s.id).sort();
     for (const v of noBroll.variants) expect([...v.segmentOrder].sort()).toEqual(kept);
 
-    expect(overlayRuleProblems(out)).toEqual([]);
+    expect(checkOverlayRules(out)).toEqual([]);
 
     // The creator cut lines under the overlays: kept overlays slide earlier, and the replan
     // must still hand back an EDL the server accepts.
@@ -304,7 +304,7 @@ describe('replan', () => {
     for (const s of edl.segments.filter((x) => x.keep).slice(0, 3)) cut = toggleSegment(cut, s.id);
     for (const passes of [['broll'], ['graphics'], ['variants'], ['broll', 'graphics', 'variants']] as const) {
       const r = await analyze.replan({ ...input, edl: cut, passes: [...passes] });
-      expect(overlayRuleProblems(r)).toEqual([]);
+      expect(checkOverlayRules(r)).toEqual([]);
       expect(r.segments).toEqual(cut.segments);
     }
 

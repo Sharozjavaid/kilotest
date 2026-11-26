@@ -37,6 +37,9 @@ export async function waitFor(what, fn, { timeoutMs = 60_000, everyMs = 500 } = 
       last = await fn();
       if (last) return last;
     } catch (e) {
+      // Keep polling through a server that is down or restarting; anything else is the answer.
+      const transient = e instanceof TypeError || (typeof e?.status === 'number' && (e.status === 0 || e.status >= 500));
+      if (!transient) throw e;
       last = e;
     }
     if (Date.now() - t0 > timeoutMs) {
@@ -79,14 +82,14 @@ export function apiClient(baseUrl, userId) {
 }
 
 /** Opens a browser page at phone size, signed in as `userId` (dev auth), collecting errors. */
-export async function openApp(ctx, { userId, fakeMedia = false, path = '/' } = {}) {
+export async function openApp(ctx, { userId, fakeMedia = false, path = '/', permissions = [] } = {}) {
   const args = fakeMedia ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] : [];
   const browser = await chromium.launch({ args });
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 2,
     acceptDownloads: true,
-    ...(fakeMedia ? { permissions: ['camera', 'microphone'] } : {}),
+    permissions: [...(fakeMedia ? ['camera', 'microphone'] : []), ...permissions],
   });
   await context.addInitScript((id) => {
     try {
@@ -96,7 +99,8 @@ export async function openApp(ctx, { userId, fakeMedia = false, path = '/' } = {
   const page = await context.newPage();
   page.setDefaultTimeout(20_000);
   const errors = [];
-  const ignore = [/expo-notifications/, /Download the React DevTools/, /net::ERR_ABORTED/];
+  // 409s are expected where a flow provokes a stale save; the flow checks them itself.
+  const ignore = [/expo-notifications/, /Download the React DevTools/, /net::ERR_ABORTED/, /status of 409 \(Conflict\)/];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
     if (m.type() === 'error' && !ignore.some((r) => r.test(m.text()))) errors.push(`console: ${m.text()}`);
@@ -121,7 +125,8 @@ export async function bodyText(page) {
 
 /** Waits until `text` (string or RegExp) is visible somewhere on the page. */
 export async function seeText(page, text, timeoutMs = 30_000) {
-  await page.getByText(text).first().waitFor({ state: 'visible', timeout: timeoutMs });
+  // Screens under the current one stay mounted (hidden) on web, so look only at visible text.
+  await page.getByText(text).locator('visible=true').first().waitFor({ state: 'visible', timeout: timeoutMs });
 }
 
 export async function ffprobe(path) {

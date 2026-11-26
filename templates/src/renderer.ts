@@ -7,10 +7,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { RenderGraphicRequest, RenderGraphicResult, TemplatesApi } from '@kilo/edl';
 import { bundle } from '@remotion/bundler';
-import { openBrowser, renderFrames, renderStill, selectComposition } from '@remotion/renderer';
+import { makeCancelSignal, openBrowser, renderFrames, renderStill, selectComposition } from '@remotion/renderer';
 import type { HeadlessBrowser } from '@remotion/renderer';
 import { capturePlan, type CapturePlan } from './holds.js';
 import { normalizeRequest, TemplateRequestError, type NormalizedRequest } from './request.js';
+import { MediaStoppedError, MediaTimeoutError } from './errors.js';
+import { mediaTimeoutMs, reaper } from './proc.js';
 
 /** Bump when the output format or render settings change, to invalidate caches. */
 const FORMAT_VERSION = 2;
@@ -318,7 +320,7 @@ function proresEncoder(): { name: string; profile: string } {
   const wanted = process.env.KILO_TEMPLATES_PRORES_ENCODER;
   let list = '';
   try {
-    list = execFileSync(FFMPEG(), ['-hide_banner', '-encoders'], { encoding: 'utf8' });
+    list = execFileSync(FFMPEG(), ['-hide_banner', '-encoders'], { encoding: 'utf8', timeout: 30_000, killSignal: 'SIGKILL' });
   } catch {
     /* fall through to prores_ks */
   }
@@ -372,8 +374,30 @@ async function captureAndEncode(
       '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
       '-vendor', 'apl0', '-an', '-frames:v', String(n.frames), '-f', 'mov', outPath,
     ],
-    { stdio: ['pipe', 'ignore', 'pipe'] },
+    // Its own process group, tracked by the shared reaper: killed with everything it
+    // started on timeout and when this process is told to stop (SIGTERM/SIGINT).
+    { stdio: ['pipe', 'ignore', 'pipe'], detached: true },
   );
+  const r = reaper();
+  r.track(ff);
+  const killFf = () => {
+    try {
+      if (ff.pid !== undefined) process.kill(-ff.pid, 'SIGKILL');
+    } catch {
+      ff.kill('SIGKILL');
+    }
+  };
+  // The whole capture and encode has a time limit scaled to the graphic's length; on
+  // timeout the capture is cancelled and ffmpeg killed.
+  const timeoutMs = mediaTimeoutMs(n.durationSec);
+  const { cancelSignal, cancel } = makeCancelSignal();
+  let timedOut = false;
+  const watchdog = setTimeout(() => {
+    timedOut = true;
+    cancel();
+    killFf();
+  }, timeoutMs);
+  watchdog.unref();
   let stderr = '';
   ff.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
   const exited = new Promise<number>((resolve, reject) => {
@@ -395,7 +419,20 @@ async function captureAndEncode(
       if (!buf) break;
       pending.delete(next);
       next++;
-      if (!ff.stdin.write(buf)) await new Promise<void>((r) => ff.stdin.once('drain', () => r()));
+      if (!ff.stdin.write(buf)) {
+        // Also give up waiting when ffmpeg is gone (killed on timeout or stop), or this would hang.
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            ff.stdin.off('drain', done);
+            ff.stdin.off('close', done);
+            ff.off('exit', done);
+            resolve();
+          };
+          ff.stdin.on('drain', done);
+          ff.stdin.on('close', done);
+          ff.on('exit', done);
+        });
+      }
     }
   };
 
@@ -419,6 +456,7 @@ async function captureAndEncode(
         puppeteerInstance: browser,
         browserExecutable: findBrowserExecutable(),
         chromiumOptions: chromiumOptions(),
+        cancelSignal,
         concurrency: envInt('KILO_TEMPLATES_CONCURRENCY', Math.max(1, Math.min(4, os.cpus().length))),
         muted: true,
         logLevel: 'error',
@@ -428,13 +466,19 @@ async function captureAndEncode(
     await chain;
     await flush();
   } catch (err) {
-    ff.kill('SIGKILL');
+    clearTimeout(watchdog);
+    killFf();
     await exited.catch(() => undefined);
+    if (timedOut) throw new MediaTimeoutError(`Graphic ${n.template} took longer than ${(timeoutMs / 1000).toFixed(0)} s and was stopped`);
+    if (r.stopping) throw new MediaStoppedError(`Graphic ${n.template} stopped: received ${r.stopping}`);
     throw err;
   } finally {
     ff.stdin.end();
   }
   const code = await exited;
+  clearTimeout(watchdog);
+  if (timedOut) throw new MediaTimeoutError(`Graphic ${n.template} took longer than ${(timeoutMs / 1000).toFixed(0)} s and was stopped`);
+  if (code !== 0 && r.stopping) throw new MediaStoppedError(`Graphic encode stopped: received ${r.stopping}`);
   if (code !== 0) throw new Error(`ffmpeg failed encoding ${outPath} (exit ${code}): ${stderr.trim()}`);
   if (next !== n.frames) throw new Error(`Wrote ${next} of ${n.frames} frames`);
   renderStats.graphics++;

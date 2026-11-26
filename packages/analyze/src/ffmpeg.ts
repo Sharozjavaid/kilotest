@@ -1,6 +1,12 @@
-import { execFile } from 'node:child_process';
+import { ChildFailedError, mediaTimeoutMs, spawnChecked } from './proc.js';
+import { ALL_CONTAINERS, assertProbedFormat, demuxArgs, inputArgs, safeInput, type Container, type SafeInput } from './safety.js';
 
-/** ffmpeg and ffprobe as child processes with argument arrays, never a shell. */
+/**
+ * ffmpeg and ffprobe as child processes with argument arrays, never a shell. Every
+ * run has a time limit scaled to the media it works on (see mediaTimeoutMs) and is
+ * killed with its process group on timeout or when this process is told to stop.
+ * Inputs are opened through `inputArgs` from safety.ts.
+ */
 
 export const FFMPEG = process.env.KILO_FFMPEG ?? 'ffmpeg';
 export const FFPROBE = process.env.KILO_FFPROBE ?? 'ffprobe';
@@ -12,26 +18,34 @@ export interface RunResult {
   stderr: string;
 }
 
-export function run(cmd: string, args: string[], opts: { maxBuffer?: number } = {}): Promise<RunResult> {
-  return new Promise((resolve, reject) => {
-    execFile(cmd, args, { maxBuffer: opts.maxBuffer ?? 64 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) {
-        const tail = String(stderr ?? '').split('\n').slice(-12).join('\n');
-        reject(new Error(`${cmd} failed: ${err.message}\n${tail}`));
-        return;
-      }
-      resolve({ stdout: String(stdout), stderr: String(stderr) });
-    });
-  });
+export interface RunOptions {
+  maxBuffer?: number;
+  /** Seconds of media the run reads or writes; sets the time limit. */
+  durationSec?: number;
+  /** Explicit limit, overriding the duration rule. */
+  timeoutMs?: number;
 }
 
-export function ffmpeg(args: string[]): Promise<RunResult> {
-  return run(FFMPEG, ['-hide_banner', '-nostdin', '-y', '-loglevel', 'error', ...args]);
+export async function run(cmd: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
+  try {
+    const r = await spawnChecked(cmd, args, {
+      timeoutMs: opts.timeoutMs ?? mediaTimeoutMs(opts.durationSec),
+      maxBuffer: opts.maxBuffer ?? 64 * 1024 * 1024,
+    });
+    return { stdout: r.stdout.toString(), stderr: r.stderr };
+  } catch (err) {
+    if (err instanceof ChildFailedError) throw new Error(`${cmd} failed: ${err.message}`);
+    throw err;
+  }
+}
+
+export function ffmpeg(args: string[], durationSec?: number): Promise<RunResult> {
+  return run(FFMPEG, ['-hide_banner', '-nostdin', '-y', '-loglevel', 'error', ...args], { durationSec });
 }
 
 /** ffmpeg with info-level logging on stderr, for filters such as silencedetect that report there. */
-export function ffmpegInfo(args: string[]): Promise<RunResult> {
-  return run(FFMPEG, ['-hide_banner', '-nostdin', '-y', '-loglevel', 'info', ...args]);
+export function ffmpegInfo(args: string[], durationSec?: number): Promise<RunResult> {
+  return run(FFMPEG, ['-hide_banner', '-nostdin', '-y', '-loglevel', 'info', ...args], { durationSec });
 }
 
 export interface ProbeStream {
@@ -56,10 +70,24 @@ export interface ProbeResult {
   format: { duration?: string; format_name?: string; tags?: Record<string, string> };
 }
 
-export async function probe(path: string): Promise<ProbeResult> {
-  const { stdout } = await run(FFPROBE, ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', path]);
+/**
+ * Probes a file opened with exactly the demuxer its content calls for (see
+ * safety.ts), and checks that demuxer is what opened it.
+ */
+export async function probe(target: SafeInput | string): Promise<ProbeResult> {
+  const input = typeof target === 'string' ? await safeInput(target, ALL_CONTAINERS) : target;
+  const { stdout } = await run(FFPROBE, [
+    '-v', 'error', ...demuxArgs(input), '-show_format', '-show_streams', '-of', 'json', '-i', `file:${input.path}`,
+  ]);
   const parsed = JSON.parse(stdout) as Partial<ProbeResult>;
-  return { streams: parsed.streams ?? [], format: parsed.format ?? {} };
+  const result = { streams: parsed.streams ?? [], format: parsed.format ?? {} };
+  assertProbedFormat(input, result.format.format_name);
+  return result;
+}
+
+/** `-f <demuxer> ... -i file:<path>` for one of the pipeline's own files (or a checked SafeInput). */
+export async function fileInput(target: SafeInput | string, allowed: readonly Container[] = ALL_CONTAINERS): Promise<string[]> {
+  return inputArgs(typeof target === 'string' ? await safeInput(target, allowed) : target);
 }
 
 export function parseRate(rate: string | undefined): number {
@@ -98,6 +126,26 @@ export function durationOf(p: ProbeResult, kind?: 'video' | 'audio'): number {
   }
   const f = Number(p.format.duration);
   return Number.isFinite(f) ? f : 0;
+}
+
+/**
+ * Duration per stream kind measured from the packets, for files whose container states
+ * none: a browser's MediaRecorder writes WebM with no duration in the header (and a
+ * variable frame rate). The end of the last packet of each kind, in seconds.
+ */
+export async function measureDurations(target: SafeInput, p: ProbeResult): Promise<{ video: number; audio: number }> {
+  const { stdout } = await run(FFPROBE, [
+    '-v', 'error', ...demuxArgs(target), '-show_entries', 'packet=stream_index,pts_time,duration_time', '-of', 'csv=p=0', '-i', `file:${target.path}`,
+  ]);
+  const kindOf = new Map(p.streams.map((s) => [s.index, s.codec_type]));
+  const out = { video: 0, audio: 0 };
+  for (const line of stdout.split('\n')) {
+    const [idx, pts, dur] = line.split(',');
+    const kind = kindOf.get(Number(idx));
+    const end = Number(pts) + (Number(dur) || 0);
+    if ((kind === 'video' || kind === 'audio') && Number.isFinite(end)) out[kind] = Math.max(out[kind], end);
+  }
+  return out;
 }
 
 const IMAGE_CODECS = new Set(['png', 'mjpeg', 'jpeg', 'webp', 'bmp', 'gif', 'tiff', 'heic', 'hevc_image', 'jpegxl', 'av1_image']);

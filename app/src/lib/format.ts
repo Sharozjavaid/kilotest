@@ -49,3 +49,10 @@ export function batchProgress(b: Pick<BatchSummary, 'counts' | 'total'>): number
 export function goalLine(posted: number, perWeek: number): string {
   return `${posted} of ${perWeek} ${perWeek === 1 ? 'video' : 'videos'} posted`;
 }
+
+/** "48 MB", "1.2 MB", "540 KB". */
+export function formatBytes(bytes: number): string {
+  if (bytes >= 10e6) return `${Math.round(bytes / 1e6)} MB`;
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+}

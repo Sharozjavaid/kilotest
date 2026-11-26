@@ -32,6 +32,7 @@ export function GraphicThemePicker({ value, onChange }: { value: string; onChang
             onPress={() => onChange(t.id)}
             accessibilityRole="radio"
             accessibilityState={{ checked: selected }}
+            aria-checked={selected}
             accessibilityLabel={`${t.name} theme`}
             style={({ pressed }) => [styles.option, pressed && { opacity: 0.7 }]}
             testID={`theme-${t.id}`}

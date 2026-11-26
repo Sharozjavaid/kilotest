@@ -95,6 +95,19 @@ describe('video status machine', () => {
     ctl.faults.decideEdit = undefined;
   });
 
+  it('a job cut short by shutdown is queued again, not failed as a bad clip', async () => {
+    let stops = 1;
+    ctl.faults.ingestClip = () => {
+      if (stops-- > 0) throw Object.assign(new Error('ffprobe not started: received SIGTERM'), { name: 'MediaStoppedError' });
+      return undefined;
+    };
+    const a = await uploadFixtures(user, ['routine']);
+    const ready = await waitForStatus(user, a.videos[0]!.videoId, 'ready_for_review', 60_000);
+    expect(ready.error).toBeNull();
+    expect(env.log.lines.some((l) => l.msg.includes('interrupted by shutdown'))).toBe(true);
+    ctl.faults.ingestClip = undefined;
+  });
+
   it('an unreadable clip fails with the bad-clip message; an invalid EDL from the decider is refused', async () => {
     ctl.faults.ingestClip = () => {
       throw new Error('ffmpeg: moov atom not found');
@@ -122,9 +135,13 @@ describe('video status machine', () => {
     const cut = ready.edl!.segments.find((s) => !s.keep && s.text)!;
     const saved = await user.ok(SaveEdlResponse, 'PUT', `/v1/videos/${id}/edl`, { edl: toggleSegment(ready.edl!, cut.id), baseRevision: 0 });
     expect(saved.edl.variants).toEqual([]);
-    // Ask for variants on the saved EDL by changing settings, then replan only that pass.
+    // A client cannot change the settings an edit was made with; they stay as stored.
     const withVariants = { ...saved.edl, settings: { ...saved.edl.settings, hookVariations: 3 } };
-    const saved2 = await user.ok(SaveEdlResponse, 'PUT', `/v1/videos/${id}/edl`, { edl: withVariants, baseRevision: 1 });
+    const kept = await user.ok(SaveEdlResponse, 'PUT', `/v1/videos/${id}/edl`, { edl: withVariants, baseRevision: 1 });
+    expect(kept.edl.settings.hookVariations).toBe(1);
+    // Ask for variants by changing the stored settings, then replan only that pass.
+    await env.sql`update edls set edl = jsonb_set(edl, '{settings,hookVariations}', '3') where video_id = ${id} and revision = 2`;
+    const saved2 = { edl: { ...kept.edl, settings: { ...kept.edl.settings, hookVariations: 3 } } };
     let gate!: () => void;
     const hold = new Promise<void>((r) => (gate = r));
     ctl.faults.replan = async () => {

@@ -67,6 +67,8 @@ export interface FixtureScore {
   longestKeptSilenceSec: number;
   outputSec: number;
   edlIssues: number;
+  /** Cut boundaries not on their clip's frame grid (the renderer would move them). */
+  offGridBoundaries: number;
   edl: Edl;
 }
 
@@ -83,6 +85,7 @@ export interface ScoreReport {
     deadAirKeptSec: number;
     outputSec: number;
     edlIssues: number;
+    offGridBoundaries: number;
   };
 }
 
@@ -106,16 +109,134 @@ export function ensureGenerated(): string[] {
   return made;
 }
 
-export function findFixtures(): string[] {
+/** Fixture directories, one per fixture id (the first root that has an id wins). */
+export function findFixtures(roots: readonly string[] = FIXTURE_ROOTS): string[] {
   const dirs: string[] = [];
-  for (const root of FIXTURE_ROOTS) {
+  const seen = new Set<string>();
+  for (const root of roots) {
     if (!existsSync(root)) continue;
     for (const name of readdirSync(root).sort()) {
       const dir = join(root, name);
-      if (existsSync(join(dir, 'manifest.json'))) dirs.push(dir);
+      if (!existsSync(join(dir, 'manifest.json')) || seen.has(name)) continue;
+      seen.add(name);
+      dirs.push(dir);
     }
   }
   return dirs;
+}
+
+// ---- touching words ------------------------------------------------------------
+
+/** Derived fixtures with no pause between consecutive spoken units ("so um this"). */
+export const TOUCHING_ROOT = join(PKG, '.work/fixtures-touching');
+/** The fixture generator leaves this much silence between consecutive units. */
+const UNIT_GAP_MAX = 0.3;
+
+const sh = (cmd: string, args: string[]) => execFileSync(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 30 }).toString();
+
+/**
+ * Rewrites one fixture clip with the short silence between consecutive spoken units
+ * removed from its sound, so those units touch, and its units and words moved to
+ * match. The picture is a plain card at the clip's frame rate (it is not scored).
+ */
+function touchClip(srcDir: string, clip: ManifestClip, outDir: string, outName: string, order: number): ManifestClip {
+  const units = [...clip.units].sort((a, b) => a.start - b.start);
+  const removed: Array<[number, number]> = [];
+  for (let k = 0; k + 1 < units.length; k++) {
+    const a = units[k]!;
+    const b = units[k + 1]!;
+    if (a.kind === 'pause' || b.kind === 'pause') continue;
+    const gap = b.start - a.end;
+    if (gap > 1e-3 && gap < UNIT_GAP_MAX) removed.push([a.end, b.start]);
+  }
+  const shift = (t: number) => {
+    let d = 0;
+    for (const [a, b] of removed) if (t >= b - 1e-9) d += b - a;
+    return Math.round((t - d) * 1000) / 1000;
+  };
+  const durationSec = shift(clip.durationSec);
+  const words = (JSON.parse(readFileSync(join(srcDir, clip.wordsFile), 'utf8')) as Transcript).words.map((w) => ({ ...w, start: shift(w.start), end: shift(w.end) }));
+  const transcript = { clipId: outName, language: 'en', durationSec, words };
+  // Sample-exact: keep the stretches between removals and join them.
+  const keepRanges: Array<[number, number]> = [];
+  let t = 0;
+  for (const [a, b] of removed) {
+    keepRanges.push([t, a]);
+    t = b;
+  }
+  keepRanges.push([t, clip.durationSec]);
+  const n = keepRanges.length;
+  const graph =
+    `[0:a]aresample=48000,asplit=${n}${keepRanges.map((_, i) => `[x${i}]`).join('')};` +
+    keepRanges.map(([a, b], i) => `[x${i}]atrim=start=${a.toFixed(4)}:end=${b.toFixed(4)},asetpts=PTS-STARTPTS[p${i}]`).join(';') +
+    `;${keepRanges.map((_, i) => `[p${i}]`).join('')}concat=n=${n}:v=0:a=1[a]`;
+  const wav = join(outDir, `${outName}.wav`);
+  sh('ffmpeg', ['-hide_banner', '-v', 'error', '-y', '-threads', '2', '-i', join(srcDir, clip.file), '-filter_complex', graph, '-map', '[a]', '-ac', '1', '-ar', '48000', wav]);
+  const tag = 'kilo-words:' + Buffer.from(JSON.stringify(transcript)).toString('base64');
+  const file = `${outName}.mp4`;
+  sh('ffmpeg', [
+    '-hide_banner', '-v', 'error', '-y', '-threads', '2',
+    '-f', 'lavfi', '-t', String(durationSec), '-i', `color=c=0x2B3038:s=360x640:r=${clip.fps}`, '-i', wav,
+    '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k',
+    '-t', String(durationSec), '-metadata', `comment=${tag}`, join(outDir, file),
+  ]);
+  writeFileSync(join(outDir, `${outName}.words.json`), JSON.stringify(transcript, null, 2));
+  return {
+    ...clip,
+    name: outName,
+    file,
+    wordsFile: `${outName}.words.json`,
+    order,
+    durationSec,
+    units: clip.units.map((u) => ({ ...u, start: shift(u.start), end: shift(u.end) })),
+  };
+}
+
+/**
+ * Builds the touching-words fixtures from the ordinary ones: every fixture with its
+ * unit gaps removed, plus "fillers60-touch", the 30 fps mid-sentence fillers clip
+ * next to a 60 fps clip so its cuts are decided inside a 60 fps EDL.
+ */
+export function ensureTouchingFixtures(): string[] {
+  const sources = new Map(findFixtures().map((d) => [d.split('/').pop()!, d]));
+  const plans: Array<{ id: string; parts: Array<{ fixture: string; clip: string }> }> = [];
+  for (const [id, dir] of sources) {
+    const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Manifest;
+    plans.push({ id: `${id}-touch`, parts: m.clips.map((c) => ({ fixture: id, clip: c.name })) });
+  }
+  if (sources.has('az_fillers') && sources.has('routine')) {
+    plans.push({ id: 'fillers60-touch', parts: [{ fixture: 'az_fillers', clip: 'talk' }, { fixture: 'routine', clip: 'clip1' }] });
+  }
+  const made: string[] = [];
+  for (const plan of plans) {
+    const out = join(TOUCHING_ROOT, plan.id);
+    const manifestOut = join(out, 'manifest.json');
+    const newest = Math.max(...plan.parts.map((p) => statSync(join(sources.get(p.fixture)!, 'manifest.json')).mtimeMs));
+    if (existsSync(manifestOut) && statSync(manifestOut).mtimeMs > newest) continue;
+    execFileSync('mkdir', ['-p', out]);
+    const first = JSON.parse(readFileSync(join(sources.get(plan.parts[0]!.fixture)!, 'manifest.json'), 'utf8')) as Manifest;
+    const clips: ManifestClip[] = [];
+    for (const [i, part] of plan.parts.entries()) {
+      const dir = sources.get(part.fixture)!;
+      const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Manifest;
+      const c = m.clips.find((x) => x.name === part.clip)!;
+      const name = plan.parts.length > 1 && plan.parts.some((p, j) => j !== i && p.clip === part.clip) ? `${part.fixture}-${c.name}` : c.name;
+      clips.push(touchClip(dir, c, out, name, plan.id === 'fillers60-touch' ? i : c.order));
+    }
+    const mixed = new Set(plan.parts.map((p) => p.fixture)).size > 1;
+    const manifest: Manifest = {
+      ...first,
+      id: plan.id,
+      title: `${first.title} (touching words)`,
+      // Units of different fixtures keep their own retake groups apart.
+      clips: mixed ? clips.map((c, i) => ({ ...c, units: c.units.map((u) => (u.group ? { ...u, group: `${i}:${u.group}` } : u)) })) : clips,
+      script: mixed ? null : first.script,
+      broll: [],
+    };
+    writeFileSync(manifestOut, JSON.stringify(manifest, null, 2));
+    made.push(plan.id);
+  }
+  return made;
 }
 
 const analyze = createAnalyze({ decider: 'heuristic', transcriber: fixtureTranscriber(), stock: null, log: () => {} });
@@ -193,6 +314,10 @@ export function jitterTranscript(t: Transcript, sec: number, seed: number): Tran
 export interface ScoreOptions {
   /** Perturb the decider's word timings by up to this many seconds. */
   jitterSec?: number;
+  /** Score the touching-words fixtures (no pause between consecutive units) instead. */
+  touching?: boolean;
+  /** Only fixtures whose id matches. */
+  only?: RegExp;
 }
 
 export async function scoreFixture(dir: string, opts: ScoreOptions = {}): Promise<FixtureScore> {
@@ -224,8 +349,15 @@ export async function scoreFixture(dir: string, opts: ScoreOptions = {}): Promis
   const score: FixtureScore = {
     id: fixture, dir, clippedWords: 0, clippedDetail: [], retakeGroups: 0, retakeGroupsRight: 0, retakeDetail: [],
     keptUnits: 0, keptUnitsFull: 0, cutUnits: 0, cutUnitsCut: 0, missedCuts: [], deadAirKeptSec: 0,
-    longestKeptSilenceSec: 0, outputSec: 0, edlIssues: validateEdl(edl, clips).length, edl,
+    longestKeptSilenceSec: 0, outputSec: 0, edlIssues: validateEdl(edl, clips).length, offGridBoundaries: 0, edl,
   };
+  for (const c of clips) {
+    for (const seg of edl.segments.filter((x) => x.clipId === c.id)) {
+      for (const t of [seg.start, seg.end]) {
+        if (t > 1e-9 && t < c.durationSec - 1e-9 && Math.abs(t * c.fps - Math.round(t * c.fps)) > 1e-6) score.offGridBoundaries++;
+      }
+    }
+  }
   const keptFraction = new Map<string, number>(); // `${clip}:${unit}` -> share of the unit kept
   let heardRun = 0;
   let heardEnd = -1;
@@ -310,8 +442,13 @@ export async function scoreFixture(dir: string, opts: ScoreOptions = {}): Promis
 
 export async function runScore(opts: ScoreOptions = {}): Promise<ScoreReport> {
   ensureGenerated();
+  if (opts.touching) ensureTouchingFixtures();
   const fixtures: FixtureScore[] = [];
-  for (const dir of findFixtures()) fixtures.push(await scoreFixture(dir, opts));
+  const dirs = opts.touching ? findFixtures([TOUCHING_ROOT]) : findFixtures();
+  for (const dir of dirs) {
+    if (opts.only && !opts.only.test(dir.split('/').pop()!)) continue;
+    fixtures.push(await scoreFixture(dir, opts));
+  }
   const sum = (f: (s: FixtureScore) => number) => fixtures.reduce((n, s) => n + f(s), 0);
   return {
     fixtures,
@@ -326,6 +463,7 @@ export async function runScore(opts: ScoreOptions = {}): Promise<ScoreReport> {
       deadAirKeptSec: sum((s) => s.deadAirKeptSec),
       outputSec: sum((s) => s.outputSec),
       edlIssues: sum((s) => s.edlIssues),
+      offGridBoundaries: sum((s) => s.offGridBoundaries),
     },
   };
 }
@@ -360,6 +498,7 @@ export function formatReport(r: ScoreReport, verbose = false): string {
   const fmt = (row: string[]) => row.map((c, i) => c.padEnd(widths[i]!)).join('  ');
   out.push(fmt(head), widths.map((w) => '-'.repeat(w)).join('  '), ...rows.slice(0, -1).map(fmt), widths.map((w) => '-'.repeat(w)).join('  '), fmt(rows[rows.length - 1]!));
   if (t.edlIssues) out.push(`EDL validation issues: ${t.edlIssues}`);
+  if (t.offGridBoundaries) out.push(`Cut boundaries off their clip's frame grid: ${t.offGridBoundaries}`);
   const problems = r.fixtures.flatMap((f) => [...f.clippedDetail, ...f.retakeDetail, ...(verbose ? f.missedCuts : [])].map((d) => `  ${f.id}: ${d}`));
   if (problems.length) out.push('', 'Details:', ...problems);
   out.push(
@@ -372,5 +511,8 @@ export function formatReport(r: ScoreReport, verbose = false): string {
 
 export function targetsMet(r: ScoreReport): boolean {
   const t = r.total;
-  return t.clippedWords === 0 && t.retakeGroupsRight >= 0.9 * t.retakeGroups && t.keptUnitsFull === t.keptUnits && t.edlIssues === 0;
+  return (
+    t.clippedWords === 0 && t.retakeGroupsRight >= 0.9 * t.retakeGroups && t.keptUnitsFull === t.keptUnits && t.edlIssues === 0 &&
+    t.offGridBoundaries === 0
+  );
 }

@@ -1,11 +1,19 @@
-export { analyze, canonicalInput, createAnalyze, enforceSettings, edlFps, selectDecider } from './analyze.js';
-export type { Analyze, AnalyzeOptions, DeciderName } from './analyze.js';
-export { ingestClip, buildConcatProxy, ingestBroll, nominalFps, sidecarPathFor, writeFixtureSidecar } from './ingest.js';
+export {
+  analyze, canonicalInput, createAnalyze, enforceSettings, edlFps, selectDecider, describeProviders, decideNotices, keepFootageSegments,
+  NO_SPEECH_MESSAGE,
+} from './analyze.js';
+export type { Analyze, AnalyzeOptions, DeciderName, DecideNotice, ProviderInfo, ProvidersReport } from './analyze.js';
+export { PipelineError, UnsupportedMediaError, MediaTimeoutError, MediaStoppedError, isPipelineError, UNSUPPORTED_MEDIA_MESSAGE } from './errors.js';
+export { mediaTimeoutMs } from './proc.js';
+export { sniffContainer, CLIP_CONTAINERS, BROLL_CONTAINERS } from './safety.js';
+export type { Container } from './safety.js';
+export { ingestClip, buildConcatProxy, ingestBroll, nominalFps, sidecarPathFor, writeFixtureSidecar, countVideoFrames } from './ingest.js';
 export type { BrollDescriber } from './ingest.js';
 export { filenameDescriber, wordsFromFilename } from './describe.js';
 export { detectSilence, noiseProfile, parseSilenceDetect, readPcm16 } from './silence.js';
 export {
   deepgramTranscriber, openaiTranscriber, fixtureTranscriber, selectTranscriber, restorePunctuation, splitWavOnSilences, OPENAI_MAX_UPLOAD_BYTES,
+  isTranscriptUnavailable, unavailableTranscript, transcriberChoice,
 } from './transcribe.js';
 export type { Transcriber, TranscribeInput, FetchLike, AudioPiece } from './transcribe.js';
 export { buildChunks, prepareClipWords } from './chunks.js';
@@ -26,5 +34,4 @@ export type { ClaudeLike, ClaudeEdit, ClaudePlan } from './claude.js';
 export { pexelsProvider, suggestStock, stockQuery } from './stock.js';
 export type { StockProvider } from './stock.js';
 export { flagFillers, FILLER_WORDS } from './text.js';
-export { enforceOverlayRules, overlayRuleProblems } from './rules.js';
-export type { RuleProblem } from './rules.js';
+export { enforceOverlayRules } from './rules.js';

@@ -320,6 +320,23 @@ export function openaiTranscriber(opts: {
 
 // ---- fixture ---------------------------------------------------------------
 
+/**
+ * A transcript that carries no information: no speech-to-text ran on this clip (the
+ * offline fixture transcriber found no sidecar). Distinct from a real transcript
+ * that heard nothing. The flag is an extra JSON field, so it survives being stored
+ * and read back as JSON; `Transcript.parse` would drop it, so check it before parsing.
+ */
+export type MaybeUnavailableTranscript = Transcript & { unavailable?: true };
+
+export function unavailableTranscript(clipId: string, durationSec: number): Transcript {
+  const t: MaybeUnavailableTranscript = { clipId, language: 'en', durationSec, words: [], unavailable: true };
+  return t;
+}
+
+export function isTranscriptUnavailable(t: Transcript | undefined): boolean {
+  return (t as MaybeUnavailableTranscript | undefined)?.unavailable === true;
+}
+
 /** Reads the sidecar ingest wrote from the fixture's comment tag (CONTRACTS.md section 4). */
 export function fixtureTranscriber(): Transcriber {
   return {
@@ -329,7 +346,8 @@ export function fixtureTranscriber(): Transcriber {
       try {
         raw = await readFile(sidecarPathFor(input.audioPath), 'utf8');
       } catch {
-        return { clipId: input.clipId, language: 'en', durationSec: input.durationSec, words: [] };
+        // No speech-to-text here: say so, rather than claim the clip is silent.
+        return unavailableTranscript(input.clipId, input.durationSec);
       }
       const t = Transcript.parse(JSON.parse(raw));
       return { ...t, clipId: input.clipId, words: flagFillers(t.words) };
@@ -337,9 +355,13 @@ export function fixtureTranscriber(): Transcriber {
   };
 }
 
+/** Which transcriber the environment selects (CONTRACTS.md section 4). */
+export function transcriberChoice(env: NodeJS.ProcessEnv = process.env): string {
+  return env.KILO_TRANSCRIBER ?? (env.DEEPGRAM_API_KEY ? 'deepgram' : env.OPENAI_API_KEY ? 'openai' : 'fixture');
+}
+
 export function selectTranscriber(env: NodeJS.ProcessEnv = process.env, fetchImpl?: FetchLike): Transcriber {
-  const choice =
-    env.KILO_TRANSCRIBER ?? (env.DEEPGRAM_API_KEY ? 'deepgram' : env.OPENAI_API_KEY ? 'openai' : 'fixture');
+  const choice = transcriberChoice(env);
   if (choice === 'deepgram') {
     if (!env.DEEPGRAM_API_KEY) throw new Error('KILO_TRANSCRIBER=deepgram needs DEEPGRAM_API_KEY');
     return deepgramTranscriber({ apiKey: env.DEEPGRAM_API_KEY, fetch: fetchImpl, baseUrl: env.DEEPGRAM_BASE_URL, model: env.KILO_DEEPGRAM_MODEL });

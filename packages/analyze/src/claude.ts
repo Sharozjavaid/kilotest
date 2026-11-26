@@ -6,7 +6,7 @@ import * as z from 'zod/v4';
 import type { BrollAsset, EditSettings, TemplateId } from '@kilo/edl';
 import { MODE_PRESETS, PACING_PARAMS, TEMPLATES, getTemplate, parseTemplateProps } from '@kilo/edl';
 import type { Chunk } from './chunks.js';
-import { THREADS, ffmpeg } from './ffmpeg.js';
+import { THREADS, ffmpeg, fileInput } from './ffmpeg.js';
 import type { ChunkDecision, CutDecisions } from './heuristic.js';
 import type { BrollDescriber } from './ingest.js';
 
@@ -313,13 +313,13 @@ export function claudeDescriber(opts: ClaudeDeciderOptions, fallback: BrollDescr
       const frames: string[] = [];
       if (input.kind === 'image') {
         const out = join(input.workDir, 'describe-0.jpg');
-        await ffmpeg(['-threads', THREADS, '-i', input.normalizedPath, '-frames:v', '1', '-vf', "scale='min(768,iw)':-2", '-q:v', '4', out]);
+        await ffmpeg(['-threads', THREADS, ...(await fileInput(input.normalizedPath)), '-frames:v', '1', '-vf', "scale='min(768,iw)':-2", '-q:v', '4', out]);
         frames.push(out);
       } else {
         const d = input.durationSec ?? 1;
         for (const [k, f] of [0.15, 0.5, 0.85].entries()) {
           const out = join(input.workDir, `describe-${k}.jpg`);
-          await ffmpeg(['-threads', THREADS, '-ss', (d * f).toFixed(3), '-i', input.normalizedPath, '-frames:v', '1', '-vf', 'scale=432:-2', '-q:v', '4', out]);
+          await ffmpeg(['-threads', THREADS, '-ss', (d * f).toFixed(3), ...(await fileInput(input.normalizedPath)), '-frames:v', '1', '-vf', 'scale=432:-2', '-q:v', '4', out]);
           frames.push(out);
         }
       }

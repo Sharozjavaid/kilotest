@@ -39,6 +39,15 @@ npm run kilo -- edit ../fixtures/out/routine/clip1.mp4 --out .work/out/routine.m
   --broll ../fixtures/out/routine/broll/shelf.mp4 --variants 2 --quality preview
 ```
 
+Recorder-style input, as the app's recorder sends it: each `--take <line>:<take>:<file>`
+is one take of a script line (both counted from 1), so a line can have several takes and
+the decider keeps the last good one. Browser recordings (WebM with no duration) work too.
+
+```sh
+npm run kilo -- edit --script script.txt --out .work/out/rec.mp4 \
+  --take 1:1:take-a.webm --take 2:1:take-b.webm --take 2:2:take-c.webm --take 3:1:take-d.webm
+```
+
 ## Tests
 
 `npm test` starts the throwaway cluster with `scripts/dev-db.sh` if it is not

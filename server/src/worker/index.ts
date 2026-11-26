@@ -74,8 +74,25 @@ interface WorkState {
  * Runs the pipeline jobs. Each handler is safe to run again: it looks at what is
  * already stored and only does the steps that are missing.
  */
+/** True when a pipeline error only means the process was told to stop (SIGTERM, SIGINT). */
+export function isStopError(err: unknown): boolean {
+  for (let e: unknown = err, depth = 0; e && depth < 5; depth++) {
+    if (e instanceof Error && e.name === 'MediaStoppedError') return true;
+    e = e instanceof UserFacingError ? e.causeError : (e as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 export class Worker {
+  /** Set by `beginStop()`: the process is shutting down. */
+  private stopping = false;
+
   constructor(private readonly deps: WorkerDeps) {}
+
+  /** Call when shutdown starts, before the queue stops: failures from here on are interruptions. */
+  beginStop(): void {
+    this.stopping = true;
+  }
 
   private get db() {
     return this.deps.db;
@@ -99,6 +116,16 @@ export class Worker {
             try {
               await fn(job.data);
             } catch (err) {
+              if (this.stopping || isStopError(err)) {
+                // The process is shutting down (SIGTERM): the pipeline refuses new ffmpeg runs and
+                // kills running ones. That says nothing about the video; hand the job back to the
+                // queue for whichever worker runs next instead of spending a retry or failing it.
+                this.deps.log.warn('job interrupted by shutdown; queued again', { job: name, id: job.id });
+                await boss.send(name, job.data as object, { startAfter: 5, retryLimit: job.retryLimit, expireInSeconds: 2 * 3600 }).catch((e) =>
+                  this.deps.log.error('could not queue the interrupted job again', { job: name, id: job.id, err: errorDetail(e) }),
+                );
+                continue;
+              }
               const willRetry = job.retryCount < job.retryLimit;
               this.deps.log.error('job failed', { job: name, id: job.id, attempt: job.retryCount + 1, willRetry, err: errorDetail(err) });
               if (willRetry) throw err;

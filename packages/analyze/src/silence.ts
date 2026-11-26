@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import type { SilenceGap } from '@kilo/edl';
-import { THREADS, ffmpegInfo } from './ffmpeg.js';
+import { THREADS, ffmpegInfo, fileInput } from './ffmpeg.js';
 
 /** Shortest stretch reported as silence. Shorter dips are just between syllables. */
 export const MIN_SILENCE_SEC = 0.1;
@@ -104,10 +104,10 @@ export async function detectSilence(input: { clipId: string; audioPath: string }
   const durationSec = pcm.samples.length / pcm.sampleRate;
   const profile = noiseProfile(pcm);
   const { stderr } = await ffmpegInfo([
-    '-threads', THREADS, '-i', input.audioPath,
+    '-threads', THREADS, ...(await fileInput(input.audioPath, ['wav'])),
     '-af', `silencedetect=noise=${profile.thresholdDb}dB:d=${MIN_SILENCE_SEC}`,
     '-f', 'null', '-',
-  ]);
+  ], durationSec);
   // A click or breath of a few milliseconds can split one pause in two; join them.
   const gaps = parseSilenceDetect(stderr, input.clipId, durationSec);
   const merged: SilenceGap[] = [];

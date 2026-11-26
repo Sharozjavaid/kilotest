@@ -8,6 +8,7 @@ import {
   SaveEdlRequest,
   TemplatePropsSchemas,
   VideoStatus,
+  checkOverlayRules,
   validateEdl,
   type AddBrollResponse,
   type CreateRenderResponse,
@@ -20,7 +21,6 @@ import type { Db } from '../db/index.js';
 import { HttpError, invalidRequest, invalidState, notFound } from '../errors.js';
 import { JOBS } from '../queue.js';
 import { DEFAULT_MAX_UPLOAD_BYTES, uploadLimit } from '../uploads.js';
-import { overlayRuleProblems } from '../overlayRules.js';
 import { extensionFor, keys } from '../storage/types.js';
 import {
   currentEdl,
@@ -62,7 +62,8 @@ async function edlProblems(db: Db, videoId: string, edl: Edl): Promise<string[]>
       problems.push(`Overlay ${o.id} uses B-roll that is not ready or does not exist`);
     }
   }
-  problems.push(...overlayRuleProblems(edl).map((p) => p.message));
+  // Base cut only: no overlapping overlays, no B-roll in the first two seconds (CONTRACTS.md section 5).
+  problems.push(...checkOverlayRules(edl).map((i) => i.message));
   const variantIds = new Set<string>();
   for (const v of edl.variants) {
     if (variantIds.has(v.id)) problems.push(`Duplicate variant id ${v.id}`);
@@ -142,7 +143,15 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
       }
       const problems = await edlProblems(tx, id, req.edl);
       if (problems.length) throw invalidRequest(problems.slice(0, 5).join('; '));
-      const edl: Edl = { ...req.edl, revision: current.revision + 1 };
+      // What the client may not change stays as stored: the video, its frame rate, the settings it was made with, who decided it.
+      const edl: Edl = {
+        ...req.edl,
+        videoId: current.edl.videoId,
+        fps: current.edl.fps,
+        settings: current.edl.settings,
+        decidedBy: current.edl.decidedBy,
+        revision: current.revision + 1,
+      };
       await tx`insert into edls (video_id, revision, user_id, edl, author) values (${id}, ${edl.revision}, ${userId}, ${tx.json(edl as never)}, 'user')`;
       await tx`
         update videos set updated_at = now(),

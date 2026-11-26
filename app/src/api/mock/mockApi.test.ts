@@ -260,6 +260,20 @@ describe('MockKiloApi', () => {
     api.dispose();
   });
 
+  it('refuses overlapping overlays like the server, and keeps the fields a client may not change', async () => {
+    const api = new MockKiloApi({ media });
+    const id = (await api.home()).readyToReview[0]!.id;
+    const d = await api.getVideo(id);
+    const g = { id: 'g', type: 'graphic' as const, anchorSegmentId: 's6', offsetSec: 0, durationSec: 1.5, template: 'bold-title' as const, props: { text: 'Hi' } };
+    const overlapping = { ...d.edl!, overlays: [...d.edl!.overlays, g, { ...g, id: 'g2', offsetSec: 0.5 }] };
+    await expect(api.saveEdl(id, { edl: overlapping, baseRevision: d.edl!.revision })).rejects.toMatchObject({ status: 400, code: 'invalid_request' });
+    const tampered = { ...d.edl!, fps: d.edl!.fps + 1, settings: { ...d.edl!.settings, hookVariations: 5 } };
+    const saved = await api.saveEdl(id, { edl: tampered, baseRevision: d.edl!.revision });
+    expect(saved.edl.fps).toBe(d.edl!.fps);
+    expect(saved.edl.settings).toEqual(d.edl!.settings);
+    api.dispose();
+  });
+
   it('starts empty for a first-time user and loads mode presets into batches', async () => {
     const api = new MockKiloApi({ media, seed: false });
     const home = await api.home();

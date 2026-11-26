@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Modal, StyleSheet, View } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,8 +17,12 @@ function Player({ url, title, onClose }: { url: string; title: string; onClose: 
   const insets = useSafeAreaInsets();
   const player = useVideoPlayer({ uri: url }, (p) => {
     p.loop = true;
-    p.play();
   });
+  // Start once the view is mounted: on web the player plays through its <video> elements,
+  // and a play() in the setup callback (before any is attached) does nothing.
+  useEffect(() => {
+    player.play();
+  }, [player]);
   return (
     <View style={[styles.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8 }]}>
       <View style={styles.top}>

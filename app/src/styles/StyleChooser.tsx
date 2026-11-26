@@ -49,6 +49,7 @@ export function StyleChooser({ settings, onPick }: { settings: EditSettings; onP
               onPress={() => onPick(st.settings)}
               accessibilityRole="radio"
               accessibilityState={{ checked: selected }}
+            aria-checked={selected}
               accessibilityLabel={`${st.name}${st.isDefault ? ', default' : ''}`}
               style={({ pressed }) => [s.chip, selected && s.chipOn, pressed && { opacity: 0.7 }]}
               testID={`style-chip-${st.id}`}

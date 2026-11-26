@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View, type DimensionValue, type StyleProp, type ViewStyle } from 'react-native';
-import { errorMessage } from '@/api/errors';
+import { router } from 'expo-router';
+import { errorMessage, isKiloApiError } from '@/api/errors';
 import { color, radius, space } from './tokens';
 import { Text } from './type';
 import { Icon, type IconName } from './Icon';
@@ -42,16 +43,23 @@ export function SkeletonRows({ count = 3 }: { count?: number }) {
 
 /** An error with the message and a retry button. */
 export function ErrorState({ error, onRetry, title = "Couldn't load this" }: { error: unknown; onRetry?: () => void; title?: string }) {
+  // Gone for good (deleted, or a wrong link): trying again cannot help, going home can.
+  const gone = isKiloApiError(error) && error.isNotFound;
+  const heading = gone ? "This isn't here" : title;
   return (
-    <Card gap={12} padding={24} style={styles.center} accessibilityLabel={title}>
+    <Card gap={12} padding={24} style={styles.center} accessibilityLabel={heading} testID={gone ? 'not-found' : 'error-state'}>
       <Icon name="alert" size={28} color={color.cut} />
       <Text variant="bodyLg" center>
-        {title}
+        {heading}
       </Text>
       <Text variant="secondary" tone="muted" center>
-        {errorMessage(error)}
+        {gone ? 'It may have been deleted, or the link is wrong.' : errorMessage(error)}
       </Text>
-      {onRetry ? <PillButton variant="secondary" label="Try again" icon="refresh" onPress={onRetry} height={44} /> : null}
+      {gone ? (
+        <PillButton variant="secondary" label="Go to Home" onPress={() => router.replace('/')} height={44} />
+      ) : onRetry ? (
+        <PillButton variant="secondary" label="Try again" icon="refresh" onPress={onRetry} height={44} />
+      ) : null}
     </Card>
   );
 }

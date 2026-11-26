@@ -38,7 +38,7 @@ describe('UploadQueue', () => {
 
   it('uploads with limited concurrency, reports progress, and completes files as they finish', async () => {
     const { transport, calls } = manualTransport();
-    const complete = jest.fn(async (_b: CompleteUploadsRequest) => ({ startedVideoIds: ['v1'] }));
+    const complete = jest.fn(async (_b: CompleteUploadsRequest) => ({ startedVideoIds: ['v1'], results: [] }));
     const onStarted = jest.fn();
     const q = new UploadQueue({ transport, store: memoryStore(), complete, concurrency: 2, onStarted });
     await q.enqueue([job('c1', 'v1'), job('c2', 'v1'), job('a1', 'v1', 'broll'), job('c3', 'v2')]);
@@ -70,7 +70,7 @@ describe('UploadQueue', () => {
 
   it('retries a failed upload with exponential backoff, then marks it failed', async () => {
     const { transport, calls } = manualTransport();
-    const q = new UploadQueue({ transport, store: memoryStore(), complete: async () => ({ startedVideoIds: [] }), maxAttempts: 3, backoffMs: (n) => 1000 * 2 ** (n - 1) });
+    const q = new UploadQueue({ transport, store: memoryStore(), complete: async () => ({ startedVideoIds: [], results: [] }), maxAttempts: 3, backoffMs: (n) => 1000 * 2 ** (n - 1) });
     await q.enqueue([job('c1', 'v1')]);
     await flush();
     calls[0]!.reject(new Error('network down'));
@@ -105,7 +105,7 @@ describe('UploadQueue', () => {
     const complete = jest
       .fn()
       .mockRejectedValueOnce(new Error('503'))
-      .mockResolvedValue({ startedVideoIds: ['v1'] });
+      .mockResolvedValue({ startedVideoIds: ['v1'], results: [] });
     const q = new UploadQueue({ transport, store: memoryStore(), complete, backoffMs: () => 5000 });
     await q.enqueue([job('c1', 'v1')]);
     await flush();
@@ -123,7 +123,7 @@ describe('UploadQueue', () => {
   it('persists the queue and resumes after a relaunch, continuing tus uploads from their URL', async () => {
     const store = memoryStore();
     const first = manualTransport();
-    const q1 = new UploadQueue({ transport: first.transport, store, complete: async () => ({ startedVideoIds: [] }) });
+    const q1 = new UploadQueue({ transport: first.transport, store, complete: async () => ({ startedVideoIds: [], results: [] }) });
     await q1.enqueue([job('c1', 'v1', 'clip', target('tus')), job('c2', 'v1')]);
     await flush();
     first.calls[0]!.cb.onResumeUrl?.('https://up.example/tus/abc');
@@ -136,7 +136,7 @@ describe('UploadQueue', () => {
 
     store.saved = saved.map((j) => (j.id === 'c2' ? { ...j, status: 'uploaded' as const } : j));
     const second = manualTransport();
-    const complete = jest.fn(async () => ({ startedVideoIds: [] }));
+    const complete = jest.fn(async () => ({ startedVideoIds: [], results: [] }));
     const q2 = new UploadQueue({ transport: second.transport, store, complete });
     await q2.resume();
     await flush();
@@ -152,7 +152,7 @@ describe('UploadQueue', () => {
 
   it('suspend aborts running uploads and resume restarts them', async () => {
     const { transport, calls } = manualTransport();
-    const q = new UploadQueue({ transport, store: memoryStore(), complete: async () => ({ startedVideoIds: [] }) });
+    const q = new UploadQueue({ transport, store: memoryStore(), complete: async () => ({ startedVideoIds: [], results: [] }) });
     await q.enqueue([job('c1', 'v1')]);
     await flush();
     expect(calls[0]!.cb.signal.aborted).toBe(false);
@@ -166,9 +166,54 @@ describe('UploadQueue', () => {
 
   it('does not add the same file twice', async () => {
     const { transport } = manualTransport();
-    const q = new UploadQueue({ transport, store: memoryStore(), complete: async () => ({ startedVideoIds: [] }) });
+    const q = new UploadQueue({ transport, store: memoryStore(), complete: async () => ({ startedVideoIds: [], results: [] }) });
     await q.enqueue([job('c1', 'v1')]);
     await q.enqueue([job('c1', 'v1')]);
     expect(q.getJobs()).toHaveLength(1);
+  });
+
+  it('deletes recorded takes once the server has them, and nothing else', async () => {
+    const { transport, calls } = manualTransport();
+    let fail = true;
+    const complete = jest.fn(async () => {
+      if (fail) throw new Error('offline');
+      return { startedVideoIds: ['v1'], results: [] };
+    });
+    const discard = jest.fn();
+    const q = new UploadQueue({ transport, store: memoryStore(), complete, discard, backoffMs: () => 1000 });
+    await q.enqueue([{ ...job('t1', 'v1'), deleteAfterUpload: true }, job('a1', 'v1', 'broll')]);
+    await flush();
+    calls[0]!.resolve();
+    calls[1]!.resolve();
+    await flush();
+    // Uploaded but not yet confirmed by uploads/complete: the take stays.
+    expect(discard).not.toHaveBeenCalled();
+    fail = false;
+    await jest.advanceTimersByTimeAsync(1500);
+    await flush();
+    expect(q.getJobs().every((j) => j.status === 'done')).toBe(true);
+    expect(discard).toHaveBeenCalledTimes(1);
+    expect(discard).toHaveBeenCalledWith('file:///t1.mov');
+  });
+
+  it('uploads a file again when uploads/complete refuses it, and gives up after the attempt limit', async () => {
+    const { transport, calls } = manualTransport();
+    const refuse = Object.assign(new Error('Upload c1 is 10 bytes but was declared as 1000'), { status: 400 });
+    const complete = jest.fn(async () => {
+      throw refuse;
+    });
+    const q = new UploadQueue({ transport, store: memoryStore(), complete, maxAttempts: 2, backoffMs: () => 100 });
+    await q.enqueue([job('c1', 'v1')]);
+    await flush();
+    calls[0]!.resolve();
+    await flush();
+    expect(q.getJobs()[0]!.status).toBe('pending');
+    await jest.advanceTimersByTimeAsync(200);
+    expect(calls).toHaveLength(2);
+    calls[1]!.resolve();
+    await flush();
+    await flush();
+    expect(q.getJobs()[0]).toMatchObject({ status: 'failed', error: refuse.message });
+    expect(complete).toHaveBeenCalledTimes(2);
   });
 });

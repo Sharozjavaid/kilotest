@@ -1,4 +1,5 @@
-import { execFile, spawn } from 'node:child_process';
+import { ChildFailedError, mediaTimeoutMs, spawnChecked } from './proc.js';
+import { ALL_CONTAINERS, assertProbedFormat, demuxArgs, inputArgs, safeInput, type Container, type SafeInput } from './safety.js';
 
 /** Keep every ffmpeg to two threads: the machine is shared. */
 export const THREADS = Number(process.env.KILO_RENDER_THREADS ?? 2) || 2;
@@ -16,66 +17,74 @@ export class FfmpegError extends Error {
 
 export interface RunOptions {
   cwd?: string;
-  /** Expected output duration in seconds, to turn ffmpeg's progress into 0..1. */
+  /** Expected output duration in seconds, to turn ffmpeg's progress into 0..1 and to set the time limit. */
   durationSec?: number;
   onProgress?: (fraction: number) => void;
+  /** Explicit time limit, overriding the duration rule (mediaTimeoutMs). */
+  timeoutMs?: number;
 }
 
 /**
  * Runs ffmpeg with an argument array (never a shell string). Progress comes from
  * `-progress pipe:1`. Resolves with stderr, which carries filter output such as
- * loudnorm's measurement.
+ * loudnorm's measurement. Time-limited by the media duration; killed with its
+ * process group on timeout or when this process is told to stop (MediaTimeoutError,
+ * MediaStoppedError).
  */
-export function runFfmpeg(args: string[], opts: RunOptions = {}): Promise<string> {
+export async function runFfmpeg(args: string[], opts: RunOptions = {}): Promise<string> {
   const full = ['-hide_banner', '-nostdin', '-y', '-loglevel', 'info', '-nostats', '-progress', 'pipe:1', ...args];
   const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const child = spawn('ffmpeg', full, { cwd: opts.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    let stdoutBuf = '';
-    child.stderr.on('data', (d: Buffer) => {
-      stderr += d.toString();
-      // Keep memory bounded on very long renders.
-      if (stderr.length > 2_000_000) stderr = stderr.slice(-1_000_000);
+  let stdoutBuf = '';
+  const onStdout = (d: Buffer) => {
+    stdoutBuf += d.toString();
+    let nl: number;
+    while ((nl = stdoutBuf.indexOf('\n')) >= 0) {
+      const line = stdoutBuf.slice(0, nl).trim();
+      stdoutBuf = stdoutBuf.slice(nl + 1);
+      if (!opts.onProgress || !opts.durationSec) continue;
+      const m = /^out_time_us=(\d+)/.exec(line);
+      if (m) opts.onProgress(Math.max(0, Math.min(1, Number(m[1]) / 1e6 / opts.durationSec)));
+    }
+  };
+  try {
+    const r = await spawnChecked(process.env.KILO_FFMPEG || 'ffmpeg', full, {
+      cwd: opts.cwd,
+      timeoutMs: opts.timeoutMs ?? mediaTimeoutMs(opts.durationSec),
+      onStdout,
     });
-    child.stdout.on('data', (d: Buffer) => {
-      stdoutBuf += d.toString();
-      let nl: number;
-      while ((nl = stdoutBuf.indexOf('\n')) >= 0) {
-        const line = stdoutBuf.slice(0, nl).trim();
-        stdoutBuf = stdoutBuf.slice(nl + 1);
-        if (!opts.onProgress || !opts.durationSec) continue;
-        const m = /^out_time_us=(\d+)/.exec(line);
-        if (m) {
-          const sec = Number(m[1]) / 1e6;
-          opts.onProgress(Math.max(0, Math.min(1, sec / opts.durationSec)));
-        }
-      }
-    });
-    child.on('error', (err) => reject(new FfmpegError(`Could not start ffmpeg: ${err.message}`, full, '')));
-    child.on('close', (code) => {
-      if (process.env.KILO_RENDER_DEBUG === '1') {
-        const out = args[args.length - 1];
-        process.stderr.write(`[render] ffmpeg ${((Date.now() - started) / 1000).toFixed(2)}s -> ${out}\n`);
-      }
-      if (code === 0) {
-        opts.onProgress?.(1);
-        resolve(stderr);
-      } else {
-        const tail = stderr.split('\n').filter(Boolean).slice(-15).join('\n');
-        reject(new FfmpegError(`ffmpeg exited with code ${code}:\n${tail}`, full, stderr));
-      }
-    });
-  });
+    opts.onProgress?.(1);
+    return r.stderr;
+  } catch (err) {
+    if (err instanceof ChildFailedError) {
+      const tail = err.stderr.split('\n').filter(Boolean).slice(-15).join('\n');
+      throw new FfmpegError(`ffmpeg failed: ${err.message.split('\n')[0]}:\n${tail}`, full, err.stderr);
+    }
+    throw err;
+  } finally {
+    if (process.env.KILO_RENDER_DEBUG === '1') {
+      process.stderr.write(`[render] ffmpeg ${((Date.now() - started) / 1000).toFixed(2)}s -> ${args[args.length - 1]}\n`);
+    }
+  }
 }
 
-export function execText(cmd: string, args: string[], cwd?: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(cmd, args, { cwd, maxBuffer: 256 * 1024 * 1024, encoding: 'utf8' }, (err, stdout, stderr) => {
-      if (err) reject(new Error(`${cmd} failed: ${err.message}\n${stderr}`));
-      else resolve(stdout);
-    });
-  });
+export async function execText(cmd: string, args: string[], cwd?: string, timeoutMs?: number): Promise<string> {
+  try {
+    const r = await spawnChecked(cmd, args, { cwd, timeoutMs: timeoutMs ?? mediaTimeoutMs(undefined), maxBuffer: 256 * 1024 * 1024 });
+    return r.stdout.toString('utf8');
+  } catch (err) {
+    if (err instanceof ChildFailedError) throw new Error(`${cmd} failed: ${err.message}\n${err.stderr}`);
+    throw err;
+  }
+}
+
+/** `-f <demuxer> ... -i file:<path>` for a file, after checking its content (see safety.ts). */
+export async function fileInput(target: SafeInput | string, allowed: readonly Container[] = ALL_CONTAINERS): Promise<string[]> {
+  return inputArgs(typeof target === 'string' ? await safeInput(target, allowed) : target);
+}
+
+/** Options for one of the renderer's own concat lists: local files of the expected format only. */
+export function concatListInput(listPath: string, inner: 'wav' | 'mov'): string[] {
+  return ['-protocol_whitelist', 'file', '-format_whitelist', `concat,${inner}`, '-f', 'concat', '-safe', '0', '-i', `file:${listPath}`];
 }
 
 export interface ProbeStream {
@@ -96,12 +105,17 @@ export interface ProbeStream {
 
 export interface ProbeResult {
   streams: ProbeStream[];
-  format: { duration?: string; bit_rate?: string; tags?: Record<string, string> };
+  format: { duration?: string; bit_rate?: string; format_name?: string; tags?: Record<string, string> };
 }
 
-export async function probe(path: string): Promise<ProbeResult> {
-  const out = await execText('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', path]);
-  return JSON.parse(out) as ProbeResult;
+export async function probe(target: SafeInput | string): Promise<ProbeResult> {
+  const input = typeof target === 'string' ? await safeInput(target, ALL_CONTAINERS) : target;
+  const out = await execText(process.env.KILO_FFPROBE || 'ffprobe', [
+    '-v', 'error', ...demuxArgs(input), '-show_streams', '-show_format', '-of', 'json', '-i', `file:${input.path}`,
+  ]);
+  const parsed = JSON.parse(out) as ProbeResult;
+  assertProbedFormat(input, (parsed.format as { format_name?: string }).format_name);
+  return parsed;
 }
 
 export function parseRate(rate: string | undefined): number {

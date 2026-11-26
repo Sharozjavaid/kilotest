@@ -2,7 +2,8 @@ import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { CAPTION_HIGHLIGHT, getGraphicTheme, getTemplate, type RenderApi, type RenderInput, type RenderOutput } from '@kilo/edl';
 import { buildAss, graphicRanges, groupCues, mapWords, subtractRanges } from './captions.js';
-import { probe, runFfmpeg } from './ffmpeg.js';
+import { concatListInput, fileInput, probe, runFfmpeg } from './ffmpeg.js';
+import { BROLL_CONTAINERS, CLIP_CONTAINERS, inputArgs, safeInput, type SafeInput } from './safety.js';
 import { audioChunkArgs, AUDIO_RATE, encoderArgs, sampleBounds, videoChunkArgs } from './graph.js';
 import { buildPlan, DEFAULT_LIMITS, RenderInputError, type ChunkLimits, type RenderPlan } from './plan.js';
 
@@ -62,28 +63,35 @@ class Progress {
 
 export async function renderVideo(input: RenderInput, options: RenderOptions = {}): Promise<RenderOutput> {
   const plan = buildPlan(input, options.limits ?? DEFAULT_LIMITS);
-  await checkFiles(plan);
+  const safe = await checkFiles(plan);
   await mkdir(input.workDir, { recursive: true });
   const tmp = await mkdtemp(join(resolve(input.workDir), 'kilo-render-'));
   const keep = options.keepIntermediates || process.env.KILO_RENDER_KEEP === '1';
   try {
-    return await renderInto(plan, input, tmp);
+    return await renderInto(plan, input, tmp, safe);
   } finally {
     if (!keep) await rm(tmp, { recursive: true, force: true });
   }
 }
 
-async function checkFiles(plan: RenderPlan): Promise<void> {
-  const paths = new Map<string, string>();
-  for (const it of plan.items) paths.set(it.clipPath, `clip "${it.clipId}"`);
-  for (const o of plan.overlays) if (o.kind === 'broll') paths.set(o.path, `B-roll asset "${o.asset.id}"`);
-  for (const [p, what] of paths) {
+/**
+ * Checks every input exists and is a plain media file of the expected kind, by
+ * content (see safety.ts), and returns how to open each one.
+ */
+async function checkFiles(plan: RenderPlan): Promise<Map<string, SafeInput>> {
+  const paths = new Map<string, { what: string; allowed: typeof CLIP_CONTAINERS }>();
+  for (const it of plan.items) paths.set(it.clipPath, { what: `clip "${it.clipId}"`, allowed: CLIP_CONTAINERS });
+  for (const o of plan.overlays) if (o.kind === 'broll') paths.set(o.path, { what: `B-roll asset "${o.asset.id}"`, allowed: BROLL_CONTAINERS });
+  const safe = new Map<string, SafeInput>();
+  for (const [p, { what, allowed }] of paths) {
     try {
       await access(p);
     } catch {
       throw new RenderInputError(`The file for ${what} does not exist: ${p}`);
     }
+    safe.set(p, await safeInput(p, allowed));
   }
+  return safe;
 }
 
 /** Where the time of the last render in this process went, in milliseconds (for timing reports). */
@@ -91,7 +99,12 @@ export const renderTimings: { last: { audioMs: number; graphicsMs: number; video
   last: null,
 };
 
-async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Promise<RenderOutput> {
+async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string, safe: Map<string, SafeInput>): Promise<RenderOutput> {
+  const inputFor = (path: string): string[] => {
+    const s = safe.get(path);
+    if (!s) throw new Error(`Input was not checked before use: ${path}`);
+    return inputArgs(s);
+  };
   const t0 = performance.now();
   const mark = { audio: 0, graphics: 0, video: 0 };
   const { format: fmt } = plan;
@@ -108,7 +121,7 @@ async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Pr
   for (const it of plan.items) {
     if (seen.has(it.clipId)) continue;
     seen.add(it.clipId);
-    const p = await probe(it.clipPath).catch((e: Error) => {
+    const p = await probe(safe.get(it.clipPath)!).catch((e: Error) => {
       throw new RenderInputError(`Clip "${it.clipId}" could not be read: ${e.message}`);
     });
     if (!p.streams.some((s) => s.codec_type === 'video')) {
@@ -122,14 +135,14 @@ async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Pr
   const audioFiles: string[] = [];
   for (const chunk of plan.chunks) {
     const out = join(tmp, `audio_${chunk.index}.wav`);
-    await runFfmpeg(audioChunkArgs({ fmt, chunk, silentClips, outFile: out }), { cwd: tmp });
+    await runFfmpeg(audioChunkArgs({ fmt, input: inputFor, chunk, silentClips, outFile: out }), { cwd: tmp, durationSec: chunk.frames / F });
     audioFiles.push(out);
     audioStage(((chunk.index + 1) / plan.chunks.length) * 0.4);
   }
   const alist = join(tmp, 'audio.txt');
   await writeFile(alist, concatList(audioFiles));
   const totalSamples = sampleBounds(0, plan.totalFrames, F).count;
-  const measure = await runFfmpeg(['-f', 'concat', '-safe', '0', '-i', alist, '-af', `${LOUDNORM}:print_format=json`, '-f', 'null', '-'], {
+  const measure = await runFfmpeg([...concatListInput(alist, 'wav'), '-af', `${LOUDNORM}:print_format=json`, '-f', 'null', '-'], {
     cwd: tmp,
     durationSec: plan.durationSec,
     onProgress: (f) => audioStage(0.4 + 0.3 * f),
@@ -143,7 +156,7 @@ async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Pr
   const audioOut = join(tmp, 'audio.m4a');
   await runFfmpeg(
     [
-      '-f', 'concat', '-safe', '0', '-i', alist,
+      ...concatListInput(alist, 'wav'),
       '-af', `${norm}aresample=${AUDIO_RATE},asetpts=N/SR/TB,apad=whole_len=${totalSamples},atrim=end_sample=${totalSamples}`,
       '-c:a', 'aac', '-b:a', fmt.quality === 'final' ? '192k' : '128k', '-ar', String(AUDIO_RATE), '-ac', '2',
       audioOut,
@@ -181,6 +194,7 @@ async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Pr
       } catch {
         throw new Error(`renderGraphic for overlay "${g.overlay.id}" returned a file that does not exist: ${res.path}`);
       }
+      safe.set(res.path, await safeInput(res.path, ['mov']));
       n += 1;
       gStage(n / graphics.length);
     }
@@ -223,7 +237,7 @@ async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Pr
     }
     const out = join(tmp, `video_${chunk.index}.mp4`);
     const before = framesDone;
-    await runFfmpeg(videoChunkArgs({ fmt, chunk, assFile, encoder, outFile: out }), {
+    await runFfmpeg(videoChunkArgs({ fmt, input: inputFor, chunk, assFile, encoder, outFile: out }), {
       cwd: tmp,
       durationSec: chunk.frames / F,
       onProgress: (f) => vStage((before + f * chunk.frames) / plan.totalFrames),
@@ -240,8 +254,8 @@ async function renderInto(plan: RenderPlan, input: RenderInput, tmp: string): Pr
   await mkdir(resolve(input.outPath, '..'), { recursive: true });
   await runFfmpeg(
     [
-      '-f', 'concat', '-safe', '0', '-i', vlist,
-      '-i', audioOut,
+      ...concatListInput(vlist, 'mov'),
+      ...(await fileInput(audioOut, ['mov'])),
       '-map', '0:v:0', '-map', '1:a:0',
       '-c', 'copy',
       '-movflags', '+faststart',

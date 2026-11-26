@@ -108,7 +108,11 @@ export function toggleSegment(edl: Edl, segmentId: string): Edl {
   return { ...edl, segments, variants };
 }
 
-/** Start time of each clip inside the concatenated review proxy. */
+/**
+ * Clip start times from summed durations. An estimate only: a real proxy's offsets
+ * come from `ConcatProxy.clipOffsets` (served as `VideoDetail.proxy.clipOffsets`),
+ * which are measured from the frames written. Use those for playback.
+ */
 export function clipOffsets(clips: readonly ClipInfo[]): Record<string, number> {
   const out: Record<string, number> = {};
   let t = 0;

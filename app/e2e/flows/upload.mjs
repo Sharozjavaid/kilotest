@@ -81,6 +81,10 @@ export default async function upload(ctx) {
     page.on('request', (r) => {
       if (r.method() === 'PUT' && r.url().includes('/v1/local/upload/')) puts.push(r);
     });
+    // Slow the uplink (about 1.5 MB/s) so upload progress is visible, as on a phone.
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Network.enable');
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 20, downloadThroughput: -1, uploadThroughput: 1_500_000 });
     await page.getByRole('button', { name: 'Edit 3 videos' }).click();
     const res = await created;
     assert(res.status() === 201, `POST /batches answered ${res.status()}`);
@@ -117,7 +121,15 @@ export default async function upload(ctx) {
           if (v.progress !== null) progress[key].push(v.progress);
           if (v.status === 'failed') throw new Error(`${v.title} failed: ${v.error}`);
         }
-        if (seen.size === 1 || Math.random() < 0.05) await shot(page, '04-batch-progress');
+        if ([...seen].some((x) => x.startsWith('Uploading')) && !ctx.state.shotUploading) {
+          ctx.state.shotUploading = true;
+          await shot(page, '04-batch-uploading');
+        }
+        if (b.videos.every((v) => v.status !== 'uploading')) await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+        if ([...seen].some((x) => x.startsWith('Editing')) && !ctx.state.shotEditing) {
+          ctx.state.shotEditing = true;
+          await shot(page, '04-batch-editing');
+        }
         return b.videos.every((v) => v.status === 'ready_for_review');
       },
       { timeoutMs: 15 * 60_000, everyMs: 400 },
@@ -134,6 +146,8 @@ export default async function upload(ctx) {
       for (let i = 1; i < list.length; i++) assert(list[i] >= list[i - 1] - 1e-9, `${k}: progress went backwards`);
     }
     assert([...seen].some((s) => s.startsWith('Editing')), 'the batch screen never showed analysis progress');
+    const uploadPcts = [...seen].filter((s) => s.startsWith('Uploading')).map((s) => Number(/\d+/.exec(s)[0]));
+    assert(uploadPcts.some((p) => p > 0 && p < 100), `the batch screen never showed upload progress between 0 and 100% (${uploadPcts})`);
     await seeText(page, '3 of 3 ready');
     await seeText(page, 'Review the first one');
     await shot(page, '05-batch-ready');

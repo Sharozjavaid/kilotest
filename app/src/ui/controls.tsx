@@ -62,6 +62,8 @@ export function SegmentedControl<T extends string>({ segments, value, onChange, 
             accessibilityRole="radio"
             accessibilityLabel={s.label}
             accessibilityState={{ selected, checked: selected }}
+            // react-native-web does not turn accessibilityState into aria-checked; say it directly.
+            aria-checked={selected}
             style={[styles.seg, selected && styles.segSelected]}
           >
             <Text variant="body" weight={selected ? 600 : 500} tone={selected ? 'white' : 'muted'} style={styles.segText} numberOfLines={1}>

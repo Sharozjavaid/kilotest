@@ -13,6 +13,7 @@ describe('score', () => {
     console.log(formatReport(report));
     const t = report.total;
     expect(t.edlIssues).toBe(0);
+    expect(t.offGridBoundaries).toBe(0);
     expect(t.clippedWords).toBe(0);
     expect(t.retakeGroups).toBeGreaterThan(0);
     expect(t.retakeGroupsRight / t.retakeGroups).toBeGreaterThanOrEqual(0.9);
@@ -26,4 +27,27 @@ describe('score', () => {
     expect(t.keptUnitsFull).toBe(t.keptUnits);
     expect(t.retakeGroupsRight / t.retakeGroups).toBeGreaterThanOrEqual(0.9);
   }, 1_800_000);
+
+  /**
+   * Finding C: words that touch with no pause between them ("so um this"), the
+   * filler-mid-sentence case real recordings are full of. The touching fixtures are the
+   * ordinary ones with the gaps between spoken units removed from the sound; one of them
+   * ("fillers60-touch") puts the 30 fps fillers clip next to a 60 fps clip, so its cuts
+   * are decided inside a 60 fps EDL.
+   */
+  for (const jitterSec of [0.08, 0.15]) {
+    it(`clips no kept word where words touch, with word timings off by up to ${jitterSec * 1000} ms`, async () => {
+      const report = await runScore({ jitterSec, touching: true });
+      console.log(formatReport(report));
+      const t = report.total;
+      expect(report.fixtures.map((f) => f.id)).toContain('fillers60-touch');
+      const mixed = report.fixtures.find((f) => f.id === 'fillers60-touch')!;
+      expect(mixed.edl.fps).toBe(60);
+      expect(t.edlIssues).toBe(0);
+      expect(t.offGridBoundaries).toBe(0);
+      expect(t.clippedWords).toBe(0);
+      expect(t.keptUnitsFull).toBe(t.keptUnits);
+      expect(t.retakeGroupsRight / t.retakeGroups).toBeGreaterThanOrEqual(0.9);
+    }, 1_800_000);
+  }
 });

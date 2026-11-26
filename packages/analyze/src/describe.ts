@@ -4,14 +4,18 @@ import { capitalize } from './text.js';
 
 const CAMERA_TOKENS = new Set(['img', 'dsc', 'dscn', 'vid', 'pxl', 'mov', 'mvi', 'gopr', 'dji', 'screenshot', 'copy', 'final', 'edit', 'export', 'stock', 'pexels', 'source', 'normalized']);
 
-/** Readable words from a file name: "desk_before-2.jpg" gives "desk before". */
+/**
+ * Readable words from a file name: "desk_before-2.jpg" gives "desk before". The name
+ * is the uploader's: only letters, digits and apostrophes inside words survive, so no
+ * markup, format directive, quote or line break reaches a description.
+ */
 export function wordsFromFilename(filename: string | undefined): string {
   if (!filename) return '';
-  const stemName = basename(filename, extname(filename));
+  const stemName = basename(filename, extname(filename)).slice(0, 200);
   return stemName
     .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .split(/[\s_\-.+()[\]]+/)
-    .map((w) => w.toLowerCase())
+    .split(/[^\p{L}\p{N}']+/u)
+    .map((w) => w.replace(/^'+|'+$/g, '').toLowerCase())
     .filter((w) => w && !/^\d+$/.test(w) && !CAMERA_TOKENS.has(w) && !/^[0-9a-f]{8,}$/.test(w))
     .join(' ');
 }

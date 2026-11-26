@@ -1,4 +1,4 @@
-import { MODE_PRESETS, resolveTimeline, toggleSegment, validateEdl, type Edl } from '@kilo/edl';
+import { MODE_PRESETS, checkOverlayRules, resolveTimeline, toggleSegment, validateEdl, type Edl } from '@kilo/edl';
 import { buildMockAnalysis } from '@/api/mock/build';
 import {
   SAFE_START_SEC,
@@ -168,21 +168,15 @@ describe('swapping, removing and durations', () => {
     expect(checkOverlays(early, assets).map((p) => `${p.code}:${p.overlayId}`)).toEqual(['first_seconds:x3']);
   });
 
-  it("checks each variant's own overlays with the base overlays, and exempts them from the first seconds", () => {
+  it('agrees with the shared checker in @kilo/edl, and does not check variant overlays', () => {
     const first = spokenLines(base)[0]!;
     const g = base.overlays.find((o) => o.type === 'graphic')!;
-    const title = { ...g, id: 'hook-title', anchorSegmentId: first.segment.id, offsetSec: 0, durationSec: 1.6, props: { text: 'Hi' } };
-    const withHook = (durationSec: number): Edl => ({
-      ...base,
-      variants: [{ id: 'hook-b', label: 'Hook B', hookText: 'Hi', segmentOrder: base.segments.filter((s) => s.keep).map((s) => s.id), overlays: [{ ...title, durationSec }] }],
-    });
-    expect(checkOverlays(withHook(1.6), assets)).toEqual([]);
-    const long = withHook(60);
-    expect(checkOverlays(long, assets).map((p) => p.code)).toContain('overlap');
-    // Placing next to a variant's overlay keeps clear of it.
-    const busyEdl: Edl = { ...withHook(3), overlays: [] };
-    const r = placeOverlay(busyEdl, first.segment.id, { type: 'graphic', template: 'bold-title', props: { text: 'Hey' } });
-    if (r.ok) expect(checkOverlays(r.edl, assets)).toEqual([]);
+    const title = { ...g, id: 'hook-title', anchorSegmentId: first.segment.id, offsetSec: 0, durationSec: 3, props: { text: 'Hi' } };
+    const withHook: Edl = { ...base, variants: [{ id: 'hook-b', label: 'Hook B', hookText: 'Hi', segmentOrder: base.segments.filter((s) => s.keep).map((s) => s.id), overlays: [title] }] };
+    expect(checkOverlays(withHook, assets)).toEqual([]);
+    expect(checkOverlayRules(withHook)).toEqual([]);
+    const bad: Edl = { ...base, overlays: [...base.overlays, { ...g, id: 'x9', offsetSec: g.offsetSec + 0.1 }] };
+    expect(checkOverlays(bad).length).toBe(checkOverlayRules(bad).length);
   });
 });
 

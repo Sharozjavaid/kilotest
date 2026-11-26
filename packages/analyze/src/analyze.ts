@@ -16,7 +16,8 @@ import { applyZoomAndTransitions } from './polish.js';
 import { detectSilence } from './silence.js';
 import { snapSegments } from './snap.js';
 import { pexelsProvider, suggestStock, type StockProvider } from './stock.js';
-import { selectTranscriber, type FetchLike, type Transcriber } from './transcribe.js';
+import { isTranscriptUnavailable, selectTranscriber, transcriberChoice, type FetchLike, type Transcriber } from './transcribe.js';
+import { mergeSilences } from './snap.js';
 import { buildVariants, heuristicHooks, type HookPlan } from './variants.js';
 import { keys } from './text.js';
 
@@ -45,6 +46,150 @@ export interface AnalyzeOptions {
 export interface Analyze extends AnalyzeApi {
   /** Which decider decideEdit and replan will use right now. */
   deciderName(): DeciderName;
+  /** decideEdit, plus anything the creator should be told about the result. */
+  decideEditWithNotices(input: DecideInput): Promise<{ edl: Edl; notices: DecideNotice[] }>;
+  /** Which providers this instance uses, and which are offline stand-ins. */
+  describeProviders(): ProvidersReport;
+}
+
+// ---- notices ------------------------------------------------------------------
+
+export const NO_SPEECH_MESSAGE = "We couldn't hear any speech in this video, so nothing was cut";
+
+/** Something about a decided edit worth telling the creator. `message` is safe to show. */
+export interface DecideNotice {
+  code: 'no_speech';
+  message: string;
+  /** True when no speech-to-text ran at all (the offline fixture transcriber had no transcript). */
+  transcriptUnavailable: boolean;
+}
+
+/**
+ * Notices for a decide input. `no_speech` when no clip has a single word: the edit
+ * then keeps the footage instead of cutting it all as dead air.
+ */
+export function decideNotices(input: DecideInput): DecideNotice[] {
+  const ids = new Set(input.clips.map((c) => c.id));
+  const mine = input.transcripts.filter((t) => ids.has(t.clipId));
+  if (mine.some((t) => t.words.length > 0)) return [];
+  const transcriptUnavailable = mine.length === 0 || mine.some((t) => isTranscriptUnavailable(t));
+  return [{ code: 'no_speech', message: NO_SPEECH_MESSAGE, transcriptUnavailable }];
+}
+
+/** Leading or trailing silence at least this long is trimmed when no speech was heard. */
+export const NO_SPEECH_TRIM_MIN_SEC = 1.0;
+/** How much of a trimmed silence stays next to the footage. */
+const NO_SPEECH_TRIM_MARGIN_SEC = 0.25;
+
+/**
+ * Segments for a video in which nothing was heard: every clip kept, except an
+ * obvious long silence at its very start or end (when the creator cuts dead air).
+ * A clip that is silent throughout is kept whole: it is footage, not a pause.
+ */
+export function keepFootageSegments(input: DecideInput): Segment[] {
+  const segments: Segment[] = [];
+  for (const clip of input.clips) {
+    const D = clip.durationSec;
+    const f = clip.fps;
+    const gaps = mergeSilences(input.silences.filter((g) => g.clipId === clip.id));
+    let keepStart = 0;
+    let keepEnd = D;
+    if (input.settings.cutDeadAir) {
+      const lead = gaps.find((g) => g.start <= 0.05 && g.end < D - 0.5 && g.end >= NO_SPEECH_TRIM_MIN_SEC);
+      const tail = gaps.find((g) => g.end >= D - 0.05 && g.start > 0.5 && D - g.start >= NO_SPEECH_TRIM_MIN_SEC);
+      if (lead) keepStart = Math.floor((lead.end - NO_SPEECH_TRIM_MARGIN_SEC) * f + 1e-6) / f;
+      if (tail) keepEnd = Math.ceil((tail.start + NO_SPEECH_TRIM_MARGIN_SEC) * f - 1e-6) / f;
+      if (keepEnd - keepStart < 0.5) {
+        keepStart = 0;
+        keepEnd = D;
+      }
+    }
+    const base = {
+      clipId: clip.id, text: '', zoom: 1, transitionIn: 'cut' as const, userOverride: false,
+      ...(clip.scriptLineIndex !== undefined ? { scriptLineIndex: clip.scriptLineIndex } : {}),
+    };
+    if (keepStart > 0) segments.push({ ...base, id: '', start: 0, end: keepStart, keep: false, reason: 'dead_air' });
+    segments.push({ ...base, id: '', start: keepStart, end: keepEnd, keep: true, reason: 'speech' });
+    if (keepEnd < D) segments.push({ ...base, id: '', start: keepEnd, end: D, keep: false, reason: 'dead_air' });
+  }
+  segments.forEach((s, i) => (s.id = `s${i + 1}`));
+  return segments;
+}
+
+// ---- providers ----------------------------------------------------------------
+
+export interface ProviderInfo {
+  /** The provider in use, e.g. "deepgram", "fixture", "claude", "heuristic". */
+  name: string;
+  /** A real service, as opposed to an offline stand-in for development and tests. */
+  real: boolean;
+  /** Extra detail: the model, or why a requested service is not in use. */
+  detail?: string;
+}
+
+export interface ProvidersReport {
+  transcriber: ProviderInfo;
+  decider: ProviderInfo;
+  /** B-roll descriptions (follow the decider). */
+  describer: ProviderInfo;
+  stock: ProviderInfo;
+  /** Names of the roles above filled by offline stand-ins. A production server should refuse transcriber or decider here. */
+  standIns: Array<'transcriber' | 'decider' | 'describer' | 'stock'>;
+  /** One line for a startup log. */
+  summary: string;
+}
+
+/**
+ * Reports which transcriber and decider (and describer and stock search) are active
+ * for this environment, and whether each is a real service or an offline stand-in.
+ * Never throws and never prints a key.
+ */
+export function describeProviders(
+  env: NodeJS.ProcessEnv = process.env,
+  overrides: { transcriber?: Transcriber; decider?: DeciderName; claudeAvailable?: boolean; stock?: boolean; claudeModel?: string } = {},
+): ProvidersReport {
+  let transcriber: ProviderInfo;
+  if (overrides.transcriber) {
+    transcriber = { name: overrides.transcriber.name, real: overrides.transcriber.name !== 'fixture', detail: 'injected' };
+  } else {
+    const choice = transcriberChoice(env);
+    if (choice === 'fixture') {
+      transcriber = { name: 'fixture', real: false, detail: 'offline stand-in: reads transcripts embedded in test recordings; real uploads get none' };
+    } else if (choice === 'deepgram') {
+      transcriber = env.DEEPGRAM_API_KEY
+        ? { name: 'deepgram', real: true, detail: env.KILO_DEEPGRAM_MODEL ?? 'nova-3' }
+        : { name: 'deepgram', real: false, detail: 'KILO_TRANSCRIBER=deepgram but DEEPGRAM_API_KEY is not set: transcription will fail' };
+    } else if (choice === 'openai') {
+      transcriber = env.OPENAI_API_KEY
+        ? { name: 'openai', real: true, detail: `${env.KILO_OPENAI_TRANSCRIBE_MODEL ?? 'whisper-1'}${env.OPENAI_BASE_URL ? ' via OPENAI_BASE_URL' : ''}` }
+        : { name: 'openai', real: false, detail: 'KILO_TRANSCRIBER=openai but OPENAI_API_KEY is not set: transcription will fail' };
+    } else {
+      transcriber = { name: choice, real: false, detail: `unknown KILO_TRANSCRIBER: transcription will fail` };
+    }
+  }
+  let wanted: string;
+  try {
+    wanted = overrides.decider ?? selectDecider(env);
+  } catch {
+    wanted = env.KILO_DECIDER ?? 'unknown';
+  }
+  const claudeAvailable = overrides.claudeAvailable ?? !!env.ANTHROPIC_API_KEY;
+  const model = overrides.claudeModel ?? env.KILO_CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL;
+  let decider: ProviderInfo;
+  if (wanted === 'claude' && claudeAvailable) decider = { name: 'claude', real: true, detail: model };
+  else if (wanted === 'claude') decider = { name: 'heuristic', real: false, detail: 'KILO_DECIDER=claude but ANTHROPIC_API_KEY is not set: using the offline heuristic' };
+  else if (wanted === 'heuristic') decider = { name: 'heuristic', real: false, detail: 'offline rules, no model' };
+  else decider = { name: wanted, real: false, detail: 'unknown KILO_DECIDER: decideEdit will fail' };
+  const describer: ProviderInfo = decider.name === 'claude'
+    ? { name: 'claude-vision', real: true, detail: model }
+    : { name: 'filename', real: false, detail: 'file name and size only' };
+  const stockOn = overrides.stock ?? !!env.PEXELS_API_KEY;
+  const stock: ProviderInfo = stockOn ? { name: 'pexels', real: true } : { name: 'none', real: false, detail: 'no PEXELS_API_KEY: no stock suggestions' };
+  const roles = { transcriber, decider, describer, stock };
+  const standIns = (Object.keys(roles) as Array<keyof typeof roles>).filter((k) => !roles[k].real);
+  const fmt = (role: string, p: ProviderInfo) => `${role}=${p.name}${p.real ? '' : ' (offline stand-in)'}`;
+  const summary = [fmt('transcriber', transcriber), fmt('decider', decider), fmt('describer', describer), fmt('stock', stock)].join(', ');
+  return { ...roles, standIns, summary };
 }
 
 export function selectDecider(env: NodeJS.ProcessEnv): DeciderName {
@@ -229,15 +374,24 @@ export function createAnalyze(opts: AnalyzeOptions = {}): Analyze {
     return key ? pexelsProvider({ apiKey: key, fetch: opts.fetch }) : null;
   };
 
-  async function decideEdit(raw: DecideInput): Promise<Edl> {
+  async function decideEditWithNotices(raw: DecideInput): Promise<{ edl: Edl; notices: DecideNotice[] }> {
     if (!raw.clips.length) throw new Error('decideEdit needs at least one clip');
     const input = canonicalInput(raw);
     const settings = input.settings;
+    const notices = decideNotices(input);
     const clipWords = prepareClipWords(input.clips, input.transcripts);
     const chunks = buildChunks(clipWords);
     const heuristic = heuristicCuts({ chunks, clipWords, settings, script: input.script });
+    const noSpeech = notices.some((n) => n.code === 'no_speech');
+    if (noSpeech) {
+      log(
+        notices[0]!.transcriptUnavailable
+          ? 'No transcript for any clip (no speech-to-text service is configured?): keeping the footage uncut'
+          : 'No speech heard in any clip: keeping the footage uncut',
+      );
+    }
     let plan: ClaudePlan | null = null;
-    if (deciderName() === 'claude') {
+    if (deciderName() === 'claude' && !noSpeech) {
       const client = claudeClient();
       if (!client) log('Claude decider selected but no ANTHROPIC_API_KEY; using the heuristic decider');
       else {
@@ -254,7 +408,9 @@ export function createAnalyze(opts: AnalyzeOptions = {}): Analyze {
     }
     const decisions = plan ? enforceSettings(plan.decisions, settings) : heuristic;
     const fps = edlFps(input.clips);
-    let segments: Segment[] = snapSegments({ clipWords, chunks, decisions, silences: input.silences, settings, fps });
+    let segments: Segment[] = noSpeech
+      ? keepFootageSegments(input)
+      : snapSegments({ clipWords, chunks, decisions, silences: input.silences, settings, fps });
     if (!segments.some((s) => s.keep)) {
       // Nothing worth keeping was found (e.g. no speech anywhere): keep everything rather than emit an empty video.
       segments = segments.map((s) => ({ ...s, keep: true, reason: 'speech' }));
@@ -282,7 +438,12 @@ export function createAnalyze(opts: AnalyzeOptions = {}): Analyze {
           return c ? lineOfChunk(lines, c) : undefined;
         }, input.broll)
       : null;
-    return finish(runPasses(base, input, ['broll', 'graphics', 'variants'], passPlan), input.clips);
+    const edl = finish(runPasses(base, input, ['broll', 'graphics', 'variants'], passPlan), input.clips);
+    return { edl, notices };
+  }
+
+  async function decideEdit(raw: DecideInput): Promise<Edl> {
+    return (await decideEditWithNotices(raw)).edl;
   }
 
   async function replan(raw: DecideInput & { edl: Edl; passes: ReplanPass[] }): Promise<Edl> {
@@ -322,6 +483,15 @@ export function createAnalyze(opts: AnalyzeOptions = {}): Analyze {
 
   return {
     deciderName,
+    decideEditWithNotices,
+    describeProviders: () =>
+      describeProviders(env(), {
+        ...(opts.transcriber ? { transcriber: opts.transcriber } : {}),
+        ...(opts.decider ? { decider: opts.decider } : {}),
+        ...(opts.claudeClient !== undefined ? { claudeAvailable: opts.claudeClient !== null } : {}),
+        ...(opts.stock !== undefined ? { stock: opts.stock !== null } : {}),
+        ...(opts.claudeModel ? { claudeModel: opts.claudeModel } : {}),
+      }),
     ingestClip,
     buildConcatProxy,
     ingestBroll: (input) => ingestBroll(input, describer()),

@@ -10,7 +10,7 @@ import {
   splitClip,
   type DraftVideo,
 } from '@/newBatch/grouping';
-import { formatDuration, plural } from '@/lib/format';
+import { formatBytes, formatDuration, plural } from '@/lib/format';
 import { Card, Header, Icon, IconButton, PillButton, Screen, Text, color, radius, typeStyle } from '@/ui';
 
 /**
@@ -110,6 +110,7 @@ function VideoCard({
           accessibilityRole="checkbox"
           accessibilityLabel={`Select ${video.title} to merge`}
           accessibilityState={{ checked: selected }}
+            aria-checked={selected}
           style={styles.check}
         >
           <View style={[styles.box, selected && styles.boxOn]}>{selected ? <Icon name="check" size={16} color={color.white} /> : null}</View>
@@ -136,7 +137,7 @@ function VideoCard({
             </Text>
             <Text variant="label" tone="muted">
               {c.durationSec ? formatDuration(c.durationSec) : 'Clip'}
-              {c.sizeBytes ? ` · ${(c.sizeBytes / 1e6).toFixed(0)} MB` : ''}
+              {c.sizeBytes ? ` · ${formatBytes(c.sizeBytes)}` : ''}
             </Text>
           </View>
           {video.clips.length > 1 ? (

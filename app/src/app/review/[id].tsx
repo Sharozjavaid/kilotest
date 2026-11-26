@@ -9,6 +9,7 @@ import { errorMessage } from '@/api/errors';
 import { formatDuration, plural, statusLabel } from '@/lib/format';
 import { useEdlSaver } from '@/review/useEdlSaver';
 import { useSkipPlayer } from '@/review/useSkipPlayer';
+import { useStableUrl } from '@/review/stableUrl';
 import { ScrubStrip } from '@/review/ScrubStrip';
 import { TranscriptRowView } from '@/review/TranscriptRowView';
 import { activeRowId, transcriptRows, type TranscriptRow } from '@/review/rows';
@@ -113,7 +114,14 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
     const variant = edl.variants.find((x) => x.id === activeVariant);
     return new Set([...edl.overlays, ...(variant?.overlays ?? [])].map((o) => o.anchorSegmentId));
   }, [edl, activeVariant]);
-  const sp = useSkipPlayer(video.proxy.url, ranges);
+  // The proxy link is re-signed on every refetch; keep one until it stops working.
+  const proxyUrl = useStableUrl(video.proxy.url);
+  const refetchVideo = useVideo(video.id).refetch;
+  const sp = useSkipPlayer(proxyUrl.url, ranges, {
+    onError: () => {
+      if (!proxyUrl.renew()) void refetchVideo().then(() => proxyUrl.renew());
+    },
+  });
   const activeId = activeRowId(edl, rows, sp.snapshot.segmentId);
 
   // ---- transcript auto-scroll ----
@@ -182,6 +190,8 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
   };
 
   const saveError = state?.error;
+  // No words at all (a muted microphone, music only): nothing could be cut by what was said.
+  const noSpeech = video.transcripts.length > 0 && video.transcripts.every((t) => t.words.length === 0);
 
   return (
     <Screen
@@ -266,6 +276,15 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
           </View>
         </View>
       </View>
+
+      {noSpeech ? (
+        <View style={styles.notice} testID="no-speech" accessibilityLiveRegion="polite">
+          <Icon name="alert" size={16} color={color.cut} />
+          <Text variant="secondary" style={{ flex: 1 }}>
+            Kilo couldn't hear any speech in this video, so it kept everything. Check that your microphone was on, or tap the pauses below to cut them yourself.
+          </Text>
+        </View>
+      ) : null}
 
       <ScrubStrip
         edl={edl}
@@ -354,5 +373,6 @@ const styles = StyleSheet.create({
   swatch: { width: 12, height: 12, borderRadius: 3 },
   list: { flex: 1, minHeight: 0 },
   actions: { flexDirection: 'row', gap: 10 },
+  notice: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', padding: 12, borderRadius: 14, backgroundColor: color.white, borderWidth: 1, borderColor: color.hairline },
   previewLink: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, marginTop: 2 },
 });

@@ -35,6 +35,8 @@ export interface UploadJob {
   nextAttemptAt: number;
   /** For `tus`: the upload's URL on the server once created, to resume it. */
   resumeUrl?: string;
+  /** A file the app made itself (a recorded take): delete it once the server has it. */
+  deleteAfterUpload?: boolean;
   error?: string;
 }
 
@@ -70,6 +72,8 @@ export interface QueueDeps {
   clearTimer?: (h: unknown) => void;
   /** Videos whose analysis started because of a complete call. */
   onStarted?: (videoIds: string[]) => void;
+  /** Deletes a local file once the server confirmed it (jobs with `deleteAfterUpload`). */
+  discard?: (fileUri: string) => void;
 }
 
 export const defaultBackoff = (attempts: number): number => Math.min(60_000, 1000 * 2 ** Math.max(0, attempts - 1));
@@ -86,7 +90,7 @@ export class UploadQueue {
   private completeNotBefore = 0;
   private loaded = false;
   private paused = false;
-  private readonly d: Required<Omit<QueueDeps, 'onStarted'>> & Pick<QueueDeps, 'onStarted'>;
+  private readonly d: Required<Omit<QueueDeps, 'onStarted' | 'discard'>> & Pick<QueueDeps, 'onStarted' | 'discard'>;
 
   constructor(deps: QueueDeps) {
     this.d = {
@@ -276,10 +280,34 @@ export class UploadQueue {
       .then(
         (res) => {
           this.completeAttempts = 0;
+          const finished = this.jobs.filter((j) => sent.has(j.id) && j.status === 'uploaded');
           this.jobs = this.jobs.map((j) => (sent.has(j.id) && j.status === 'uploaded' ? { ...j, status: 'done' } : j));
+          // The server has these files now: drop the app's own copies (recorded takes).
+          for (const j of finished) {
+            if (!j.deleteAfterUpload) continue;
+            try {
+              this.d.discard?.(j.fileUri);
+            } catch {
+              // Already gone.
+            }
+          }
           if (res.startedVideoIds.length) this.d.onStarted?.(res.startedVideoIds);
         },
-        () => {
+        (e: unknown) => {
+          const status = (e as { status?: unknown })?.status;
+          if (typeof status === 'number' && status >= 400 && status < 500 && status !== 401 && status !== 408 && status !== 429) {
+            // The server refused these files (a size that does not match: it deleted the bytes).
+            // Asking again cannot help; send them again, within the attempt limit.
+            const message = e instanceof Error ? e.message : 'The server did not accept the upload';
+            this.jobs = this.jobs.map((j) =>
+              sent.has(j.id) && j.status === 'uploaded'
+                ? j.attempts >= this.d.maxAttempts
+                  ? { ...j, status: 'failed', error: message }
+                  : { ...j, status: 'pending', bytesSent: 0, error: message, nextAttemptAt: this.d.now() + this.d.backoffMs(j.attempts) }
+                : j,
+            );
+            return;
+          }
           this.completeAttempts += 1;
           this.completeNotBefore = this.d.now() + this.d.backoffMs(this.completeAttempts);
         },

@@ -13,6 +13,16 @@ export class PickerPermissionError extends Error {
 
 export class UnsupportedFileError extends Error {}
 
+/** "a text file", "a PDF" — not a MIME type. */
+function describeType(type: string): string {
+  const t = type.trim().toLowerCase();
+  if (t.startsWith('text/')) return 'a text file';
+  if (t === 'application/pdf') return 'a PDF';
+  if (t.startsWith('audio/')) return 'a sound file';
+  if (t.includes('zip') || t.includes('compressed')) return 'an archive';
+  return 'not a video or a photo';
+}
+
 /** Exact size of a local file (the server checks it), when the picker did not say. */
 function nativeSize(uri: string): number | null {
   if (Platform.OS === 'web') return null;
@@ -47,7 +57,7 @@ export async function pickFromLibrary(what: 'videos' | 'media'): Promise<PickedF
   } catch (e) {
     // The web picker rejects anything that is not an image or a video ("Unsupported file type: text/plain").
     const m = /Unsupported file type: ([^.]+)/.exec(e instanceof Error ? e.message : '');
-    if (m) throw new UnsupportedFileError(`Kilo can only use videos${what === 'media' ? ' and photos' : ''}. One of the files you picked is ${m[1] || 'something else'}.`);
+    if (m) throw new UnsupportedFileError(`Kilo can only use videos${what === 'media' ? ' and photos' : ''}. One of the files you picked is ${describeType(m[1] ?? '')}. Pick it again without that file.`);
     throw e;
   }
   if (res.canceled) return [];

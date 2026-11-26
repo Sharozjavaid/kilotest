@@ -11,6 +11,7 @@ import {
   ListStylesResponse,
   ListVideosResponse,
   Style,
+  SaveEdlResponse,
   VideoDetail,
   type Edl,
   type SaveStyleRequest,
@@ -168,6 +169,16 @@ describe('every route: validation, unknown ids, other users, wrong state', () =>
     expect(ApiError.parse(res.body).error.message).toMatch(/overlap/);
     // Nothing above stored anything.
     expect((await a.ok(VideoDetail, 'GET', `/v1/videos/${ready.id}`)).edl!.revision).toBe(0);
+  });
+
+  it('PUT /v1/videos/:id/edl keeps the fields a client may not change', async () => {
+    const before = edlOf(await a.ok(VideoDetail, 'GET', `/v1/videos/${ready.id}`));
+    const tampered = { ...before, fps: before.fps === 30 ? 60 : 30, decidedBy: before.decidedBy === 'claude' ? 'heuristic' : 'claude', settings: { ...before.settings, hookVariations: 5 } };
+    const saved = await a.ok(SaveEdlResponse, 'PUT', `/v1/videos/${ready.id}/edl`, { edl: tampered, baseRevision: before.revision });
+    expect(saved.edl.fps).toBe(before.fps);
+    expect(saved.edl.decidedBy).toBe(before.decidedBy);
+    expect(saved.edl.settings).toEqual(before.settings);
+    expect(saved.edl.revision).toBe(before.revision + 1);
   });
 
   it('POST /v1/videos/:id/broll', async () => {

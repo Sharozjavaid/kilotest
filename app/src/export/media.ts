@@ -28,7 +28,7 @@ export class PermissionError extends Error {}
 /** Saves files to the camera roll. Asks for add-only permission. */
 export async function saveToCameraRoll(items: Array<{ url: string; name: string }>): Promise<number> {
   if (Platform.OS === 'web') {
-    for (const it of items) webDownload(it.url, `${safeName(it.name)}.mp4`);
+    for (const it of items) await webDownload(it.url, `${safeName(it.name)}.mp4`);
     return items.length;
   }
   const perm = await MediaLibrary.requestPermissionsAsync(true);
@@ -47,7 +47,7 @@ export async function shareVideo(url: string, name: string, dialogTitle: string)
   if (Platform.OS === 'web') {
     const nav = globalThis.navigator as Navigator & { share?: (d: { title?: string; url?: string }) => Promise<void> };
     if (nav?.share) await nav.share({ title: dialogTitle, url });
-    else webDownload(url, `${safeName(name)}.mp4`);
+    else await webDownload(url, `${safeName(name)}.mp4`);
     return;
   }
   if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing is not available on this device.');
@@ -55,14 +55,23 @@ export async function shareVideo(url: string, name: string, dialogTitle: string)
   await Sharing.shareAsync(local, { mimeType: 'video/mp4', UTI: 'public.mpeg-4', dialogTitle });
 }
 
-function webDownload(url: string, filename: string): void {
+/**
+ * Browsers ignore `download` on a cross-origin link (the API serves files from another
+ * origin) and navigate to the video instead, leaving the app. Fetch the bytes and save
+ * them through a same-origin blob: URL.
+ */
+async function webDownload(url: string, filename: string): Promise<void> {
   const doc = (globalThis as { document?: Document }).document;
   if (!doc) return;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`The download failed (${res.status}). Try again.`);
+  const blobUrl = URL.createObjectURL(await res.blob());
   const a = doc.createElement('a');
-  a.href = url;
+  a.href = blobUrl;
   a.download = filename;
   a.rel = 'noopener';
   doc.body.appendChild(a);
   a.click();
   a.remove();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
 }

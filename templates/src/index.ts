@@ -5,3 +5,4 @@ export type { PruneOptions, PruneResult } from './renderer.js';
 export { capturePlan, planFromSignatures, frameSignatures } from './holds.js';
 export { TemplateRequestError, normalizeRequest } from './request.js';
 export type { NormalizedRequest } from './request.js';
+export { PipelineError, MediaTimeoutError, MediaStoppedError, isPipelineError } from './errors.js';

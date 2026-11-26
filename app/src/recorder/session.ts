@@ -342,7 +342,8 @@ export function recordingUploadJobs(res: CreateBatchResponse, s: RecorderSession
   if (!v || v.clips.length !== kept.length || v.broll.length !== broll.length) throw new Error('The server returned a different number of files');
   const clips = v.clips.map((c, i) => {
     const t = kept[i]!;
-    return { id: c.clipId, kind: 'clip' as const, videoId: v.videoId, batchId: res.batch.id, fileUri: t.uri, filename: t.filename, contentType: t.contentType, sizeBytes: t.sizeBytes, target: c.upload };
+    // The take is the app's own file: once the server has it, it is deleted.
+    return { id: c.clipId, kind: 'clip' as const, videoId: v.videoId, batchId: res.batch.id, fileUri: t.uri, filename: t.filename, contentType: t.contentType, sizeBytes: t.sizeBytes, target: c.upload, deleteAfterUpload: true };
   });
   const assets = v.broll.map((b, i) => {
     const f = broll[i]!;

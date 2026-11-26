@@ -30,6 +30,22 @@ EXPO_PUBLIC_API_URL=http://<your computer's LAN IP>:8787 npx expo start --dev-cl
 
 With no `EXPO_PUBLIC_SUPABASE_URL` the app signs in with dev auth (`dev:<user id>` tokens). For Supabase auth set `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`. A phone must reach the server over the LAN, so use the computer's IP, not `localhost`.
 
+## End-to-end against the real server
+
+```sh
+npm run e2e                       # everything: database, server, web export, seven flows
+E2E_ONLY=upload,review npm run e2e
+E2E_SKIP_BUILD=1 npm run e2e      # reuse the last web export
+```
+
+`e2e/run.mjs` starts PostgreSQL (`../server/scripts/dev-db.sh`), a fresh `kilo_e2e`
+database, the server in dev mode with the real pipeline (fixture transcriber, heuristic
+decider, local storage, dev auth, 120 s signed links), exports the app for web without mock
+mode, serves it, and drives it with Playwright at 390x844 through `e2e/flows/`: upload,
+review, broll, export, recorder (Chromium's fake camera), styles (with the weekly goal) and
+failures. Later flows use what the upload flow made. Logs, downloads and server output go
+to `.work/e2e/`; screenshots of every main screen with real data to `.work/shots-real/`.
+
 ## Device builds
 
 The recorder uses `react-native-vision-camera` (v5, Nitro modules), which is native code: the app needs a development build, not Expo Go. `ios/` and `android/` are generated from `app.json`; do not edit them by hand.
