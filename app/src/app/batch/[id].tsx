@@ -35,9 +35,15 @@ export default function BatchScreen() {
         <ErrorState error={batch.error} onRetry={() => void batch.refetch()} />
       ) : (
         <>
-          <Text variant="secondary" tone="muted">
-            Keep Kilo open while clips upload; they carry on in the background where your phone allows. You'll get a notification when the batch is ready.
-          </Text>
+          {batch.data!.videos.some((x) => x.status === 'uploading') ? (
+            <Text variant="secondary" tone="muted">
+              Uploads carry on in the background where your phone allows, and pick up again when you reopen Kilo.
+            </Text>
+          ) : batch.data!.videos.some((x) => x.status === 'queued' || x.status === 'analyzing') ? (
+            <Text variant="secondary" tone="muted">
+              You'll get a notification when the batch is ready.
+            </Text>
+          ) : null}
           {batch.data!.videos.map((v) => (
             <VideoProgressCard key={v.id} video={v} upload={uploads.get(v.id)} />
           ))}
