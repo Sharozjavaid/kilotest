@@ -1,5 +1,6 @@
 import { toggleSegment, type Captions, type Edl, type Overlay } from '@kilo/edl';
 import { isKiloApiError } from '@/api/errors';
+import { fitOverlays } from '@/broll/overlays';
 
 /**
  * Saving review edits. The user's taps are kept as *pending toggles* on top of the
@@ -48,9 +49,14 @@ export function editsChange(edl: Edl, edits: readonly PendingEdit[]): boolean {
   return JSON.stringify(after.overlays) !== JSON.stringify(edl.overlays) || JSON.stringify(after.captions) !== JSON.stringify(edl.captions);
 }
 
-/** What the screen shows: toggles, then edits, on top of the server EDL. */
+/**
+ * What the screen shows and what a save sends: toggles, then edits, on top of the
+ * server EDL, with the overlays fitted back within the server's rules (a cut can pull
+ * an overlay into the first seconds or onto another one; the server refuses that).
+ */
 export function compose(server: Edl, pending: Pending, edits: readonly PendingEdit[] = []): Edl {
-  return applyEdits(applyPending(server, pending), edits);
+  const raw = applyEdits(applyPending(server, pending), edits);
+  return raw === server ? raw : fitOverlays(raw);
 }
 
 export interface PendingToggle {

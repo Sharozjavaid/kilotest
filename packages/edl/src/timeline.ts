@@ -160,6 +160,9 @@ export interface EdlIssue {
     | 'duplicate_id'
     | 'unknown_anchor'
     | 'unknown_variant_segment'
+    | 'duplicate_variant_segment'
+    | 'overlay_overlap'
+    | 'broll_too_early'
     | 'nothing_kept';
   message: string;
 }
@@ -223,14 +226,51 @@ export function validateEdl(edl: Edl, clips?: readonly ClipInfo[]): EdlIssue[] {
     }
   }
   for (const v of edl.variants) {
+    const seen = new Set<string>();
     for (const id of v.segmentOrder) {
       if (!ids.has(id)) {
         issues.push({ code: 'unknown_variant_segment', message: `Variant ${v.id} lists unknown segment ${id}` });
       }
+      if (seen.has(id)) {
+        issues.push({ code: 'duplicate_variant_segment', message: `Variant ${v.id} lists segment ${id} twice` });
+      }
+      seen.add(id);
     }
   }
   if (!edl.segments.some((s) => s.keep)) {
     issues.push({ code: 'nothing_kept', message: 'No segment is kept' });
+  }
+  return issues;
+}
+
+/** The opening stretch of the base cut that B-roll must leave alone, so the hook stays on the speaker. */
+export const HOOK_PROTECT_SEC = 2;
+
+/**
+ * The overlay rules every stored EDL must satisfy, checked on the base cut:
+ * no two of the EDL's own overlays overlap, and no B-roll overlay starts inside
+ * the first HOOK_PROTECT_SEC seconds. Overlays that belong to a variant (such as
+ * its hook title) are not checked. Deciders, the app's overlay editor and the
+ * server's save route all use this one function.
+ */
+export function checkOverlayRules(edl: Edl): EdlIssue[] {
+  const issues: EdlIssue[] = [];
+  const placed = resolveTimeline(edl).overlays;
+  for (let i = 0; i < placed.length; i++) {
+    const cur = placed[i]!;
+    if (cur.overlay.type === 'broll' && cur.outStart < HOOK_PROTECT_SEC - EPS) {
+      issues.push({
+        code: 'broll_too_early',
+        message: `B-roll overlay ${cur.overlay.id} starts in the first ${HOOK_PROTECT_SEC} seconds`,
+      });
+    }
+    const prev = placed[i - 1];
+    if (prev && cur.outStart < prev.outEnd - EPS) {
+      issues.push({
+        code: 'overlay_overlap',
+        message: `Overlays ${prev.overlay.id} and ${cur.overlay.id} overlap`,
+      });
+    }
   }
   return issues;
 }

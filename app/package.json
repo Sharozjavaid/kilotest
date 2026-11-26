@@ -60,7 +60,8 @@
     "test": "jest",
     "typecheck": "tsc --noEmit",
     "export:web": "EXPO_PUBLIC_MOCK=1 expo export --platform web --output-dir .work/web",
-    "doctor": "expo-doctor"
+    "doctor": "expo-doctor",
+    "e2e": "node e2e/run.mjs"
   },
   "private": true,
   "jest": {

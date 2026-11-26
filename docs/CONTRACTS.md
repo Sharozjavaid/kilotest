@@ -86,7 +86,8 @@ Base path `/v1`. JSON in and out. Bodies are the zod schemas in `packages/edl/sr
 | `GET /v1/home` | | `HomeResponse` | |
 | `POST /v1/batches` | `CreateBatchRequest` | `CreateBatchResponse` | Creates the batch, videos, clips and B-roll rows and an upload target for each file. |
 | `GET /v1/batches/:id` | | `BatchDetail` | |
-| `POST /v1/uploads/complete` | `CompleteUploadsRequest` | `CompleteUploadsResponse` | A video is queued once every clip and B-roll file it was created with is in. |
+| `POST /v1/uploads/complete` | `CompleteUploadsRequest` | `CompleteUploadsResponse` | Answers 200 with a result per id; one bad id never fails the others. A video is queued once every clip and B-roll file it was created with is in. |
+| `POST /v1/uploads/targets` | `ReissueUploadsRequest` | `ReissueUploadsResponse` | Fresh upload targets for files not yet in, after a target expired. |
 | `GET /v1/videos` | query `status`, `batchId` | `ListVideosResponse` | Newest first. |
 | `GET /v1/videos/:id` | | `VideoDetail` | |
 | `DELETE /v1/videos/:id` | | 204 | |
@@ -103,6 +104,7 @@ Base path `/v1`. JSON in and out. Bodies are the zod schemas in `packages/edl/sr
 | `POST /v1/styles`, `PUT /v1/styles/:id` | `SaveStyleRequest` | `Style` | |
 | `DELETE /v1/styles/:id` | | 204 | |
 | `POST /v1/devices` | `RegisterDeviceRequest` | 204 | |
+| `DELETE /v1/devices` | `UnregisterDeviceRequest` | 204 | Called on sign-out. Only removes a token registered to the caller. |
 
 Local storage driver only: `PUT /v1/local/upload/:token` (raw bytes) and `GET /v1/local/file/:token` (supports `Range`). These are the URLs the driver hands out as upload targets and signed downloads.
 
@@ -126,7 +128,8 @@ Rules the server enforces, which the app must expect:
 - `VideoSummary.progress` is 0..1 while `queued` or `analyzing` and null otherwise. `clipCount` is known from creation.
 - A B-roll asset that is not yet `ready` has null width, height and duration and an empty description.
 - `sizeBytes` must be the file's exact size. A declared size over `KILO_MAX_UPLOAD_BYTES` (default 2 GiB) is refused at creation; a body larger than declared is stopped with 413 `file_too_large`; `uploads/complete` answers 400 and deletes the object when the stored size does not match.
-- Overlays in a saved EDL must not overlap one another on the base cut, and no B-roll overlay may start in the first two seconds of the base cut (the hook stays on the speaker). Overlays that belong to a variant, such as its hook title, are exempt from the two-second rule. A save that breaks this answers 400.
+- Overlays in a saved EDL must satisfy `checkOverlayRules` from `@kilo/edl`: on the base cut no two overlays overlap and no B-roll starts in the first two seconds (the hook stays on the speaker). Overlays that belong to a variant, such as its hook title, are not checked. A save that breaks this answers 400. Deciders and the app's overlay editor use the same function.
+- On save the server keeps `videoId`, `fps`, `settings` and `decidedBy` from the stored EDL; a client cannot change them.
 
 ### Auth
 

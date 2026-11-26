@@ -53,7 +53,7 @@ export type UploadTarget = z.infer<typeof UploadTarget>;
 // ---- Batches and uploads ---------------------------------------------------
 
 export const NewClip = z.object({
-  filename: z.string(),
+  filename: z.string().min(1).max(255),
   contentType: z.string(),
   sizeBytes: z.number().int().nonnegative(),
   scriptLineIndex: z.number().int().nonnegative().optional(),
@@ -62,7 +62,7 @@ export const NewClip = z.object({
 export type NewClip = z.infer<typeof NewClip>;
 
 export const NewBrollAsset = z.object({
-  filename: z.string(),
+  filename: z.string().min(1).max(255),
   contentType: z.string(),
   sizeBytes: z.number().int().nonnegative(),
   kind: BrollKind,
@@ -73,7 +73,7 @@ export const NewVideo = z.object({
   title: z.string().min(1).max(120),
   source: z.enum(['upload', 'recorder']),
   /** Teleprompter lines when the video was recorded against a script. */
-  script: z.array(z.string()).optional(),
+  script: z.array(z.string().max(500)).max(200).optional(),
   /** In the order they should play. */
   clips: z.array(NewClip).min(1).max(60),
   broll: z.array(NewBrollAsset).max(30).default([]),
@@ -115,11 +115,36 @@ export const CompleteUploadsRequest = z.object({
 });
 export type CompleteUploadsRequest = z.infer<typeof CompleteUploadsRequest>;
 
+export const UploadResult = z.object({
+  id: z.string(),
+  kind: z.enum(['clip', 'asset']),
+  ok: z.boolean(),
+  /** Set when not ok: `not_found` (deleted or not yours), `not_uploaded`, `size_mismatch`. The file must be uploaded again, with a fresh target, or dropped. */
+  code: z.string().optional(),
+});
+export type UploadResult = z.infer<typeof UploadResult>;
+
+/** The call answers 200 even when some ids fail; each id's outcome is in `results`. */
 export const CompleteUploadsResponse = z.object({
   /** Videos whose analysis was queued by this call. */
   startedVideoIds: z.array(z.string()),
+  results: z.array(UploadResult).default([]),
 });
 export type CompleteUploadsResponse = z.infer<typeof CompleteUploadsResponse>;
+
+/** Asks for fresh upload targets for files that are not in yet, after a target expired. */
+export const ReissueUploadsRequest = z.object({
+  clipIds: z.array(z.string()).max(200).default([]),
+  assetIds: z.array(z.string()).max(200).default([]),
+});
+export type ReissueUploadsRequest = z.infer<typeof ReissueUploadsRequest>;
+
+/** Ids that are unknown, not the caller's, or already uploaded are left out. */
+export const ReissueUploadsResponse = z.object({
+  clips: z.array(z.object({ clipId: z.string(), upload: UploadTarget })),
+  broll: z.array(z.object({ assetId: z.string(), upload: UploadTarget })),
+});
+export type ReissueUploadsResponse = z.infer<typeof ReissueUploadsResponse>;
 
 // ---- Videos ----------------------------------------------------------------
 
@@ -278,10 +303,14 @@ export const ListStylesResponse = z.object({ styles: z.array(Style) });
 export type ListStylesResponse = z.infer<typeof ListStylesResponse>;
 
 export const RegisterDeviceRequest = z.object({
-  expoPushToken: z.string(),
+  expoPushToken: z.string().min(1).max(200),
   platform: z.enum(['ios', 'android', 'web']),
 });
 export type RegisterDeviceRequest = z.infer<typeof RegisterDeviceRequest>;
+
+/** Sent on sign-out so the device stops receiving this account's notifications. */
+export const UnregisterDeviceRequest = z.object({ expoPushToken: z.string().min(1).max(200) });
+export type UnregisterDeviceRequest = z.infer<typeof UnregisterDeviceRequest>;
 
 export const HomeResponse = z.object({
   goal: GoalView,

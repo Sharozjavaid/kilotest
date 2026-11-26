@@ -31,6 +31,12 @@ export interface IngestedClip {
 /** Review proxy spec: H.264 540x960, at most 30 fps, AAC, a keyframe at least every 0.5 s, +faststart. */
 export interface ConcatProxy {
   path: string;
+  /**
+   * Where each clip really starts inside the proxy file, measured from the frames
+   * written, not summed from clip durations (the proxy's frame rate can differ from
+   * a clip's, so sums drift by up to a frame per clip). The review player seeks by
+   * these, so they must be exact to within a proxy frame over any number of clips.
+   */
   clipOffsets: Record<string, number>;
 }
 

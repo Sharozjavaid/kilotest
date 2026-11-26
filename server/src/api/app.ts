@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono';
+import { cors } from 'hono/cors';
 import { ZodError, type ZodType, type ZodTypeDef } from 'zod';
 import type { Authenticator } from '../auth.js';
 import { isUuid } from '../auth.js';
@@ -29,6 +30,40 @@ export interface AppDeps {
   now?: () => Date;
   /** Largest file one upload may carry (default 2 GiB). */
   maxUploadBytes?: number;
+  /** Browser origins allowed to call the API (CORS). Empty or ['*'] allows any origin. */
+  corsOrigins?: string[];
+}
+
+/**
+ * Headers a browser app may send and read. Auth is a bearer token (no cookies), so
+ * allowing other origins exposes nothing a token holder could not already reach.
+ * Upload and file routes need it too: the web app PUTs bytes to upload targets and
+ * plays files with Range requests.
+ */
+export const CORS_ALLOW_HEADERS = [
+  'authorization',
+  'content-type',
+  'range',
+  'x-upsert',
+  'tus-resumable',
+  'upload-length',
+  'upload-metadata',
+  'upload-offset',
+  'x-signature',
+  'apikey',
+];
+export const CORS_EXPOSE_HEADERS = ['content-length', 'content-range', 'accept-ranges', 'location', 'upload-offset', 'upload-length', 'tus-resumable'];
+
+export function corsMiddleware(origins: string[] | undefined) {
+  const list = (origins ?? []).map((o) => o.trim().replace(/\/+$/, '')).filter(Boolean);
+  const any = list.length === 0 || list.includes('*');
+  return cors({
+    origin: any ? '*' : (origin) => (list.includes(origin) ? origin : null),
+    allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowHeaders: CORS_ALLOW_HEADERS,
+    exposeHeaders: CORS_EXPOSE_HEADERS,
+    maxAge: 600,
+  });
 }
 
 export type Env = { Variables: { userId: string } };
@@ -64,6 +99,9 @@ export function pathId(c: Context, name: string, what: string): string {
 
 export function createApp(deps: AppDeps): Hono<Env> {
   const app = new Hono<Env>();
+
+  // First, so preflights never reach auth and every answer (errors included) carries the headers.
+  app.use('*', corsMiddleware(deps.corsOrigins));
 
   app.onError((err, c) => {
     if (err instanceof HttpError) {

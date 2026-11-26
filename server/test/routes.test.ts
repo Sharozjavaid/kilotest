@@ -160,6 +160,12 @@ describe('every route: validation, unknown ids, other users, wrong state', () =>
     await a.err(400, 'invalid_request', 'PUT', path, { edl: badBroll, baseRevision: 0 });
     const nothingKept = { ...edl, segments: edl.segments.map((s) => ({ ...s, keep: false })) };
     await a.err(400, 'invalid_request', 'PUT', path, { edl: nothingKept, baseRevision: 0 });
+    // Overlay rules: no two overlays at once on the base cut.
+    const title = (id: string, offsetSec: number) => ({ id, type: 'graphic', template: 'bold-title', props: { text: 'Hi' }, anchorSegmentId: kept.id, offsetSec, durationSec: 1.5 });
+    const overlapping = { ...edl, overlays: [title('g1', 2.2), title('g2', 3)] };
+    const res = await a.req('PUT', path, { edl: overlapping, baseRevision: 0 });
+    expect(res.status).toBe(400);
+    expect(ApiError.parse(res.body).error.message).toMatch(/overlap/);
     // Nothing above stored anything.
     expect((await a.ok(VideoDetail, 'GET', `/v1/videos/${ready.id}`)).edl!.revision).toBe(0);
   });

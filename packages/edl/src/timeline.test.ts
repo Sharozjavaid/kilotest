@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SETTINGS,
   Edl,
+  checkOverlayRules,
   clipOffsets,
   edlStats,
   formatDuration,
@@ -111,6 +112,27 @@ describe('validateEdl', () => {
     expect(codes).toContain('segment_gap');
     expect(codes).toContain('segment_overlap');
     expect(codes).toContain('unknown_anchor');
+  });
+});
+
+describe('checkOverlayRules', () => {
+  it('accepts overlays that keep clear of each other and of the hook', () => {
+    expect(checkOverlayRules(makeEdl())).toEqual([]);
+  });
+
+  it('reports overlap and B-roll over the hook', () => {
+    const edl = makeEdl();
+    edl.overlays.push(
+      { id: 'o3', type: 'graphic', anchorSegmentId: 's4', offsetSec: 1, durationSec: 1, template: 'bold-title', props: { text: 'x' } },
+      { id: 'o4', type: 'broll', anchorSegmentId: 's2', offsetSec: 0.5, durationSec: 1, assetId: 'b1', sourceStartSec: 0 },
+    );
+    expect(checkOverlayRules(edl).map((i) => i.code).sort()).toEqual(['broll_too_early', 'overlay_overlap']);
+  });
+
+  it('flags a variant that repeats a segment', () => {
+    const edl = makeEdl();
+    edl.variants[0]!.segmentOrder.push('s2');
+    expect(validateEdl(edl, clips).map((i) => i.code)).toContain('duplicate_variant_segment');
   });
 });
 

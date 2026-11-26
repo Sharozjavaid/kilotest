@@ -14,10 +14,16 @@ import {
 /**
  * Editing the overlays of an EDL from the B-roll screen. Pure, so it is unit-tested.
  *
- * Rules every edit keeps (checked on the base cut, the timeline the B-roll screen shows):
- * - no overlay overlaps another overlay;
- * - nothing covers the first two seconds (the hook stays on the speaker);
- * - a duration stays within the asset's length (video B-roll) or the template's min/max.
+ * Rules every edit keeps (checked on the base cut, the timeline the B-roll screen shows).
+ * The first two are the server's (CONTRACTS.md section 5; a save that breaks them
+ * answers 400), and `checkOverlays` reports exactly what the server would refuse:
+ * - no overlay overlaps another on the base cut, counting each variant's own overlays
+ *   (a hook title) together with the base overlays;
+ * - no B-roll starts in the first two seconds of the base cut (the hook stays on the
+ *   speaker); a variant's overlays are exempt.
+ * The editor is stricter when it places something: it starts graphics after the first
+ * two seconds too, and keeps a duration within the asset's length (video B-roll) or
+ * the template's min/max.
  *
  * Overlays stay anchored to a segment (`anchorSegmentId` + `offsetSec`); positions on
  * the output timeline come from `resolveTimeline`.
@@ -135,19 +141,33 @@ export function checkOverlays(edl: Edl, assets?: readonly OverlayAsset[]): Overl
     }
   }
   for (const p of placed) {
-    if (p.outStart < SAFE_START_SEC - EPS) {
+    if (p.overlay.type === 'broll' && p.outStart < SAFE_START_SEC - EPS) {
       problems.push({ code: 'first_seconds', overlayId: p.overlay.id, message: 'The first two seconds stay on you.' });
     }
   }
-  const sorted = [...placed].sort((a, b) => a.outStart - b.outStart);
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = sorted[i - 1]!;
-    const cur = sorted[i]!;
-    if (cur.outStart < prev.outEnd - EPS) {
-      problems.push({ code: 'overlap', overlayId: cur.overlay.id, message: 'Two overlays would play at the same time.' });
+  const reported = new Set<string>();
+  for (const set of overlaySets(edl)) {
+    const sorted = onBaseCut(edl, set).sort((a, b) => a.outStart - b.outStart || a.outEnd - b.outEnd);
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length && sorted[j]!.outStart < sorted[i]!.outEnd - EPS; j++) {
+        const id = sorted[j]!.overlay.id;
+        if (reported.has(id)) continue;
+        reported.add(id);
+        problems.push({ code: 'overlap', overlayId: id, message: 'Two overlays would play at the same time.' });
+      }
     }
   }
   return problems;
+}
+
+/** The base overlays, then the base overlays with each variant's own: the sets that play together. */
+function overlaySets(edl: Edl): Overlay[][] {
+  return [edl.overlays, ...edl.variants.filter((v) => v.overlays.length).map((v) => [...edl.overlays, ...v.overlays])];
+}
+
+/** Where overlays play on the base cut (overlays on a cut line are left out). */
+function onBaseCut(edl: Edl, overlays: readonly Overlay[]) {
+  return resolveTimeline({ ...edl, overlays: [...overlays], variants: [] }).overlays;
 }
 
 export interface PlaceOptions {
@@ -198,7 +218,9 @@ export function placeOverlay(edl: Edl, anchorSegmentId: string, content: Overlay
   if (lim.max < lim.min - EPS || lim.max <= 0) {
     return { ok: false, problem: { code: 'too_short', message: 'This clip is too short to use.' } };
   }
-  const busy = tl.overlays.filter((o) => others.includes(o.overlay)).map((o) => [o.outStart, o.outEnd] as const);
+  // Clear of the other base overlays and of every variant's own overlays (a hook title), which play over the base cut too.
+  const variantOverlays = edl.variants.flatMap((v) => v.overlays);
+  const busy = onBaseCut(edl, [...others, ...variantOverlays]).map((o) => [o.outStart, o.outEnd] as const);
   const segLen = anchor.outEnd - anchor.outStart;
   // Earliest start inside the line: past the safe zone and the wanted offset, then past any overlay covering it.
   let start = Math.max(anchor.outStart + (opts.offsetSec ?? 0), SAFE_START_SEC);
@@ -330,4 +352,61 @@ function floor2(n: number): number {
 }
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
+}
+
+// ---- Keeping the rules after a cut ------------------------------------------------
+
+/** The shortest an overlay may run: the template's minimum, or the B-roll minimum (photos carry a pan). */
+function minDurationOf(o: Overlay): number {
+  if (o.type === 'graphic') return getTemplate(o.template).minDurationSec;
+  return o.kenBurns ? IMAGE_DURATION.min : VIDEO_MIN_SEC;
+}
+
+/** Replaces (or with null removes) the overlay `id`, wherever it lives: the base list or a variant's. */
+function mapOverlay(edl: Edl, id: string, next: Overlay | null): Edl {
+  const fix = (list: Overlay[]) => (list.some((o) => o.id === id) ? list.flatMap((o) => (o.id === id ? (next ? [next] : []) : [o])) : list);
+  return { ...edl, overlays: fix(edl.overlays), variants: edl.variants.map((v) => ({ ...v, overlays: fix(v.overlays) })) };
+}
+
+/**
+ * Brings the overlays back within the server's rules after the cut changed under
+ * them (cutting a line pulls every later overlay earlier, restoring one pushes them
+ * later). B-roll that slid into the first two seconds moves to start at the two-second
+ * mark if its line is still playing there, else it is dropped. Where two overlays now
+ * overlap, the earlier one is shortened to end where the later one starts if it can
+ * keep its minimum length, else the later one is dropped. Returns the EDL unchanged
+ * (the same object) when nothing breaks a rule.
+ */
+export function fitOverlays(edl: Edl): Edl {
+  if (!checkOverlays(edl).some((p) => p.code === 'first_seconds' || p.code === 'overlap')) return edl;
+  let out = edl;
+  // B-roll in the first seconds.
+  const tl = resolveTimeline({ ...out, variants: [] });
+  for (const p of tl.overlays) {
+    if (p.overlay.type !== 'broll' || p.outStart >= SAFE_START_SEC - EPS) continue;
+    const anchor = tl.items.find((i) => i.segment.id === p.overlay.anchorSegmentId)!;
+    const fits = anchor.outEnd - SAFE_START_SEC > EPS && tl.durationSec - SAFE_START_SEC >= minDurationOf(p.overlay) - EPS;
+    out = mapOverlay(out, p.overlay.id, fits ? { ...p.overlay, offsetSec: round3(SAFE_START_SEC - anchor.outStart) } : null);
+  }
+  // Overlaps, one pair at a time until none is left.
+  for (let guard = 0; guard < 200; guard++) {
+    let pair: [ReturnType<typeof onBaseCut>[number], ReturnType<typeof onBaseCut>[number]] | null = null;
+    for (const set of overlaySets(out)) {
+      const sorted = onBaseCut(out, set).sort((a, b) => a.outStart - b.outStart || a.outEnd - b.outEnd);
+      for (let i = 1; i < sorted.length && !pair; i++) {
+        for (let k = 0; k < i; k++) {
+          if (sorted[i]!.outStart < sorted[k]!.outEnd - EPS) {
+            pair = [sorted[k]!, sorted[i]!];
+            break;
+          }
+        }
+      }
+      if (pair) break;
+    }
+    if (!pair) break;
+    const [a, b] = pair;
+    const room = floor2(b.outStart - a.outStart);
+    out = room >= minDurationOf(a.overlay) - EPS ? mapOverlay(out, a.overlay.id, { ...a.overlay, durationSec: room }) : mapOverlay(out, b.overlay.id, null);
+  }
+  return out;
 }

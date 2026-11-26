@@ -4,6 +4,7 @@ import {
   SAFE_START_SEC,
   checkOverlays,
   durationLimits,
+  fitOverlays,
   overlayCardText,
   placeOverlay,
   placedCount,
@@ -160,8 +161,28 @@ describe('swapping, removing and durations', () => {
         { id: 'x2', type: 'graphic', anchorSegmentId: 's6', offsetSec: 0.5, durationSec: 1, template: 'bold-title', props: { text: 'Hi' } },
       ],
     };
-    const codes = checkOverlays(bad, assets).map((p) => p.code).sort();
-    expect(codes).toEqual(['first_seconds', 'overlap']);
+    // As on the server: a graphic may open the video; overlapping is never allowed.
+    expect(checkOverlays(bad, assets).map((p) => `${p.code}:${p.overlayId}`)).toEqual(['overlap:x2']);
+    const b = base.overlays.find((o) => o.type === 'broll')!;
+    const early: Edl = { ...base, overlays: [...base.overlays, { ...b, id: 'x3', anchorSegmentId: 's4', offsetSec: 0, durationSec: 1 }] };
+    expect(checkOverlays(early, assets).map((p) => `${p.code}:${p.overlayId}`)).toEqual(['first_seconds:x3']);
+  });
+
+  it("checks each variant's own overlays with the base overlays, and exempts them from the first seconds", () => {
+    const first = spokenLines(base)[0]!;
+    const g = base.overlays.find((o) => o.type === 'graphic')!;
+    const title = { ...g, id: 'hook-title', anchorSegmentId: first.segment.id, offsetSec: 0, durationSec: 1.6, props: { text: 'Hi' } };
+    const withHook = (durationSec: number): Edl => ({
+      ...base,
+      variants: [{ id: 'hook-b', label: 'Hook B', hookText: 'Hi', segmentOrder: base.segments.filter((s) => s.keep).map((s) => s.id), overlays: [{ ...title, durationSec }] }],
+    });
+    expect(checkOverlays(withHook(1.6), assets)).toEqual([]);
+    const long = withHook(60);
+    expect(checkOverlays(long, assets).map((p) => p.code)).toContain('overlap');
+    // Placing next to a variant's overlay keeps clear of it.
+    const busyEdl: Edl = { ...withHook(3), overlays: [] };
+    const r = placeOverlay(busyEdl, first.segment.id, { type: 'graphic', template: 'bold-title', props: { text: 'Hey' } });
+    if (r.ok) expect(checkOverlays(r.edl, assets)).toEqual([]);
   });
 });
 
@@ -175,5 +196,39 @@ describe('card text', () => {
     expect(overlayCardText(s, assets)).toEqual({ kind: 'STOCK PHOTO', title: 'Stopwatch on a counter', detail: 'Slow pan · Photo from Pexels' });
     const v = { ...b, assetId: 'a-clip', durationSec: 1.2 };
     expect(overlayCardText(v, assets).detail).toBe('1.2 seconds');
+  });
+});
+
+describe('fitting overlays after a cut', () => {
+  it('leaves sound overlays alone', () => {
+    expect(fitOverlays(base)).toBe(base);
+  });
+
+  it('moves B-roll that a cut pulled into the first two seconds, or drops it', () => {
+    // Cutting s4 and s6 makes s11 (2.93 s long) the opening line, with B-roll 0.5 s into it.
+    let edl = toggleSegment(toggleSegment(base, 's4'), 's6');
+    const b = edl.overlays.find((o) => o.type === 'broll')!;
+    edl = { ...edl, overlays: [{ ...b, anchorSegmentId: 's11', offsetSec: 0.5, durationSec: 1.2 }] };
+    expect(checkOverlays(edl).map((p) => p.code)).toEqual(['first_seconds']);
+    const fitted = fitOverlays(edl);
+    expect(checkOverlays(fitted)).toEqual([]);
+    expect(fitted.overlays[0]!.offsetSec).toBeCloseTo(SAFE_START_SEC, 3);
+    // Only s13 (2.18 s) left: no room after the first two seconds, so it goes.
+    const short = { ...toggleSegment(edl, 's11'), overlays: [{ ...b, anchorSegmentId: 's13', offsetSec: 0.2 }] };
+    expect(fitOverlays(short).overlays).toEqual([]);
+  });
+
+  it('shortens the earlier of two overlays a cut pushed together, or drops the later one', () => {
+    // A long graphic on s6 runs into s11's stat callout once s6's neighbour is cut.
+    const g = base.overlays.find((o) => o.anchorSegmentId === 's6')!;
+    const long: Edl = { ...base, overlays: base.overlays.map((o) => (o.id === g.id ? { ...o, durationSec: 3 } : o)) };
+    const fitted = fitOverlays(long);
+    expect(checkOverlays(fitted)).toEqual([]);
+    expect(fitted.overlays).toHaveLength(base.overlays.length);
+    // Nothing left to shorten: the later one goes.
+    const stacked: Edl = { ...base, overlays: [...base.overlays, { ...g, id: 'dup', offsetSec: g.offsetSec + 0.1 }] };
+    const out = fitOverlays(stacked);
+    expect(checkOverlays(out)).toEqual([]);
+    expect(out.overlays.map((o) => o.id)).not.toContain('dup');
   });
 });

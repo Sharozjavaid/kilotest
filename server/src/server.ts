@@ -94,6 +94,7 @@ export async function startServer(options: StartOptions): Promise<RunningServer>
       pipeline,
       now: options.now,
       maxUploadBytes: config.maxUploadBytes,
+      corsOrigins: config.corsOrigins,
     });
     http = serve({ fetch: app.fetch, port: config.port });
     log.info('api listening', { port: config.port, storage: storage.kind, auth: config.auth });

@@ -1,6 +1,9 @@
+import { Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { File } from 'expo-file-system';
 import { getMockApi } from '@/api/client';
 import type { PickedFile } from './grouping';
+import { toPickedFile } from './pickedFile';
 
 export class PickerPermissionError extends Error {
   constructor() {
@@ -8,25 +11,30 @@ export class PickerPermissionError extends Error {
   }
 }
 
+export class UnsupportedFileError extends Error {}
+
+/** Exact size of a local file (the server checks it), when the picker did not say. */
+function nativeSize(uri: string): number | null {
+  if (Platform.OS === 'web') return null;
+  try {
+    const f = new File(uri);
+    return f.exists ? f.size : null;
+  } catch {
+    return null;
+  }
+}
+
 function toPicked(a: ImagePicker.ImagePickerAsset, i: number): PickedFile {
-  const isVideo = a.type === 'video' || (a.mimeType ?? '').startsWith('video/');
-  const fallbackName = `${isVideo ? 'clip' : 'photo'}-${i + 1}.${isVideo ? 'mov' : 'jpg'}`;
-  return {
-    id: a.assetId ?? a.uri,
-    uri: a.uri,
-    filename: a.fileName ?? fallbackName,
-    contentType: a.mimeType ?? (isVideo ? 'video/quicktime' : 'image/jpeg'),
-    sizeBytes: a.fileSize ?? 0,
-    kind: isVideo ? 'video' : 'image',
-    durationSec: a.duration ? a.duration / 1000 : undefined,
-  };
+  return toPickedFile(a, i, { platform: Platform.OS, sizeOf: nativeSize });
 }
 
 /** Picks several files from the library. `videos` for clips, `media` for B-roll (photos and videos). */
 export async function pickFromLibrary(what: 'videos' | 'media'): Promise<PickedFile[]> {
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!perm.granted) throw new PickerPermissionError();
-  const res = await ImagePicker.launchImageLibraryAsync({
+  let res: ImagePicker.ImagePickerResult;
+  try {
+    res = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: what === 'videos' ? ['videos'] : ['images', 'videos'],
     allowsMultipleSelection: true,
     orderedSelection: true,
@@ -35,7 +43,13 @@ export async function pickFromLibrary(what: 'videos' | 'media'): Promise<PickedF
     preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
     videoExportPreset: ImagePicker.VideoExportPreset.Passthrough,
     quality: 1,
-  });
+    });
+  } catch (e) {
+    // The web picker rejects anything that is not an image or a video ("Unsupported file type: text/plain").
+    const m = /Unsupported file type: ([^.]+)/.exec(e instanceof Error ? e.message : '');
+    if (m) throw new UnsupportedFileError(`Kilo can only use videos${what === 'media' ? ' and photos' : ''}. One of the files you picked is ${m[1] || 'something else'}.`);
+    throw e;
+  }
   if (res.canceled) return [];
   return res.assets.map(toPicked);
 }

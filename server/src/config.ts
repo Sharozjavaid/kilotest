@@ -28,6 +28,8 @@ export interface Config {
   maxUploadBytes: number;
   /** Lifetime of signed download URLs, seconds. */
   urlTtlSec: number;
+  /** Browser origins allowed by CORS (`KILO_CORS_ORIGINS`, comma separated); empty allows any. */
+  corsOrigins: string[];
 }
 
 function int(value: string | undefined, fallback: number, name: string): number {
@@ -71,6 +73,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     localSigningSecret: env.KILO_LOCAL_SIGNING_SECRET || undefined,
     maxUploadBytes: Math.max(1, int(env.KILO_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_BYTES, 'KILO_MAX_UPLOAD_BYTES')),
     urlTtlSec: int(env.KILO_URL_TTL_SEC, 3600, 'KILO_URL_TTL_SEC'),
+    corsOrigins: (env.KILO_CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
   };
   return config;
 }
