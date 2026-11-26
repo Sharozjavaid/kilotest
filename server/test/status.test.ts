@@ -114,7 +114,7 @@ describe('video status machine', () => {
     };
     const a = await uploadFixtures(user, ['routine']);
     const failed = await waitForStatus(user, a.videos[0]!.videoId, 'failed');
-    expect(failed.error).toBe('One of the clips could not be read. Check that it is a video file.');
+    expect(failed.error).toMatch(/^“.+\.mp4” could not be read. Check that it is a video file, or replace it.$/);
     ctl.faults.ingestClip = undefined;
 
     ctl.faults.decideEdit = async (input: { videoId: string }) => {

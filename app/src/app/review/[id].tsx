@@ -124,6 +124,15 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
   });
   const activeId = activeRowId(edl, rows, sp.snapshot.segmentId);
 
+  // A different opening is a different video: start it from its own beginning.
+  const shownVariant = useRef(activeVariant);
+  useEffect(() => {
+    if (shownVariant.current === activeVariant) return;
+    shownVariant.current = activeVariant;
+    sp.seekToOutput(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeVariant]);
+
   // ---- transcript auto-scroll ----
   const scrollRef = useRef<ScrollViewInstance>(null);
   const rowY = useRef(new Map<string, number>());
@@ -191,7 +200,12 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
 
   const saveError = state?.error;
   // No words at all (a muted microphone, music only): nothing could be cut by what was said.
-  const noSpeech = video.transcripts.length > 0 && video.transcripts.every((t) => t.words.length === 0);
+  // The server's notice when it sends one; until then, worked out from the transcripts.
+  const noSpeech =
+    video.notice ??
+    (video.transcripts.length > 0 && video.transcripts.every((t) => t.words.length === 0)
+      ? "Kilo couldn't hear any speech in this video, so it kept everything. Check that your microphone was on, or tap the pauses below to cut them yourself."
+      : null);
 
   return (
     <Screen
@@ -281,7 +295,7 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
         <View style={styles.notice} testID="no-speech" accessibilityLiveRegion="polite">
           <Icon name="alert" size={16} color={color.cut} />
           <Text variant="secondary" style={{ flex: 1 }}>
-            Kilo couldn't hear any speech in this video, so it kept everything. Check that your microphone was on, or tap the pauses below to cut them yourself.
+            {noSpeech}
           </Text>
         </View>
       ) : null}

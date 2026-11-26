@@ -74,6 +74,17 @@ interface WorkState {
  * Runs the pipeline jobs. Each handler is safe to run again: it looks at what is
  * already stored and only does the steps that are missing.
  */
+/**
+ * What to tell the creator when a clip cannot be ingested. The file is named, so a
+ * video made of many clips says which one to replace; a pipeline error with its own
+ * advice (a file that took too long) uses that advice.
+ */
+export function clipFailureMessage(err: unknown, filename: string): string {
+  const p = err as { isPipelineError?: boolean; code?: string; userMessage?: string } | null;
+  if (p?.isPipelineError && p.code !== 'unsupported_media' && p.userMessage) return `“${filename}”: ${p.userMessage}`;
+  return `“${filename}” could not be read. Check that it is a video file, or replace it.`;
+}
+
 /** True when a pipeline error only means the process was told to stop (SIGTERM, SIGINT). */
 export function isStopError(err: unknown): boolean {
   for (let e: unknown = err, depth = 0; e && depth < 5; depth++) {
@@ -200,7 +211,7 @@ export class Worker {
             ...(clip.take_number !== null ? { takeNumber: clip.take_number } : {}),
           });
         } catch (err) {
-          throw new UserFacingError(MSG.badClip, err);
+          throw new UserFacingError(clipFailureMessage(err, clip.filename), err);
         }
         const normKey = keys.clipNormalized(userId, videoId, clip.id);
         const thumbKey = keys.clipThumb(userId, videoId, clip.id);

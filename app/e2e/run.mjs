@@ -6,14 +6,31 @@
 //   E2E_SKIP_BUILD=1         reuse the last web export in .work/e2e/web
 //   E2E_API_PORT / E2E_WEB_PORT   ports (default 8791 / 8792)
 import { spawn } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { APP_DIR, SERVER_DIR, WORK, SHOTS, Failure, apiClient, run, sleep, waitFor } from './lib.mjs';
 import { startStatic } from './serve.mjs';
 
-const API_PORT = Number(process.env.E2E_API_PORT ?? 8791);
-const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 8792);
+/** The wanted port if it is free, else any free one (the web export is built for the API port chosen). */
+async function freePort(wanted) {
+  const net = await import('node:net');
+  const tryPort = (port) =>
+    new Promise((resolve) => {
+      const srv = net.createServer();
+      srv.once('error', () => resolve(null));
+      srv.listen(port, () => srv.close(() => resolve(srv.address()?.port ?? port)));
+    });
+  return (await tryPort(wanted)) ?? (await new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.listen(0, () => {
+      const p = srv.address().port;
+      srv.close(() => resolve(p));
+    });
+  }));
+}
+const API_PORT = await freePort(Number(process.env.E2E_API_PORT ?? 8791));
+const WEB_PORT = await freePort(Number(process.env.E2E_WEB_PORT ?? 8792));
 const API_URL = `http://localhost:${API_PORT}`;
 const DB_NAME = 'kilo_e2e';
 
@@ -70,6 +87,10 @@ function serverControl(databaseUrl) {
   for (const k of ['ANTHROPIC_API_KEY', 'DEEPGRAM_API_KEY', 'OPENAI_API_KEY', 'PEXELS_API_KEY']) delete env[k];
   const out = createWriteStream(join(WORK, 'server.log'), { flags: 'a' });
   let child = null;
+  // Whatever happens to this process (a crash, Ctrl-C), the server goes with it.
+  process.on('exit', () => {
+    if (child && child.exitCode === null) child.kill('SIGKILL');
+  });
   const control = {
     url: API_URL,
     async start() {
@@ -78,11 +99,16 @@ function serverControl(databaseUrl) {
       child.stdout.pipe(out, { end: false });
       child.stderr.pipe(out, { end: false });
       const c = child;
+      let exited = false;
       c.on('exit', (code) => {
+        exited = true;
         out.write(`--- server exited ${code}\n`);
         if (child === c) child = null;
       });
-      await waitFor('the server to answer /v1/health', async () => (await fetch(`${API_URL}/v1/health`)).ok, { timeoutMs: 60_000 });
+      await waitFor('the server to answer /v1/health', async () => {
+        if (exited) throw new Error(`the server exited while starting; see ${join(WORK, 'server.log')}`);
+        return (await fetch(`${API_URL}/v1/health`)).ok;
+      }, { timeoutMs: 60_000 });
     },
     async stop() {
       const c = child;
@@ -99,7 +125,8 @@ function serverControl(databaseUrl) {
 // ---- The web export ---------------------------------------------------------------------
 async function buildApp() {
   const outDir = join(WORK, 'web');
-  if (process.env.E2E_SKIP_BUILD === '1' && existsSync(join(outDir, 'index.html'))) return outDir;
+  const marker = join(outDir, '.api-url');
+  if (process.env.E2E_SKIP_BUILD === '1' && existsSync(join(outDir, 'index.html')) && existsSync(marker) && readFileSync(marker, 'utf8') === API_URL) return outDir;
   log(`building the web export for ${API_URL}`);
   const env = { ...process.env, EXPO_OFFLINE: '1', EXPO_PUBLIC_API_URL: API_URL, CI: '1' };
   for (const k of ['EXPO_PUBLIC_MOCK', 'EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_ANON_KEY']) delete env[k];
@@ -108,11 +135,30 @@ async function buildApp() {
     env,
     maxBuffer: 64 * 1024 * 1024,
   });
+  writeFileSync(marker, API_URL);
   return outDir;
 }
 
 // ---- Main ----------------------------------------------------------------------------------
 process.on('unhandledRejection', (e) => log(`unhandled rejection: ${e?.stack ?? e}`));
+let tearingDown = null;
+async function teardown() {
+  tearingDown ??= (async () => {
+    await web?.close().catch(() => {});
+    await server?.stop().catch(() => {});
+  })();
+  return tearingDown;
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(sig, () => {
+    log(`\n${sig}: tearing down`);
+    void teardown().finally(() => process.exit(130));
+  });
+}
+process.on('uncaughtException', (e) => {
+  log(`uncaught exception: ${e?.stack ?? e}`);
+  void teardown().finally(() => process.exit(1));
+});
 const results = [];
 let server = null;
 let web = null;
@@ -154,8 +200,7 @@ try {
   log(`setup failed: ${e?.stack ?? e}`);
   results.push({ name: 'setup', ok: false, error: String(e?.message ?? e) });
 } finally {
-  await web?.close();
-  await server?.stop();
+  await teardown();
 }
 
 log('\nSummary');

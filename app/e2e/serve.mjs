@@ -34,9 +34,19 @@ export function startStatic(rootDir, port) {
     res.writeHead(200, { 'Content-Type': type, 'Content-Length': size, 'Accept-Ranges': 'bytes' });
     fs.createReadStream(file).pipe(res);
   });
-  return new Promise((resolve) =>
-    server.listen(port, () => resolve({ close: () => new Promise((r) => server.close(() => r())) })),
-  );
+  return new Promise((resolve, reject) => {
+    server.once('error', (e) => reject(e.code === 'EADDRINUSE' ? new Error(`port ${port} is in use (E2E_WEB_PORT picks another)`) : e));
+    server.listen(port, () =>
+      resolve({
+        port: server.address().port,
+        close: () =>
+          new Promise((r) => {
+            server.closeAllConnections?.();
+            server.close(() => r());
+          }),
+      }),
+    );
+  });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

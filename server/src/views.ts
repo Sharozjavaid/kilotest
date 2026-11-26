@@ -138,6 +138,8 @@ export async function toSummary(storage: StorageDriver, row: SummaryRow): Promis
     variantCount: row.edl?.variants.length ?? 0,
     postedAt: row.posted_at ? iso(row.posted_at) : null,
     error: row.status === 'failed' ? (row.error ?? 'Something went wrong') : null,
+    // Not stored yet: the worker will keep analyze's decide notices (no_speech) on the video.
+    notice: null,
   };
 }
 

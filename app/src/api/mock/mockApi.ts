@@ -625,6 +625,7 @@ export class MockKiloApi implements KiloApi {
       variantCount: 0,
       postedAt: null,
       error: null,
+      notice: null,
     };
   }
 

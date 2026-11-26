@@ -44,7 +44,7 @@ export default async function failures(ctx) {
     await waitFor('the bad video to fail', async () => (await ctx.api.video(badId)).status === 'failed', { timeoutMs: 120_000, everyMs: 700 });
     const failed = await ctx.api.video(badId);
     ctx.log(`  failed with: ${failed.error}`);
-    assert(/video file|could not be read/i.test(failed.error), `unhelpful error: ${failed.error}`);
+    assert(/could not be read/i.test(failed.error) && failed.error.includes('not-a-video.mp4'), `unhelpful error: ${failed.error}`);
     await seeText(page, failed.error, 20_000);
     await shot(page, '27-failed-video');
     // Retry: back through analysis, and failed again with the same message (the file is still not a video).

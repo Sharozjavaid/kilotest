@@ -84,7 +84,7 @@ export default async function recorder(ctx) {
     await page.waitForURL(/\/review\//);
     await seeText(page, 'Final length');
     const text = await bodyText(page);
-    assert(/no speech|couldn't hear|could not hear/i.test(text), 'the review screen does not say that no speech was found');
+    assert(/no speech|couldn't hear|could not hear|any speech/i.test(text), 'the review screen does not say that no speech was found');
     await shot(page, '22-record-review');
     // The takes were deleted once their uploads were confirmed (on web: the blob URLs are revoked).
     const errorsBefore = errors.length;
