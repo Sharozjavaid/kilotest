@@ -1,0 +1,28 @@
+{
+  "id": "az_backtoback",
+  "title": "Back-to-back retakes",
+  "mode": "general",
+  "clips": [
+    {
+      "name": "take",
+      "fps": 60,
+      "size": "720x1280",
+      "units": [
+        { "say": "The trick is to apply it on damp skin", "keep": false, "reason": "retake", "group": "damp" },
+        { "pause": 0.7 },
+        { "say": "The trick is to apply it on", "keep": false, "reason": "false_start", "group": "damp" },
+        { "pause": 0.5 },
+        { "say": "The trick is to apply it on damp skin.", "group": "damp" },
+        { "pause": 0.9 },
+        { "say": "You only need a pea sized amount.", "keep": false, "reason": "retake", "group": "pea" },
+        { "pause": 0.6 },
+        { "say": "You only need a pea sized amount.", "group": "pea" },
+        { "pause": 1.2 },
+        { "say": "Honestly it changed my whole morning.", "keep": false, "reason": "retake", "group": "morning" },
+        { "pause": 0.8 },
+        { "say": "Honestly, it changed my entire morning routine.", "group": "morning" },
+        { "say": "Try it for a week and see." }
+      ]
+    }
+  ]
+}

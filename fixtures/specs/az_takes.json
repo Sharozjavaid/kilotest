@@ -1,0 +1,21 @@
+{
+  "id": "az_takes",
+  "title": "Recorder takes without script text",
+  "mode": "general",
+  "clips": [
+    { "name": "l1_t1", "fps": 60, "scriptLineIndex": 0, "takeNumber": 1, "units": [
+      { "say": "Here's the", "keep": false, "reason": "false_start", "group": "k0" } ] },
+    { "name": "l1_t2", "fps": 60, "scriptLineIndex": 0, "takeNumber": 2, "units": [
+      { "say": "Here's the fastest way to fold a fitted sheet.", "group": "k0" } ] },
+    { "name": "l2_t1", "fps": 60, "scriptLineIndex": 1, "takeNumber": 1, "units": [
+      { "say": "Tuck the corners into each other, inside out.", "keep": false, "reason": "retake", "group": "k1" } ] },
+    { "name": "l2_t2", "fps": 60, "scriptLineIndex": 1, "takeNumber": 2, "units": [
+      { "say": "Tuck the corners into each other, inside out.", "group": "k1" } ] },
+    { "name": "l3_t1", "fps": 60, "scriptLineIndex": 2, "takeNumber": 1, "units": [
+      { "say": "Then fold it in thirds and you're done.", "group": "k2" } ] },
+    { "name": "l3_t2", "fps": 60, "scriptLineIndex": 2, "takeNumber": 2, "units": [
+      { "say": "So then you", "keep": false, "reason": "false_start", "group": "k2" },
+      { "pause": 1.0 },
+      { "say": "hang on", "keep": false, "reason": "off_script" } ] }
+  ]
+}

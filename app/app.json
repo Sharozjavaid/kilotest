@@ -1,17 +1,27 @@
 {
   "expo": {
-    "name": "app",
-    "slug": "app",
+    "name": "kilo",
+    "slug": "kilo",
+    "scheme": "kilo",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "backgroundColor": "#F5F8FC",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "app.kilo.editor",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "fetch",
+          "remote-notification"
+        ]
+      }
     },
     "android": {
+      "package": "app.kilo.editor",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#F5F8FC",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -19,7 +29,9 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "output": "single",
+      "bundler": "metro"
     },
     "plugins": [
       "expo-router",
@@ -28,7 +40,38 @@
       "expo-sharing",
       "expo-secure-store",
       "expo-image",
-      "expo-splash-screen"
-    ]
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F5F8FC",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 120
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Kilo opens your library so you can pick the clips and B-roll to edit."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Kilo saves your finished videos to your library.",
+          "savePhotosPermission": "Kilo saves your finished videos to your library.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#1F5EFF"
+        }
+      ],
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
   }
 }

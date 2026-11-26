@@ -1,0 +1,39 @@
+{
+  "id": "az_script",
+  "title": "Script without line markers",
+  "mode": "ugc_ad",
+  "script": [
+    "My hair used to frizz the second I stepped outside.",
+    "This spray fixed it in one week.",
+    "It smells like coconut and it's not sticky at all.",
+    "Use code GLOW for ten percent off."
+  ],
+  "clips": [
+    {
+      "name": "a",
+      "fps": 60,
+      "size": "720x1280",
+      "units": [
+        { "say": "My hair used to frizz the second I stepped outside.", "line": 0 },
+        { "pause": 0.9 },
+        { "say": "okay so the lighting in here is kind of weird but whatever", "keep": false, "reason": "off_script" },
+        { "pause": 1.2 },
+        { "say": "This spray fixed it in", "keep": false, "reason": "false_start", "group": "s2" },
+        { "pause": 0.8 },
+        { "say": "This spray fixed it in one week.", "line": 1, "group": "s2" }
+      ]
+    },
+    {
+      "name": "b",
+      "fps": 60,
+      "size": "720x1280",
+      "units": [
+        { "say": "It smells like coconut and it's not sticky at all.", "keep": false, "reason": "retake", "group": "s3" },
+        { "pause": 1.0 },
+        { "say": "It smells like coconut, and it's not sticky at all.", "line": 2, "group": "s3" },
+        { "pause": 0.8 },
+        { "say": "Use code GLOW for ten percent off.", "line": 3 }
+      ]
+    }
+  ]
+}

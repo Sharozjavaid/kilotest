@@ -1,0 +1,35 @@
+{
+  "name": "@kilo/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kilo HTTP API, worker, migrations, storage, auth, push and the kilo command-line tool.",
+  "type": "module",
+  "scripts": {
+    "api": "tsx src/main.ts api",
+    "worker": "tsx src/main.ts worker",
+    "dev": "tsx src/main.ts dev",
+    "migrate": "tsx src/db/migrate-cli.ts",
+    "kilo": "tsx src/cli/kilo.ts",
+    "dev-db": "bash scripts/dev-db.sh",
+    "test": "vitest run",
+    "test:real": "KILO_TEST_REAL=1 vitest run test/real-pipeline.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@kilo/analyze": "file:../packages/analyze",
+    "@kilo/edl": "file:../packages/edl",
+    "@kilo/render": "file:../packages/render",
+    "@kilo/templates": "file:../templates",
+    "hono": "^4.6.12",
+    "pg-boss": "^10.1.5",
+    "postgres": "^3.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

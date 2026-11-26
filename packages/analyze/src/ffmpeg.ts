@@ -1,0 +1,115 @@
+import { execFile } from 'node:child_process';
+
+/** ffmpeg and ffprobe as child processes with argument arrays, never a shell. */
+
+export const FFMPEG = process.env.KILO_FFMPEG ?? 'ffmpeg';
+export const FFPROBE = process.env.KILO_FFPROBE ?? 'ffprobe';
+/** The machine is shared: keep every encode to two threads. */
+export const THREADS = process.env.KILO_FFMPEG_THREADS ?? '2';
+
+export interface RunResult {
+  stdout: string;
+  stderr: string;
+}
+
+export function run(cmd: string, args: string[], opts: { maxBuffer?: number } = {}): Promise<RunResult> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { maxBuffer: opts.maxBuffer ?? 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        const tail = String(stderr ?? '').split('\n').slice(-12).join('\n');
+        reject(new Error(`${cmd} failed: ${err.message}\n${tail}`));
+        return;
+      }
+      resolve({ stdout: String(stdout), stderr: String(stderr) });
+    });
+  });
+}
+
+export function ffmpeg(args: string[]): Promise<RunResult> {
+  return run(FFMPEG, ['-hide_banner', '-nostdin', '-y', '-loglevel', 'error', ...args]);
+}
+
+/** ffmpeg with info-level logging on stderr, for filters such as silencedetect that report there. */
+export function ffmpegInfo(args: string[]): Promise<RunResult> {
+  return run(FFMPEG, ['-hide_banner', '-nostdin', '-y', '-loglevel', 'info', ...args]);
+}
+
+export interface ProbeStream {
+  index: number;
+  codec_type: 'video' | 'audio' | 'subtitle' | 'data' | string;
+  codec_name?: string;
+  width?: number;
+  height?: number;
+  r_frame_rate?: string;
+  avg_frame_rate?: string;
+  duration?: string;
+  nb_frames?: string;
+  sample_rate?: string;
+  channels?: number;
+  tags?: Record<string, string>;
+  side_data_list?: Array<{ side_data_type?: string; rotation?: number }>;
+  disposition?: Record<string, number>;
+}
+
+export interface ProbeResult {
+  streams: ProbeStream[];
+  format: { duration?: string; format_name?: string; tags?: Record<string, string> };
+}
+
+export async function probe(path: string): Promise<ProbeResult> {
+  const { stdout } = await run(FFPROBE, ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', path]);
+  const parsed = JSON.parse(stdout) as Partial<ProbeResult>;
+  return { streams: parsed.streams ?? [], format: parsed.format ?? {} };
+}
+
+export function parseRate(rate: string | undefined): number {
+  if (!rate) return 0;
+  const [n, d] = rate.split('/').map(Number);
+  if (!n || !Number.isFinite(n)) return 0;
+  if (d === undefined) return n;
+  if (!d) return 0;
+  return n / d;
+}
+
+export const NOMINAL_RATES = [24, 25, 30, 50, 60] as const;
+
+/** Snaps a measured rate (29.97, 59.94, 23.976, 48, 120...) to the nearest nominal rate. */
+export function snapFps(rate: number): number {
+  if (!Number.isFinite(rate) || rate <= 0) return 30;
+  if (rate > 60) return 60;
+  let best: number = NOMINAL_RATES[0];
+  for (const r of NOMINAL_RATES) if (Math.abs(r - rate) < Math.abs(best - rate)) best = r;
+  return best;
+}
+
+/** Rotation in degrees from the display matrix or the legacy rotate tag. */
+export function rotationOf(stream: ProbeStream): number {
+  const side = stream.side_data_list?.find((s) => typeof s.rotation === 'number');
+  const raw = side?.rotation ?? (stream.tags?.rotate !== undefined ? Number(stream.tags.rotate) : 0);
+  const r = ((Math.round(raw) % 360) + 360) % 360;
+  return r;
+}
+
+export function durationOf(p: ProbeResult, kind?: 'video' | 'audio'): number {
+  if (kind) {
+    const s = p.streams.find((x) => x.codec_type === kind);
+    const d = Number(s?.duration);
+    if (Number.isFinite(d) && d > 0) return d;
+  }
+  const f = Number(p.format.duration);
+  return Number.isFinite(f) ? f : 0;
+}
+
+const IMAGE_CODECS = new Set(['png', 'mjpeg', 'jpeg', 'webp', 'bmp', 'gif', 'tiff', 'heic', 'hevc_image', 'jpegxl', 'av1_image']);
+
+/** True when the probed file is a still image rather than a video. */
+export function isStillImage(p: ProbeResult): boolean {
+  const v = p.streams.find((s) => s.codec_type === 'video');
+  if (!v) return false;
+  const fmt = p.format.format_name ?? '';
+  if (/image2|_pipe|png|jpeg|webp/.test(fmt) && !/mov|mp4|matroska|webm|avi/.test(fmt)) return true;
+  if (v.disposition?.attached_pic) return true;
+  const frames = Number(v.nb_frames);
+  if (IMAGE_CODECS.has(v.codec_name ?? '') && (!Number.isFinite(frames) || frames <= 1)) return true;
+  return false;
+}

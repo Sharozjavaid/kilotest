@@ -1,0 +1,574 @@
+import { randomUUID } from 'node:crypto';
+import { createWriteStream, existsSync } from 'node:fs';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline as streamPipeline } from 'node:stream/promises';
+import { fileURLToPath } from 'node:url';
+import type PgBoss from 'pg-boss';
+import {
+  Edl,
+  validateEdl,
+  type BrollAsset,
+  type ClipInfo,
+  type DecideInput,
+  type IngestedClip,
+  type PushData,
+  type ReplanPass,
+  type SilenceGap,
+  type Transcript,
+} from '@kilo/edl';
+import type { Sql } from '../db/index.js';
+import { UserFacingError, errorDetail, userMessage } from '../errors.js';
+import { goalStats, isBehindPace, localTime } from '../goal.js';
+import type { Logger } from '../log.js';
+import type { Pipeline } from '../pipeline/types.js';
+import type { Notifier } from '../push.js';
+import {
+  JOBS,
+  type AnalyzeJob,
+  type BossQueue,
+  type BrollIngestJob,
+  type RenderJob,
+  type ReplanJob,
+} from '../queue.js';
+import { contentTypeFor, extensionFor, keys, type StorageDriver } from '../storage/types.js';
+import { currentEdl, type BrollRow, type ClipRow, type GoalRow, type RenderRow, type VideoRow } from '../views.js';
+
+export interface WorkerDeps {
+  db: Sql;
+  storage: StorageDriver;
+  pipeline: Pipeline;
+  notifier: Notifier;
+  log: Logger;
+  workDir: string;
+  /** Allow file:// stock download URLs (tests and local runs only). */
+  allowFileUrls?: boolean;
+  /** How many stock candidates to ask for when stock B-roll is on. */
+  maxStock?: number;
+  now?: () => Date;
+}
+
+export interface WorkerOptions {
+  analyzeConcurrency: number;
+  renderConcurrency: number;
+  pollingIntervalSeconds?: number;
+  /** Schedule the hourly goal reminder job (default true). */
+  scheduleReminders?: boolean;
+}
+
+const MSG = {
+  analyze: 'We could not process this video. Try again, or re-upload the clips.',
+  badClip: 'One of the clips could not be read. Check that it is a video file.',
+  decide: 'We could not build an edit for this video. Try again.',
+  replan: 'Updating the edit failed. Try again.',
+  render: 'The export failed. Try again.',
+};
+
+/** Local paths from earlier attempts, so a retry can skip finished steps. */
+interface WorkState {
+  clips: Record<string, { normalizedPath: string; audioPath: string; thumbnailPath: string }>;
+}
+
+/**
+ * Runs the pipeline jobs. Each handler is safe to run again: it looks at what is
+ * already stored and only does the steps that are missing.
+ */
+export class Worker {
+  constructor(private readonly deps: WorkerDeps) {}
+
+  private get db() {
+    return this.deps.db;
+  }
+  private get storage() {
+    return this.deps.storage;
+  }
+  private get analyze() {
+    return this.deps.pipeline.analyze;
+  }
+
+  // ---- registration ------------------------------------------------------
+
+  async start(queue: BossQueue, options: WorkerOptions): Promise<void> {
+    const boss = queue.boss;
+    const poll = options.pollingIntervalSeconds ?? 2;
+    const register = async <T>(name: string, count: number, fn: (data: T) => Promise<void>, onFinalFailure: (data: T, err: unknown) => Promise<void>) => {
+      for (let i = 0; i < count; i++) {
+        await boss.work<T>(name, { includeMetadata: true, batchSize: 1, pollingIntervalSeconds: poll }, async (jobs: PgBoss.JobWithMetadata<T>[]) => {
+          for (const job of jobs) {
+            try {
+              await fn(job.data);
+            } catch (err) {
+              const willRetry = job.retryCount < job.retryLimit;
+              this.deps.log.error('job failed', { job: name, id: job.id, attempt: job.retryCount + 1, willRetry, err: errorDetail(err) });
+              if (willRetry) throw err;
+              await onFinalFailure(job.data, err);
+            }
+          }
+        });
+      }
+    };
+    await register<AnalyzeJob>(JOBS.analyze, options.analyzeConcurrency, (d) => this.runAnalyze(d.videoId), (d, e) =>
+      this.failVideo(d.videoId, userMessage(e, MSG.analyze)),
+    );
+    await register<ReplanJob>(JOBS.replan, options.analyzeConcurrency, (d) => this.runReplan(d.videoId, d.passes), (d, e) =>
+      this.failVideo(d.videoId, userMessage(e, MSG.replan)),
+    );
+    await register<BrollIngestJob>(JOBS.brollIngest, 1, (d) => this.runBrollIngest(d.assetId), (d) => this.failAsset(d.assetId));
+    await register<RenderJob>(JOBS.render, options.renderConcurrency, (d) => this.runRender(d.renderId), (d, e) =>
+      this.failRender(d.renderId, userMessage(e, MSG.render)),
+    );
+    await register<object>(JOBS.goalReminders, 1, async () => {
+      await this.runGoalReminders();
+    }, async () => {});
+    if (options.scheduleReminders !== false) await boss.schedule(JOBS.goalReminders, '0 * * * *', {}, { tz: 'UTC' });
+  }
+
+  // ---- video.analyze -----------------------------------------------------
+
+  async runAnalyze(videoId: string): Promise<void> {
+    const video = await this.video(videoId);
+    if (!video || (video.status !== 'queued' && video.status !== 'analyzing')) return;
+    await this.db`update videos set status = 'analyzing', updated_at = now() where id = ${videoId} and status in ('queued', 'analyzing')`;
+    const firstAnalysis = video.analyzed_at === null;
+    const dir = join(this.deps.workDir, 'videos', videoId);
+    await mkdir(dir, { recursive: true });
+    const state = await this.loadState(dir);
+    const userId = video.user_id;
+
+    // 1. Ingest, transcribe and detect silence, per clip.
+    let clips = await this.db<ClipRow[]>`select * from clips where video_id = ${videoId} order by ord`;
+    if (!clips.length) throw new UserFacingError(MSG.badClip);
+    const transcribed = new Set(
+      (await this.db<{ clip_id: string }[]>`select clip_id from transcripts where video_id = ${videoId}`).map((r) => r.clip_id),
+    );
+    for (const clip of clips) {
+      const local = state.clips[clip.id];
+      const haveLocal = local && existsSync(local.audioPath) && existsSync(local.normalizedPath);
+      const needsAudio = !transcribed.has(clip.id) || clip.silences === null;
+      let paths = haveLocal ? local : undefined;
+      if (!clip.info || !clip.normalized_key || !clip.thumb_key || (needsAudio && !haveLocal)) {
+        const input = join(dir, 'source', `${clip.id}.${clip.ext}`);
+        await this.storage.download(keys.clipSource(userId, videoId, clip.id, clip.ext), input);
+        let ingested: IngestedClip;
+        try {
+          ingested = await this.analyze.ingestClip({
+            clipId: clip.id,
+            order: clip.ord,
+            inputPath: input,
+            workDir: join(dir, 'ingest'),
+            ...(clip.script_line_index !== null ? { scriptLineIndex: clip.script_line_index } : {}),
+            ...(clip.take_number !== null ? { takeNumber: clip.take_number } : {}),
+          });
+        } catch (err) {
+          throw new UserFacingError(MSG.badClip, err);
+        }
+        const normKey = keys.clipNormalized(userId, videoId, clip.id);
+        const thumbKey = keys.clipThumb(userId, videoId, clip.id);
+        await this.storage.upload(normKey, ingested.normalizedPath, 'video/mp4');
+        await this.storage.upload(thumbKey, ingested.thumbnailPath, 'image/jpeg');
+        const info: ClipInfo = { ...ingested.info, id: clip.id, order: clip.ord };
+        await this.db`update clips set info = ${this.db.json(info as never)}, normalized_key = ${normKey}, thumb_key = ${thumbKey} where id = ${clip.id}`;
+        paths = { normalizedPath: ingested.normalizedPath, audioPath: ingested.audioPath, thumbnailPath: ingested.thumbnailPath };
+        state.clips[clip.id] = paths;
+        await this.saveState(dir, state);
+        clip.info = info;
+        clip.normalized_key = normKey;
+      }
+      if (!transcribed.has(clip.id)) {
+        const t = await this.analyze.transcribeClip({ clipId: clip.id, audioPath: paths!.audioPath, durationSec: clip.info!.durationSec });
+        const transcript: Transcript = { ...t, clipId: clip.id };
+        await this.db`
+          insert into transcripts (clip_id, user_id, video_id, transcript)
+          values (${clip.id}, ${userId}, ${videoId}, ${this.db.json(transcript as never)})
+          on conflict (clip_id) do update set transcript = excluded.transcript`;
+        transcribed.add(clip.id);
+      }
+      if (clip.silences === null) {
+        const gaps = (await this.analyze.detectSilence({ clipId: clip.id, audioPath: paths!.audioPath })).map((g) => ({ ...g, clipId: clip.id }));
+        await this.db`update clips set silences = ${this.db.json(gaps as never)} where id = ${clip.id}`;
+        clip.silences = gaps;
+      }
+    }
+
+    // 2. The review proxy.
+    if (!video.proxy_key) {
+      const ingestedClips: IngestedClip[] = [];
+      for (const clip of clips) {
+        let normalizedPath = state.clips[clip.id]?.normalizedPath;
+        if (!normalizedPath || !existsSync(normalizedPath)) {
+          normalizedPath = join(dir, 'normalized', `${clip.id}.mp4`);
+          await this.storage.download(clip.normalized_key!, normalizedPath);
+        }
+        ingestedClips.push({
+          info: clip.info!,
+          normalizedPath,
+          audioPath: state.clips[clip.id]?.audioPath ?? '',
+          thumbnailPath: state.clips[clip.id]?.thumbnailPath ?? '',
+        });
+      }
+      const proxy = await this.analyze.buildConcatProxy({ clips: ingestedClips, outPath: join(dir, 'proxy.mp4') });
+      const proxyKey = keys.proxy(userId, videoId);
+      await this.storage.upload(proxyKey, proxy.path, 'video/mp4');
+      await this.db`update videos set proxy_key = ${proxyKey}, clip_offsets = ${this.db.json(proxy.clipOffsets)} where id = ${videoId}`;
+    }
+
+    // 3. The creator's B-roll.
+    await this.ingestPendingBroll(videoId, dir);
+
+    // 4. Stock B-roll.
+    clips = await this.db<ClipRow[]>`select * from clips where video_id = ${videoId} order by ord`;
+    if (video.settings.stockBroll && !video.stock_done) {
+      const input = await this.decideInput(video, clips);
+      const candidates = await this.analyze.suggestStockBroll({ ...input, max: this.deps.maxStock ?? 3 });
+      for (const candidate of candidates) {
+        const assetId = randomUUID();
+        try {
+          const ext = extensionFor(new URL(candidate.downloadUrl).pathname, candidate.kind === 'image' ? 'image/jpeg' : 'video/mp4');
+          const local = join(dir, 'stock', `${assetId}.${ext}`);
+          await this.downloadUrl(candidate.downloadUrl, local);
+          const sourceKey = keys.brollSource(userId, videoId, assetId, ext);
+          await this.storage.upload(sourceKey, local, contentTypeFor(sourceKey));
+          await this.db`
+            insert into broll_assets (id, user_id, video_id, kind, source, filename, content_type, ext, attribution, stock_query, status, uploaded_at)
+            values (${assetId}, ${userId}, ${videoId}, ${candidate.kind}, 'stock', ${`stock.${ext}`}, ${contentTypeFor(sourceKey)}, ${ext},
+                    ${candidate.attribution}, ${candidate.query}, 'processing', now())`;
+          await this.ingestBrollAsset(assetId, dir, local);
+        } catch (err) {
+          this.deps.log.warn('stock candidate skipped', { videoId, err: errorDetail(err) });
+        }
+      }
+      await this.db`update videos set stock_done = true where id = ${videoId}`;
+    }
+
+    // 5. Decide.
+    if (!(await currentEdl(this.db, videoId))) {
+      const input = await this.decideInput(video, clips);
+      let edl: Edl;
+      try {
+        edl = Edl.parse(await this.analyze.decideEdit(input));
+      } catch (err) {
+        throw new UserFacingError(MSG.decide, err);
+      }
+      const issues = validateEdl(edl, input.clips);
+      if (issues.length || edl.videoId !== videoId) {
+        this.deps.log.error('decider returned an invalid EDL', { videoId, issues });
+        throw new UserFacingError(MSG.decide);
+      }
+      edl = { ...edl, revision: 0 };
+      await this.db`
+        insert into edls (video_id, revision, user_id, edl, author)
+        values (${videoId}, 0, ${userId}, ${this.db.json(edl as never)}, 'decider')
+        on conflict do nothing`;
+    }
+
+    const [done] = await this.db`
+      update videos set status = 'ready_for_review', error = null, analyzed_at = coalesce(analyzed_at, now()), updated_at = now()
+      where id = ${videoId} and status = 'analyzing' returning id`;
+    await rm(dir, { recursive: true, force: true });
+    if (done && firstAnalysis) await this.checkBatchReady(video.batch_id);
+  }
+
+  private async decideInput(video: VideoRow, clips: ClipRow[]): Promise<DecideInput> {
+    const transcripts = await this.db<{ transcript: Transcript; clip_id: string }[]>`
+      select clip_id, transcript from transcripts where video_id = ${video.id}`;
+    const byClip = new Map(transcripts.map((t) => [t.clip_id, t.transcript]));
+    const broll = await this.db<BrollRow[]>`
+      select * from broll_assets where video_id = ${video.id} and status = 'ready' order by created_at, id`;
+    return {
+      videoId: video.id,
+      clips: clips.map((c) => c.info!),
+      transcripts: clips.map((c) => byClip.get(c.id)).filter((t): t is Transcript => Boolean(t)),
+      silences: clips.flatMap((c) => (c.silences ?? []) as SilenceGap[]),
+      settings: video.settings,
+      ...(video.script ? { script: video.script } : {}),
+      broll: broll.filter((b) => b.info).map((b) => b.info as BrollAsset),
+    };
+  }
+
+  /** Ingests every uploaded B-roll asset of the video that is not ready yet. A bad file fails only that asset. */
+  private async ingestPendingBroll(videoId: string, dir: string): Promise<void> {
+    const pending = await this.db<BrollRow[]>`
+      select * from broll_assets where video_id = ${videoId} and status = 'processing' and uploaded_at is not null order by created_at, id`;
+    for (const asset of pending) {
+      try {
+        await this.ingestBrollAsset(asset.id, dir);
+      } catch (err) {
+        this.deps.log.warn('B-roll ingest failed', { assetId: asset.id, err: errorDetail(err) });
+        await this.failAsset(asset.id);
+      }
+    }
+  }
+
+  private async ingestBrollAsset(assetId: string, dir: string, localSource?: string): Promise<void> {
+    const [asset] = await this.db<BrollRow[]>`select * from broll_assets where id = ${assetId}`;
+    if (!asset || asset.status === 'ready') return;
+    const input = localSource ?? join(dir, 'broll-source', `${asset.id}.${asset.ext}`);
+    if (!localSource) await this.storage.download(keys.brollSource(asset.user_id, asset.video_id, asset.id, asset.ext), input);
+    const result = await this.analyze.ingestBroll({
+      assetId: asset.id,
+      inputPath: input,
+      workDir: join(dir, 'broll'),
+      source: asset.source,
+      filename: asset.filename,
+    });
+    const ext = extname(result.normalizedPath).slice(1).toLowerCase() || (result.asset.kind === 'image' ? 'jpg' : 'mp4');
+    const normKey = keys.brollNormalized(asset.user_id, asset.video_id, asset.id, ext);
+    const thumbKey = keys.brollThumb(asset.user_id, asset.video_id, asset.id);
+    await this.storage.upload(normKey, result.normalizedPath, contentTypeFor(normKey));
+    await this.storage.upload(thumbKey, result.thumbnailPath, 'image/jpeg');
+    const info: BrollAsset = {
+      ...result.asset,
+      id: asset.id,
+      source: asset.source,
+      ...(asset.attribution ? { attribution: asset.attribution } : {}),
+    };
+    await this.db`
+      update broll_assets set info = ${this.db.json(info as never)}, normalized_key = ${normKey}, thumb_key = ${thumbKey}, status = 'ready'
+      where id = ${asset.id}`;
+  }
+
+  // ---- broll.ingest ------------------------------------------------------
+
+  async runBrollIngest(assetId: string): Promise<void> {
+    const [asset] = await this.db<BrollRow[]>`select * from broll_assets where id = ${assetId}`;
+    if (!asset || asset.status === 'ready' || !asset.uploaded_at) return;
+    const dir = join(this.deps.workDir, 'broll', assetId);
+    try {
+      await this.ingestBrollAsset(assetId, dir);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  // ---- video.replan ------------------------------------------------------
+
+  async runReplan(videoId: string, passes: ReplanPass[]): Promise<void> {
+    const video = await this.video(videoId);
+    if (!video || video.status !== 'analyzing') return;
+    const dir = join(this.deps.workDir, 'videos', videoId);
+    await this.ingestPendingBroll(videoId, dir);
+    const current = await currentEdl(this.db, videoId);
+    if (!current) throw new UserFacingError(MSG.replan);
+    const clips = await this.db<ClipRow[]>`select * from clips where video_id = ${videoId} order by ord`;
+    const input = await this.decideInput(video, clips);
+    let edl: Edl;
+    try {
+      edl = Edl.parse(await this.analyze.replan({ ...input, edl: current.edl, passes }));
+    } catch (err) {
+      throw new UserFacingError(MSG.replan, err);
+    }
+    const before = new Map(current.edl.segments.map((s) => [s.id, s.keep]));
+    const keepChanged = edl.segments.length !== before.size || edl.segments.some((s) => before.get(s.id) !== s.keep);
+    const issues = validateEdl(edl, input.clips);
+    if (keepChanged || issues.length || edl.videoId !== videoId) {
+      this.deps.log.error('replan returned an unusable EDL', { videoId, keepChanged, issues });
+      throw new UserFacingError(MSG.replan);
+    }
+    await this.db.begin(async (tx) => {
+      const [v] = await tx<{ status: string }[]>`select status from videos where id = ${videoId} for update`;
+      if (v?.status !== 'analyzing') return;
+      const latest = await currentEdl(tx, videoId);
+      const revision = (latest?.revision ?? current.revision) + 1;
+      const stored = { ...edl, revision };
+      await tx`insert into edls (video_id, revision, user_id, edl, author) values (${videoId}, ${revision}, ${video.user_id}, ${tx.json(stored as never)}, 'replan')`;
+      await tx`update videos set status = 'ready_for_review', error = null, updated_at = now() where id = ${videoId}`;
+    });
+    await rm(dir, { recursive: true, force: true });
+  }
+
+  // ---- render.run --------------------------------------------------------
+
+  async runRender(renderId: string): Promise<void> {
+    const [render] = await this.db<RenderRow[]>`select * from renders where id = ${renderId}`;
+    if (!render || render.status === 'done') return;
+    const [edlRow] = await this.db<{ edl: Edl }[]>`
+      select edl from edls where video_id = ${render.video_id} and revision = ${render.edl_revision}`;
+    if (!edlRow) return; // video deleted
+    await this.db`update renders set status = 'rendering', progress = 0, error = null, updated_at = now() where id = ${renderId}`;
+    const edl = Edl.parse(edlRow.edl);
+    const dir = join(this.deps.workDir, 'renders', renderId);
+    await mkdir(dir, { recursive: true });
+    try {
+      const clipRows = await this.db<ClipRow[]>`select * from clips where video_id = ${render.video_id} order by ord`;
+      const used = new Set(edl.segments.map((s) => s.clipId));
+      const clips: Record<string, { path: string; info: ClipInfo }> = {};
+      for (const c of clipRows) {
+        if (!used.has(c.id) || !c.normalized_key || !c.info) continue;
+        const path = join(dir, 'clips', `${c.id}.mp4`);
+        await this.storage.download(c.normalized_key, path);
+        clips[c.id] = { path, info: c.info };
+      }
+      const assetIds = new Set(
+        [...edl.overlays, ...edl.variants.flatMap((v) => v.overlays)].flatMap((o) => (o.type === 'broll' ? [o.assetId] : [])),
+      );
+      const brollRows = assetIds.size
+        ? await this.db<BrollRow[]>`select * from broll_assets where id in ${this.db([...assetIds])} and status = 'ready'`
+        : [];
+      const broll: Record<string, { path: string; asset: BrollAsset }> = {};
+      for (const b of brollRows) {
+        const path = join(dir, 'broll', `${b.id}${extname(b.normalized_key!)}`);
+        await this.storage.download(b.normalized_key!, path);
+        broll[b.id] = { path, asset: b.info! };
+      }
+      const transcripts = (
+        await this.db<{ transcript: Transcript }[]>`select transcript from transcripts where video_id = ${render.video_id}`
+      ).map((t) => t.transcript);
+
+      let lastWrite = 0;
+      let lastValue = 0;
+      const pending: Promise<unknown>[] = [];
+      const onProgress = (p: number) => {
+        const value = Math.max(0, Math.min(0.99, p));
+        const now = Date.now();
+        if (value - lastValue < 0.05 && now - lastWrite < 1000) return;
+        lastWrite = now;
+        lastValue = value;
+        pending.push(
+          this.db`update renders set progress = ${value}, updated_at = now() where id = ${renderId} and status = 'rendering'`.catch(() => {}),
+        );
+      };
+      const outPath = join(dir, 'out.mp4');
+      const output = await this.deps.pipeline.render.renderVideo({
+        edl,
+        variantId: render.variant_id,
+        quality: render.quality,
+        clips,
+        broll,
+        transcripts,
+        outPath,
+        workDir: join(dir, 'work'),
+        renderGraphic: this.deps.pipeline.templates.renderGraphic,
+        onProgress,
+      });
+      await Promise.all(pending);
+      const key = keys.render(render.user_id, render.video_id, renderId);
+      await this.storage.upload(key, output.outPath, 'video/mp4');
+      await this.db`
+        update renders set status = 'done', progress = 1, output_key = ${key}, duration_sec = ${output.durationSec}, updated_at = now()
+        where id = ${renderId}`;
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+    if (render.quality === 'final') {
+      const [video] = await this.db<{ id: string }[]>`
+        update videos set status = 'done', updated_at = now()
+        where id = ${render.video_id} and status = 'rendering'
+          and not exists (select 1 from renders where video_id = ${render.video_id} and quality = 'final' and status in ('queued', 'rendering'))
+        returning id`;
+      void video;
+      await this.notify(render.user_id, { type: 'render_done', videoId: render.video_id, renderId });
+    }
+  }
+
+  // ---- goal.reminders ----------------------------------------------------
+
+  /** Sends `goal_reminder` to users at their local reminder hour when behind pace. Returns how many were sent. */
+  async runGoalReminders(now: Date = this.deps.now?.() ?? new Date()): Promise<number> {
+    const goals = await this.db<GoalRow[]>`
+      select user_id, videos_per_week, reminder_enabled, reminder_hour, time_zone, last_reminded_on::text as last_reminded_on
+      from goals where reminder_enabled and videos_per_week > 0`;
+    let sent = 0;
+    for (const goal of goals) {
+      let local;
+      try {
+        local = localTime(now, goal.time_zone);
+      } catch {
+        continue;
+      }
+      if (local.hour !== goal.reminder_hour || goal.last_reminded_on === local.date) continue;
+      const posts = await this.db<{ video_id: string | null; posted_at: Date }[]>`
+        select video_id, posted_at from posts where user_id = ${goal.user_id} and posted_at > ${new Date(now.getTime() - 9 * 86_400_000)}`;
+      const stats = goalStats(
+        posts.map((p) => ({ videoId: p.video_id, postedAt: new Date(p.posted_at) })),
+        goal.videos_per_week,
+        goal.time_zone,
+        now,
+      );
+      if (!isBehindPace(stats.postedThisWeek, goal.videos_per_week, local.weekday)) continue;
+      const [claimed] = await this.db`
+        update goals set last_reminded_on = ${local.date}::date
+        where user_id = ${goal.user_id} and last_reminded_on is distinct from ${local.date}::date
+        returning user_id`;
+      if (!claimed) continue;
+      await this.notify(goal.user_id, { type: 'goal_reminder' });
+      sent += 1;
+    }
+    return sent;
+  }
+
+  // ---- failure handling --------------------------------------------------
+
+  async failVideo(videoId: string, message: string): Promise<void> {
+    const [row] = await this.db<{ user_id: string; batch_id: string }[]>`
+      update videos set status = 'failed', error = ${message}, updated_at = now()
+      where id = ${videoId} and status <> 'failed' returning user_id, batch_id`;
+    if (!row) return;
+    await this.notify(row.user_id, { type: 'video_failed', videoId });
+    await this.checkBatchReady(row.batch_id);
+  }
+
+  async failAsset(assetId: string): Promise<void> {
+    await this.db`update broll_assets set status = 'failed' where id = ${assetId} and status <> 'ready'`;
+  }
+
+  async failRender(renderId: string, message: string): Promise<void> {
+    const [render] = await this.db<RenderRow[]>`
+      update renders set status = 'failed', error = ${message}, updated_at = now() where id = ${renderId} returning *`;
+    if (render?.quality === 'final') {
+      const [video] = await this.db<{ id: string }[]>`
+        update videos set status = 'failed', error = ${message}, updated_at = now()
+        where id = ${render.video_id} and status = 'rendering' returning id`;
+      if (video) await this.notify(render.user_id, { type: 'video_failed', videoId: render.video_id });
+    }
+  }
+
+  /** Sends `batch_ready` once, when no video of the batch is still waiting for its first analysis. */
+  private async checkBatchReady(batchId: string): Promise<void> {
+    const [batch] = await this.db<{ user_id: string }[]>`
+      update batches set ready_notified_at = now()
+      where id = ${batchId} and ready_notified_at is null
+        and not exists (select 1 from videos where batch_id = ${batchId} and status in ('uploading', 'queued')
+                        or batch_id = ${batchId} and status = 'analyzing' and analyzed_at is null)
+        and exists (select 1 from videos where batch_id = ${batchId} and analyzed_at is not null)
+      returning user_id`;
+    if (batch) await this.notify(batch.user_id, { type: 'batch_ready', batchId });
+  }
+
+  // ---- helpers -----------------------------------------------------------
+
+  private async notify(userId: string, data: PushData): Promise<void> {
+    await this.deps.notifier.notify(userId, data);
+  }
+
+  private async video(videoId: string): Promise<VideoRow | undefined> {
+    const [row] = await this.db<VideoRow[]>`select * from videos where id = ${videoId}`;
+    return row;
+  }
+
+  private async loadState(dir: string): Promise<WorkState> {
+    try {
+      return JSON.parse(await readFile(join(dir, 'state.json'), 'utf8')) as WorkState;
+    } catch {
+      return { clips: {} };
+    }
+  }
+
+  private async saveState(dir: string, state: WorkState): Promise<void> {
+    await writeFile(join(dir, 'state.json'), JSON.stringify(state));
+  }
+
+  private async downloadUrl(url: string, dest: string): Promise<void> {
+    await mkdir(join(dest, '..'), { recursive: true });
+    const parsed = new URL(url);
+    if (parsed.protocol === 'file:') {
+      if (!this.deps.allowFileUrls) throw new Error('file:// downloads are disabled');
+      await copyFile(fileURLToPath(parsed), dest);
+      return;
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error(`Unsupported URL: ${parsed.protocol}`);
+    const res = await fetch(url, { redirect: 'follow' });
+    if (!res.ok || !res.body) throw new Error(`Download failed: ${res.status}`);
+    await streamPipeline(Readable.fromWeb(res.body as import('node:stream/web').ReadableStream), createWriteStream(dest));
+  }
+}

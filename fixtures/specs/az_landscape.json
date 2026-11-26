@@ -1,0 +1,38 @@
+{
+  "id": "az_landscape",
+  "title": "Landscape and a silent clip",
+  "mode": "tiktok_shop",
+  "clips": [
+    {
+      "name": "wide",
+      "fps": 30,
+      "size": "1920x1080",
+      "units": [
+        { "say": "This lamp folds flat into your bag.", "keep": false, "reason": "retake", "group": "lamp" },
+        { "pause": 1.0 },
+        { "say": "This lamp folds completely flat into your bag.", "group": "lamp" },
+        { "pause": 0.8 },
+        { "say": "It charges in about", "keep": false, "reason": "false_start", "group": "charge" },
+        { "filler": "uh" },
+        { "pause": 0.9 },
+        { "say": "It charges in about forty minutes and lasts all week.", "group": "charge" }
+      ]
+    },
+    {
+      "name": "silent",
+      "fps": 30,
+      "size": "1280x720",
+      "units": [ { "pause": 2.5 } ]
+    },
+    {
+      "name": "close",
+      "fps": 30,
+      "size": "1920x1080",
+      "units": [
+        { "say": "It's twenty nine dollars right now, down from fifty." },
+        { "pause": 0.7 },
+        { "say": "Grab it from the shop link below." }
+      ]
+    }
+  ]
+}

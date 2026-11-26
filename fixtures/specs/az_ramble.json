@@ -1,0 +1,38 @@
+{
+  "id": "az_ramble",
+  "title": "Long ramble",
+  "mode": "general",
+  "clips": [
+    {
+      "name": "ramble",
+      "fps": 25,
+      "size": "720x1280",
+      "units": [
+        { "say": "I want to talk about the one habit that changed how I work." },
+        { "pause": 0.8 },
+        { "say": "For years I would sit down at my desk and just stare at the screen, waiting for the right moment to start." },
+        { "say": "And that moment never came." },
+        { "pause": 1.6 },
+        { "say": "Then a friend told me about the two minute rule.", "keep": false, "reason": "retake", "group": "rule" },
+        { "pause": 0.9 },
+        { "say": "sorry", "keep": false, "reason": "off_script" },
+        { "pause": 0.8 },
+        { "say": "let me start again", "keep": false, "reason": "off_script" },
+        { "pause": 1.1 },
+        { "say": "Then a friend of mine told me about the two minute rule.", "group": "rule" },
+        { "say": "If something takes less than two minutes, you do it right away, no planning, no list." },
+        { "pause": 0.7 },
+        { "say": "It sounds simple, and it is, but the effect on the rest of the day is huge." },
+        { "pause": 2.4 },
+        { "say": "The first week I cleared my inbox, I paid three bills, and I finally fixed the squeaky door." },
+        { "say": "The second week I noticed I was starting bigger tasks the same way, just the first two minutes." },
+        { "pause": 1.0 },
+        { "say": "So that's the rule.", "keep": false, "reason": "false_start", "group": "end" },
+        { "pause": 0.5 },
+        { "say": "wait", "keep": false, "reason": "off_script" },
+        { "pause": 0.9 },
+        { "say": "So that's the rule. Start for two minutes, and let momentum do the rest.", "group": "end" }
+      ]
+    }
+  ]
+}

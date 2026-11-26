@@ -1,0 +1,28 @@
+{
+  "id": "az_fillers",
+  "title": "Fillers mid-sentence",
+  "mode": "general",
+  "clips": [
+    {
+      "name": "talk",
+      "fps": 30,
+      "size": "1080x1920",
+      "units": [
+        { "say": "So this serum is," },
+        { "filler": "um" },
+        { "say": "honestly the best thing I've tried this year." },
+        { "pause": 0.9 },
+        { "say": "I put it on" },
+        { "filler": "uh" },
+        { "say": "every night before bed." },
+        { "pause": 0.7 },
+        { "say": "And the price is", "keep": false, "reason": "false_start", "group": "price" },
+        { "pause": 1.0 },
+        { "say": "And the price is only fifteen dollars.", "group": "price" },
+        { "filler": "um" },
+        { "pause": 0.6 },
+        { "say": "My skin feels softer, smoother, and it glows." }
+      ]
+    }
+  ]
+}
