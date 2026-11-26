@@ -41,7 +41,7 @@ If you need a change to `@kilo/edl`, do not edit it. Work around it locally and 
 
 ## 4. Pipeline
 
-`packages/edl/src/pipeline.ts` has the exact function signatures and media specs.
+`packages/edl/src/pipeline.ts` has the exact function signatures and media specs. `ingestClip` and `ingestBroll` write fixed file names, so every call needs a `workDir` of its own.
 
 ```
 upload ──► ingestClip (per clip) ──► buildConcatProxy
@@ -125,12 +125,14 @@ Rules the server enforces, which the app must expect:
 - B-roll cannot be added to a `failed` video or removed while `analyzing` or `rendering`.
 - `VideoSummary.progress` is 0..1 while `queued` or `analyzing` and null otherwise. `clipCount` is known from creation.
 - A B-roll asset that is not yet `ready` has null width, height and duration and an empty description.
+- `sizeBytes` must be the file's exact size. A declared size over `KILO_MAX_UPLOAD_BYTES` (default 2 GiB) is refused at creation; a body larger than declared is stopped with 413 `file_too_large`; `uploads/complete` answers 400 and deletes the object when the stored size does not match.
+- Overlays in a saved EDL must not overlap one another on the base cut, and no B-roll overlay may start in the first two seconds of the base cut (the hook stays on the speaker). Overlays that belong to a variant, such as its hook title, are exempt from the two-second rule. A save that breaks this answers 400.
 
 ### Auth
 
 `Authorization: Bearer <token>`.
 
-- `KILO_AUTH=supabase`: the token is a Supabase access token, verified with `SUPABASE_JWT_SECRET`. The user id is the `sub` claim.
+- `KILO_AUTH=supabase`: the token is a Supabase access token. Tokens signed with asymmetric keys are verified against the project's JWKS at `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`; HS256 tokens are verified with `SUPABASE_JWT_SECRET` when it is set. Either variable is enough to start. The user id is the `sub` claim.
 - `KILO_AUTH=dev`: the token is `dev:<user id>`. For local runs and tests only; the server refuses to start in this mode when `NODE_ENV=production`.
 
 ### Storage
