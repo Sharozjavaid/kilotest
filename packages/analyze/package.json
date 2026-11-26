@@ -1,0 +1,29 @@
+{
+  "name": "@kilo/analyze",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kilo analysis: ingest, proxy, transcription, silence detection, edit decisions, snapping, B-roll, graphics, variants.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "score": "tsx scripts/score.ts",
+    "fixtures": "tsx scripts/gen-fixtures.ts"
+  },
+  "dependencies": {
+    "@kilo/edl": "file:../edl",
+    "@anthropic-ai/sdk": "^1.14.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
