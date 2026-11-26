@@ -84,7 +84,8 @@ export function edlStats(edl: Edl, variantId?: string | null): EdlStats {
 /**
  * Flips one segment between kept and cut. Returns a new EDL with the revision
  * unchanged; the server bumps it on save. A restored segment is inserted into each
- * variant at its natural position; a cut one is removed from every variant.
+ * variant at its natural position; a cut one is removed from every variant, and a
+ * variant's own overlays anchored to a cut opening segment move to its new opening.
  */
 export function toggleSegment(edl: Edl, segmentId: string): Edl {
   const index = edl.segments.findIndex((s) => s.id === segmentId);
@@ -95,7 +96,17 @@ export function toggleSegment(edl: Edl, segmentId: string): Edl {
   const naturalIndex = new Map(segments.map((s, i) => [s.id, i]));
   const variants = edl.variants.map((v) => {
     const without = v.segmentOrder.filter((id) => id !== segmentId);
-    if (!nowKept) return { ...v, segmentOrder: without };
+    if (!nowKept) {
+      // A variant's hook title is anchored to its opening segment. When that segment
+      // is cut, move the title to the new opening so the variant keeps its hook.
+      const wasFirst = v.segmentOrder[0] === segmentId;
+      const nextFirst = without[0];
+      const overlays =
+        wasFirst && nextFirst !== undefined
+          ? v.overlays.map((o) => (o.anchorSegmentId === segmentId ? { ...o, anchorSegmentId: nextFirst } : o))
+          : v.overlays;
+      return { ...v, segmentOrder: without, overlays };
+    }
     // Insert after the last entry that naturally precedes it, keeping any reordered hook in front.
     let insertAt = 0;
     without.forEach((id, i) => {

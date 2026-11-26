@@ -76,6 +76,17 @@ describe('toggleSegment', () => {
     expect(next.variants[1]!.segmentOrder).toEqual(['s4', 's2', 's3', 's5']);
   });
 
+  it('moves a variant hook title to the new opening when the opening is cut', () => {
+    const edl = makeEdl();
+    edl.variants[1]!.overlays = [
+      { id: 'h1', type: 'graphic', anchorSegmentId: 's4', offsetSec: 0, durationSec: 1, template: 'bold-title', props: { text: 'Hook' } },
+    ];
+    const next = toggleSegment(edl, 's4');
+    expect(next.variants[1]!.segmentOrder).toEqual(['s2', 's5']);
+    expect(next.variants[1]!.overlays[0]!.anchorSegmentId).toBe('s2');
+    expect(resolveTimeline(next, 'hook-b').overlays.some((o) => o.overlay.id === 'h1')).toBe(true);
+  });
+
   it('removes a cut segment from every variant', () => {
     const next = toggleSegment(makeEdl(), 's4');
     expect(next.variants.map((v) => v.segmentOrder)).toEqual([
