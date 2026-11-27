@@ -18,7 +18,10 @@
     "score:variants": "tsx scripts/score-variants.ts",
     "check:variants-render": "tsx scripts/check-variants-render.ts",
     "score:broll": "tsx scripts/score-broll.ts",
-    "score:batch30": "tsx scripts/score-batch30.ts"
+    "score:batch30": "tsx scripts/score-batch30.ts",
+    "score:real": "tsx scripts/score-real.ts",
+    "whisper:fillers": "tsx scripts/whisper-fillers.ts",
+    "whisper:setup": "sh whisper/setup.sh"
   },
   "dependencies": {
     "@kilo/edl": "file:../edl",

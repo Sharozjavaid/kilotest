@@ -79,44 +79,57 @@ const rmsDb = (x, a, b) => {
 
 /**
  * The speaker's room tone: the quiet stretches of their own recordings (before the first
- * word, after the last, and long pauses between words), minus anything with a breath or click.
+ * word, after the last, and long pauses between words), minus anything with a breath or click
+ * and minus processed near-digital silence.
  */
 function roomTone(speaker) {
   const ids = readdirSync(cache).filter((f) => f.startsWith(`${speaker}-`) && f.endsWith('.json')).map((f) => f.slice(0, -5)).sort();
   const regions = [];
-  for (const id of ids.slice(0, 30)) {
+  for (const id of ids) {
     const u = utterance(id);
     const spans = [[0.02, u.words[0].start - 0.06]];
     for (let i = 1; i < u.words.length; i++) if (u.words[i].start - u.words[i - 1].end > 0.25) spans.push([u.words[i - 1].end + 0.06, u.words[i].start - 0.06]);
     spans.push([u.words[u.words.length - 1].end + 0.08, u.durationSec - 0.02]);
     for (const [a, b] of spans) if (b - a >= 0.12) regions.push({ u, a: Math.round(a * SR), b: Math.round(b * SR) });
   }
-  // Level of every 20 ms window; the floor is the quiet end of them.
+  // Level of every 20 ms window: a region is clean when no window stands out from its median.
   const win = SR / 50;
-  const levels = [];
   for (const r of regions) {
-    r.peak = -120;
-    for (let i = r.a; i + win <= r.b; i += win) {
-      const l = rmsDb(r.u.samples, i, i + win);
-      levels.push(l);
-      r.peak = Math.max(r.peak, l);
-    }
+    const levels = [];
+    for (let i = r.a; i + win <= r.b; i += win) levels.push(rmsDb(r.u.samples, i, i + win));
+    levels.sort((x, y) => x - y);
+    r.level = levels[Math.floor(levels.length / 2)] ?? -120;
+    r.peak = levels[levels.length - 1] ?? -120;
   }
-  levels.sort((x, y) => x - y);
-  const floor = levels[Math.floor(levels.length * 0.3)] ?? -70;
-  const clean = regions.filter((r) => r.peak <= floor + 8);
+  const clean = regions.filter((r) => r.peak <= r.level + 6 && r.level > -78);
   if (!clean.length) throw new Error(`speaker ${speaker}: no clean room tone`);
-  return { floorDb: floor, regions: clean };
+  const sorted = clean.map((r) => r.level).sort((x, y) => x - y);
+  return { floorDb: sorted[Math.floor(sorted.length / 2)], regions: clean };
 }
 
-/** `sec` of the speaker's room tone, joined from their quiet stretches with short crossfades. */
-function toneOf(tone, sec, r) {
+/** The room tone level of one utterance: the median level of its own quiet stretches. */
+function toneLevelOf(tone, id) {
+  const own = tone.regions.filter((r) => r.u.id === id).map((r) => r.level).sort((x, y) => x - y);
+  return own.length ? own[Math.floor(own.length / 2)] : tone.floorDb;
+}
+
+/**
+ * `sec` of room tone to sit next to utterance `near`, joined with short crossfades: its own
+ * quiet stretches when it has enough, else stretches of the speaker's other recordings at the
+ * same level (within 3 dB), so a pause sounds like the room the line was read in.
+ */
+function toneOf(tone, sec, r, near) {
+  const own = tone.regions.filter((x) => x.u.id === near);
+  const ownLen = own.reduce((n, x) => n + x.b - x.a, 0) / SR;
+  const level = toneLevelOf(tone, near);
+  let pool = ownLen >= 0.3 ? own : tone.regions.filter((x) => Math.abs(x.level - level) <= 3);
+  if (!pool.length) pool = tone.regions;
   const need = Math.max(1, Math.round(sec * SR));
   const out = new Float32Array(need);
   const xf = Math.round(0.02 * SR);
   let pos = 0;
   while (pos < need) {
-    const reg = tone.regions[Math.floor(r() * tone.regions.length)];
+    const reg = pool[Math.floor(r() * pool.length)];
     const len = Math.min(reg.b - reg.a, need - pos + xf);
     for (let i = 0; i < len && pos + i < need; i++) {
       const v = reg.u.samples[reg.a + i];
@@ -160,16 +173,18 @@ function buildClip(spec, clip, order, dir, tone, r, lineIndex) {
   const clipGain = clip.gainDb ?? 0;
   const pieces = [];
   let toneTail = Infinity; // room tone available at the end of what is placed so far, samples
-  const placeTone = (sec, db) => {
-    const seg = toneOf(tone, sec + 2 * XFADE, r).map((v) => v * gain(db));
+  const placeTone = (sec, db, near) => {
+    const seg = toneOf(tone, sec + 2 * XFADE, r, near).map((v) => v * gain(db));
     append(buf, seg, Math.min(Math.round(XFADE * SR), toneTail));
     toneTail = seg.length;
   };
-  placeTone(clip.leadIn ?? 0.5, clipGain);
+  const firstUtt = clip.pieces.find((p) => p.utt)?.utt;
+  placeTone(clip.leadIn ?? 0.5, clipGain + (clip.pieces.find((p) => p.utt)?.gainDb ?? 0), firstUtt);
   let lastDb = clipGain;
+  let lastUtt = firstUtt;
   for (const p of clip.pieces) {
     if (p.pause !== undefined) {
-      placeTone(p.pause, lastDb);
+      placeTone(p.pause, lastDb, lastUtt);
       continue;
     }
     const u = utterance(p.utt);
@@ -207,8 +222,9 @@ function buildClip(spec, clip, order, dir, tone, r, lineIndex) {
       source: { utt: u.id, from: round(first.start - lead), to: round(last.end + tail) },
     });
     lastDb = db;
+    lastUtt = p.utt;
   }
-  placeTone(clip.tail ?? 0.6, lastDb);
+  placeTone(clip.tail ?? 0.6, lastDb, lastUtt);
   let data = buf.data.subarray(0, buf.len);
   // Never clip: scale the whole clip down if a loud take would.
   let peak = 0;

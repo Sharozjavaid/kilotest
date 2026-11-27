@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { BrollAsset, DecideInput, EditSettings, Edl, IngestedBroll, IngestedClip, Mode, SilenceGap, Transcript, Word } from '@kilo/edl';
 import { MODE_PRESETS, PACING_PARAMS, validateEdl } from '@kilo/edl';
 import { createAnalyze } from '../src/analyze.js';
-import { fixtureTranscriber } from '../src/transcribe.js';
+import { fixtureTranscriber, type Transcriber } from '../src/transcribe.js';
 
 /**
  * The Phase 0 acceptance test: every fixture through ingest, the fixture
@@ -324,17 +324,20 @@ export interface ScoreOptions {
   only?: RegExp;
   /** Overrides on the fixture's mode preset (for example hookVariations). */
   settings?: Partial<EditSettings>;
+  /** Transcribe with this instead of the fixture transcriber (the recordings' own ground truth). */
+  transcriber?: Transcriber;
 }
 
 export async function scoreFixture(dir: string, opts: ScoreOptions = {}): Promise<FixtureScore> {
   const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Manifest;
   const fixture = manifest.id;
+  const az = opts.transcriber ? createAnalyze({ decider: 'heuristic', transcriber: opts.transcriber, stock: null, log: () => {} }) : analyze;
   const ingested: IngestedClip[] = [];
   for (const c of manifest.clips) ingested.push(await cachedIngest(fixture, dir, c));
   const transcripts: Transcript[] = [];
   const silences: SilenceGap[] = [];
   for (const ic of ingested) {
-    const t = await analyze.transcribeClip({ clipId: ic.info.id, audioPath: ic.audioPath, durationSec: ic.info.durationSec });
+    const t = await az.transcribeClip({ clipId: ic.info.id, audioPath: ic.audioPath, durationSec: ic.info.durationSec });
     transcripts.push(opts.jitterSec ? jitterTranscript(t, opts.jitterSec, transcripts.length + 7) : t);
     silences.push(...(await analyze.detectSilence({ clipId: ic.info.id, audioPath: ic.audioPath })));
   }
@@ -352,7 +355,7 @@ export async function scoreFixture(dir: string, opts: ScoreOptions = {}): Promis
     ...(manifest.script ? { script: manifest.script } : {}),
     broll,
   };
-  const edl = await analyze.decideEdit(input);
+  const edl = await az.decideEdit(input);
 
   const score: FixtureScore = {
     id: fixture, dir, clippedWords: 0, clippedDetail: [], retakeGroups: 0, retakeGroupsRight: 0, retakeDetail: [],
