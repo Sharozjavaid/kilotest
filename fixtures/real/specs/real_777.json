@@ -1,0 +1,94 @@
+{
+  "id": "real_777",
+  "title": "Real speech, LibriSpeech speaker 777 (M)",
+  "mode": "general",
+  "speaker": "777",
+  "script": false,
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.91,
+      "tail": 1.26,
+      "pieces": [
+        {
+          "utt": "777-126732-0035",
+          "role": "line",
+          "gainDb": 0.2
+        },
+        {
+          "pause": 1.92
+        },
+        {
+          "utt": "777-126732-0043",
+          "role": "line",
+          "gainDb": -0.8
+        },
+        {
+          "pause": 1.7
+        },
+        {
+          "utt": "777-126732-0047",
+          "words": 10,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 0.4
+        }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 1,
+      "leadIn": 0.56,
+      "tail": 1.41,
+      "pieces": [
+        {
+          "utt": "777-126732-0047",
+          "role": "line",
+          "group": "g1",
+          "gainDb": -1.3
+        },
+        {
+          "pause": 0.56
+        },
+        {
+          "utt": "777-126732-0025",
+          "words": 6,
+          "role": "abandoned",
+          "group": "g2",
+          "gainDb": -0.9
+        },
+        {
+          "pause": 0.86
+        },
+        {
+          "utt": "777-126732-0003",
+          "role": "line",
+          "group": "g2",
+          "gainDb": 1.3,
+          "note": "two sentences that open \"michaelis the ticket of leave apostle\": that opening from one, then the other in full"
+        },
+        {
+          "pause": 0.94
+        },
+        {
+          "utt": "777-126732-0053",
+          "role": "line",
+          "gainDb": -0.7
+        },
+        {
+          "pause": 1.21
+        },
+        {
+          "utt": "777-126732-0058",
+          "role": "line",
+          "gainDb": 1.2
+        }
+      ]
+    }
+  ]
+}

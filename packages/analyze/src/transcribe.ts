@@ -4,6 +4,7 @@ import { Transcript, type Word } from '@kilo/edl';
 import { sidecarPathFor } from './ingest.js';
 import { readPcm16 } from './silence.js';
 import { flagFillers, norm } from './text.js';
+import { whisperOptionsFromEnv, whisperTranscriber } from './whisper.js';
 
 export interface TranscribeInput {
   clipId: string;
@@ -12,7 +13,7 @@ export interface TranscribeInput {
 }
 
 export interface Transcriber {
-  readonly name: 'deepgram' | 'openai' | 'fixture';
+  readonly name: 'deepgram' | 'openai' | 'whisper' | 'fixture';
   transcribe(input: TranscribeInput): Promise<Transcript>;
 }
 
@@ -23,7 +24,7 @@ export type FetchLike = (url: string, init: { method: string; headers: Record<st
   text(): Promise<string>;
 }>;
 
-function cleanWords(words: Word[], durationSec: number): Word[] {
+export function cleanWords(words: Word[], durationSec: number): Word[] {
   const out: Word[] = [];
   for (const w of words) {
     const text = w.text.trim();
@@ -377,6 +378,7 @@ export function selectTranscriber(env: NodeJS.ProcessEnv = process.env, fetchImp
       ...(Number.isFinite(max) && max > 0 ? { maxUploadBytes: max } : {}),
     });
   }
+  if (choice === 'whisper') return whisperTranscriber(whisperOptionsFromEnv(env));
   if (choice === 'fixture') return fixtureTranscriber();
   throw new Error(`Unknown KILO_TRANSCRIBER: ${choice}`);
 }

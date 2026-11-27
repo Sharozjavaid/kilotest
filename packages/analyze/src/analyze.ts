@@ -185,6 +185,8 @@ export function describeProviders(
       transcriber = env.OPENAI_API_KEY
         ? { name: 'openai', real: true, detail: `${env.KILO_OPENAI_TRANSCRIBE_MODEL ?? 'whisper-1'}${env.OPENAI_BASE_URL ? ' via OPENAI_BASE_URL' : ''}` }
         : { name: 'openai', real: false, detail: 'KILO_TRANSCRIBER=openai but OPENAI_API_KEY is not set: transcription will fail' };
+    } else if (choice === 'whisper') {
+      transcriber = { name: 'whisper', real: true, detail: `${env.KILO_WHISPER_MODEL || 'base.en'} on this machine's CPU (needs npm run whisper:setup)` };
     } else {
       transcriber = { name: choice, real: false, detail: `unknown KILO_TRANSCRIBER: transcription will fail` };
     }

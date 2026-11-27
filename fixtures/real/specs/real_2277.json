@@ -1,0 +1,126 @@
+{
+  "id": "real_2277",
+  "title": "Real speech, LibriSpeech speaker 2277 (F)",
+  "mode": "general",
+  "speaker": "2277",
+  "script": false,
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.38,
+      "tail": 1.39,
+      "pieces": [
+        {
+          "utt": "2277-149896-0017",
+          "role": "line",
+          "gainDb": -1.3
+        },
+        {
+          "pause": 0.53
+        },
+        {
+          "utt": "2277-149896-0018",
+          "role": "line",
+          "gainDb": 1.4
+        },
+        {
+          "pause": 0.64
+        },
+        {
+          "utt": "2277-149896-0019",
+          "words": 3,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 0
+        },
+        {
+          "pause": 0.42
+        },
+        {
+          "utt": "2277-149896-0019",
+          "words": 8,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 1.57
+        },
+        {
+          "utt": "2277-149896-0019",
+          "role": "line",
+          "group": "g1",
+          "gainDb": -0.6
+        }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": -0.6,
+      "leadIn": 0.92,
+      "tail": 1.07,
+      "pieces": [
+        {
+          "utt": "2277-149896-0020",
+          "role": "line",
+          "gainDb": 0.1
+        },
+        {
+          "pause": 1.7
+        },
+        {
+          "utt": "2277-149896-0021",
+          "role": "line",
+          "gainDb": 0.2
+        },
+        {
+          "pause": 0.7
+        },
+        {
+          "utt": "2277-149896-0023",
+          "words": 7,
+          "role": "abandoned",
+          "group": "g2",
+          "gainDb": 0.2
+        },
+        {
+          "pause": 1.25
+        },
+        {
+          "utt": "2277-149896-0023",
+          "role": "line",
+          "group": "g2",
+          "gainDb": 1.4
+        }
+      ]
+    },
+    {
+      "name": "part3",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": -3.6,
+      "leadIn": 1.41,
+      "tail": 1.41,
+      "pieces": [
+        {
+          "utt": "2277-149896-0026",
+          "role": "line",
+          "gainDb": -0.6
+        },
+        {
+          "pause": 1.45
+        },
+        {
+          "utt": "2277-149896-0030",
+          "role": "line",
+          "gainDb": -1.2
+        }
+      ]
+    }
+  ]
+}

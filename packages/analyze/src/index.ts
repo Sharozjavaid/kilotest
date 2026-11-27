@@ -16,6 +16,8 @@ export {
   isTranscriptUnavailable, unavailableTranscript, transcriberChoice,
 } from './transcribe.js';
 export type { Transcriber, TranscribeInput, FetchLike, AudioPiece } from './transcribe.js';
+export { whisperTranscriber, whisperOptionsFromEnv, parseWhisperOutput, whisperWords, WhisperSetupError, DEFAULT_WHISPER_MODEL } from './whisper.js';
+export type { WhisperOptions } from './whisper.js';
 export { buildChunks, prepareClipWords } from './chunks.js';
 export type { Chunk, ClipWord, ClipWords } from './chunks.js';
 export { heuristicCuts, sameLine, separateLines, slotDifferences, enumeration } from './heuristic.js';

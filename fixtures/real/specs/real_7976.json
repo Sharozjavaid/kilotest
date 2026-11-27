@@ -1,0 +1,104 @@
+{
+  "id": "real_7976",
+  "title": "Real speech, LibriSpeech speaker 7976 (M)",
+  "mode": "general",
+  "speaker": "7976",
+  "script": false,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 1.16,
+      "tail": 0.86,
+      "pieces": [
+        {
+          "utt": "7976-105575-0020",
+          "role": "line",
+          "gainDb": -0.5
+        },
+        {
+          "pause": 2.03
+        },
+        {
+          "utt": "7976-105575-0026",
+          "role": "line",
+          "gainDb": -0.1
+        },
+        {
+          "pause": 3.93
+        },
+        {
+          "utt": "7976-110124-0004",
+          "words": 3,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -0.1
+        },
+        {
+          "pause": 0.74
+        },
+        {
+          "utt": "7976-110124-0004",
+          "words": 7,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -1.2
+        },
+        {
+          "pause": 1.15
+        },
+        {
+          "utt": "7976-110124-0004",
+          "role": "line",
+          "group": "g1",
+          "gainDb": -0.1
+        },
+        {
+          "pause": 1.83
+        },
+        {
+          "utt": "7976-110124-0005",
+          "role": "line",
+          "gainDb": -1
+        },
+        {
+          "pause": 1.97
+        },
+        {
+          "utt": "7976-110124-0011",
+          "role": "line",
+          "gainDb": 0.3
+        },
+        {
+          "pause": 3.91
+        },
+        {
+          "utt": "7976-110124-0015",
+          "words": 11,
+          "role": "abandoned",
+          "group": "g2",
+          "gainDb": 1.1
+        },
+        {
+          "pause": 0.72
+        },
+        {
+          "utt": "7976-110124-0015",
+          "role": "line",
+          "group": "g2",
+          "gainDb": 0.9
+        },
+        {
+          "pause": 0.38
+        },
+        {
+          "utt": "7976-110124-0016",
+          "role": "line",
+          "gainDb": 0.5
+        }
+      ]
+    }
+  ]
+}
