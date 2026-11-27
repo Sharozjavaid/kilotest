@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import type { TemplateComponentProps } from '../common';
-import { fitFlow, fontCss, unitOf } from '../fit';
+import { fitFlow, fontCss, inkBox, unitOf } from '../fit';
 import { ease, progress } from '../motion';
 import { textDirection } from '../scripts';
 import { cardShadow, fonts, inkOn } from '../style';
@@ -15,6 +15,17 @@ const GAP = 0.16;
 const ROW_GAP = 0.22;
 const TILTS = [-2.5, 2, -1.5, 2.5];
 
+/**
+ * How far to move a word so its ink sits in the middle of a chip `chip` high (at 1px). The
+ * line box places the baseline by the first family's ascent and descent; a word drawn by a
+ * fallback face with deeper descenders would otherwise sit low.
+ */
+function inkShift(b: ReturnType<typeof inkBox>, chip: number): number {
+  if (!b.fontAscent && !b.fontDescent) return -0.02;
+  const baseline = (chip - (b.fontAscent + b.fontDescent)) / 2 + b.fontAscent;
+  return chip / 2 - (baseline + (b.descent - b.ascent) / 2);
+}
+
 export const KeywordPop: React.FC<TemplateComponentProps<KeywordPopProps>> = ({ props, theme, clock, area }) => {
   const font = fonts(theme).headline;
   // Inset so tilted corners and the soft shadow also stay out of the right-hand rail.
@@ -23,15 +34,18 @@ export const KeywordPop: React.FC<TemplateComponentProps<KeywordPopProps>> = ({ 
   const words = props.words.map((w) => w.trim());
   const L = useMemo(() => {
     const unit = words.map((w) => unitOf(w, font) + PAD_X * 2);
-    const opts = { unit, gapUnit: GAP, maxWidth, lineUnit: CHIP_H, rowGapUnit: ROW_GAP, maxHeight: area.bottom - 24 - area.height * 0.5, maxLines: 4 };
+    // A chip is tall enough for its word's ink (Arabic and Devanagari reach further than Latin).
+    const inks = words.map((w) => inkBox(w, font));
+    const chip = Math.max(CHIP_H, ...inks.map((b) => b.ascent + b.descent + 0.36));
+    const opts = { unit, gapUnit: GAP, maxWidth, lineUnit: chip, rowGapUnit: ROW_GAP, maxHeight: area.bottom - 24 - area.height * 0.5, maxLines: 4 };
     const fit = fitFlow({ ...opts, maxSize: 150, minSize: 52 }) ?? fitFlow({ ...opts, maxSize: 52, minSize: 20 });
     if (!fit) throw new Error('keyword-pop: words do not fit');
-    return { fit, unit };
+    return { fit, unit, inks, chip };
   }, [words.join('\u0000'), font.family, maxWidth, area.bottom, area.height]);
 
-  const { fit, unit } = L;
+  const { fit, unit, inks, chip } = L;
   const size = fit.size;
-  const chipH = size * CHIP_H;
+  const chipH = size * chip;
   const rowGap = size * ROW_GAP;
   const blockH = fit.lines.length * chipH + (fit.lines.length - 1) * rowGap;
   const cx = (area.left + area.rightLower) / 2;
@@ -91,7 +105,7 @@ export const KeywordPop: React.FC<TemplateComponentProps<KeywordPopProps>> = ({ 
                 opacity,
               }}
             >
-              <span style={{ ...fontCss(font, size), lineHeight: `${chipH}px`, transform: `translateY(${-size * 0.02}px)` }}>{words[i]}</span>
+              <span style={{ ...fontCss(font, size), lineHeight: `${chipH}px`, transform: `translateY(${inkShift(inks[i]!, chip) * size}px)` }}>{words[i]}</span>
             </div>
           );
         });

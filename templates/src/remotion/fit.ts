@@ -42,9 +42,28 @@ function unitWidth(text: string, font: FontSpec): number {
   ctx.font = `${font.weight} ${size}px ${familyList(font)}`;
   (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${font.tracking * size}px`;
   const s = font.uppercase ? text.toUpperCase() : text;
-  const w = ctx.measureText(s).width / size;
+  const m = ctx.measureText(s);
+  // The ink can reach past the advance (a Devanagari vowel sign, a heavy final letter):
+  // a text takes the room its ink needs, so what fits is what is drawn.
+  const right = Number.isFinite(m.actualBoundingBoxRight) ? m.actualBoundingBoxRight : 0;
+  const left = Number.isFinite(m.actualBoundingBoxLeft) ? m.actualBoundingBoxLeft : 0;
+  const w = (Math.max(m.width, right) + Math.max(0, left)) / size;
   cache.set(key, w);
   return w;
+}
+
+/**
+ * The ink box of `text` at 1px around its baseline (`ascent` above, `descent` below), and
+ * the line box the page centres it in: the first family's font ascent and descent. Zero
+ * where a canvas reports nothing.
+ */
+export function inkBox(text: string, font: FontSpec): { ascent: number; descent: number; fontAscent: number; fontDescent: number } {
+  unitWidth(' ', font);
+  const size = 200;
+  ctx!.font = `${font.weight} ${size}px ${familyList(font)}`;
+  const m = ctx!.measureText(font.uppercase ? text.toUpperCase() : text);
+  const f = (x: number) => (Number.isFinite(x) ? x / size : 0);
+  return { ascent: f(m.actualBoundingBoxAscent), descent: f(m.actualBoundingBoxDescent), fontAscent: f(m.fontBoundingBoxAscent), fontDescent: f(m.fontBoundingBoxDescent) };
 }
 
 export function measure(text: string, font: FontSpec, size: number): number {
