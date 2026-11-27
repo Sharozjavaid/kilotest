@@ -102,8 +102,13 @@ export async function openApp(ctx, { userId, fakeMedia = false, path = '/', perm
   // 409s are expected where a flow provokes a stale save; the flow checks them itself.
   const ignore = [/expo-notifications/, /Download the React DevTools/, /net::ERR_ABORTED/, /status of 409 \(Conflict\)/];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  // A flow that takes the connection away on purpose sets ctx.offlineUntil: requests the
+  // browser refuses inside that window are the outage itself, not an app error.
+  const offlineNow = () => ctx.offlineUntil !== undefined && Date.now() <= ctx.offlineUntil;
   page.on('console', (m) => {
-    if (m.type() === 'error' && !ignore.some((r) => r.test(m.text()))) errors.push(`console: ${m.text()}`);
+    if (m.type() !== 'error' || ignore.some((r) => r.test(m.text()))) return;
+    if (/net::ERR_INTERNET_DISCONNECTED/.test(m.text()) && offlineNow()) return;
+    errors.push(`console: ${m.text()}`);
   });
   page.on('dialog', (d) => {
     ctx.log(`  dialog: ${d.message().replace(/\s+/g, ' ')}`);

@@ -489,6 +489,7 @@ export default async function batch30(ctx) {
           offlineDone = true;
           const okBefore = putOk.size;
           const tOff = Date.now();
+          ctx.offlineUntil = Infinity;
           await cdp.send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
           const paused = await waitFor('the Batch screen to say uploads are paused', async () => (await bodyText(page)).includes('Uploads paused: no connection'), { timeoutMs: 15_000, everyMs: 250 }).then(() => true, () => false);
           await shot(page, 'b30-04b-batch-offline');
@@ -496,6 +497,8 @@ export default async function batch30(ctx) {
           await sleep(8000);
           const startedWhileOffline = putStarts.length - startsOffline;
           await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 20, downloadThroughput: -1, uploadThroughput: 1_500_000 });
+          // Console messages about refused requests can land just after the connection is back.
+          ctx.offlineUntil = Date.now() + 2000;
           report.offline = { afterFiles: okBefore, pausedShown: paused, offlineSec: sec(Date.now() - tOff), startedWhileOffline };
           ctx.log(`  connection lost after ${okBefore} files for ${report.offline.offlineSec}s: paused shown ${paused}, ${startedWhileOffline} uploads started while offline`);
           assert(paused, 'the Batch screen never said the uploads were paused while offline');
