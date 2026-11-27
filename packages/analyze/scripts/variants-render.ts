@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Edl, RenderApi, RenderInput, TemplatesApi } from '@kilo/edl';
@@ -193,6 +193,8 @@ export async function renderVariants(opts: { fixtures?: string[]; quality?: 'pre
           return [v.id, src.subarray(Math.round(seg.start * SR), Math.round((seg.start + len) * SR))] as const;
         }),
       );
+      mkdirSync(join(WORK, fixture), { recursive: true });
+      writeFileSync(join(WORK, fixture, 'edl.json'), JSON.stringify(edl, null, 2));
       for (const v of edl.variants) {
         const outDir = join(WORK, fixture);
         mkdirSync(outDir, { recursive: true });
@@ -206,6 +208,8 @@ export async function renderVariants(opts: { fixtures?: string[]; quality?: 'pre
         const tl = resolveTimeline(edl, v.id);
         const problems: string[] = [];
         const probedSec = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', outPath]).toString());
+        const [fpsNum, fpsDen] = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'csv=p=0', outPath]).toString().trim().split('/').map(Number);
+        const outFps = fpsNum! / (fpsDen || 1);
         if (Math.abs(probedSec - tl.durationSec) > 0.1) problems.push(`lasts ${probedSec.toFixed(2)} s, the timeline ${tl.durationSec.toFixed(2)} s`);
 
         const got = pcm(outPath);
@@ -250,7 +254,9 @@ export async function renderVariants(opts: { fixtures?: string[]; quality?: 'pre
         let keptFrames = 0;
         let keptFramesBlue = 0;
         frames.forEach((f, k) => {
-          const t = k * every + every / 2;
+          // ffmpeg's fps filter emits, for output frame k, the last input frame that starts
+          // before (k + 0.5) * every. Trace that frame's own time, not the interval's middle.
+          const t = (Math.ceil((k + 0.5) * every * outFps - 1e-6) - 1) / outFps;
           if (covered(t)) return;
           const item = tl.items.find((it) => t >= it.outStart && t < it.outEnd);
           if (!item) return;
@@ -259,15 +265,18 @@ export async function renderVariants(opts: { fixtures?: string[]; quality?: 'pre
           checked++;
           const srcT = item.segment.start + (t - item.outStart);
           const mc = manifest.clips.find((c) => `${fixture}-${c.name}` === item.segment.clipId);
-          const unit = mc?.units.find((u) => srcT >= u.start - 0.02 && srcT <= u.end + 0.02);
+          // Every unit within 20 ms of this frame: near a unit's edge both it and its neighbour match.
+          const near = mc?.units.filter((u) => srcT >= u.start - 0.02 && srcT <= u.end + 0.02) ?? [];
+          const unit = near[0];
           const red = cutBandShare(f) > 0.08;
-          if (unit && unit.kind !== 'pause' && unit.keep) {
+          if (near.length === 1 && unit!.kind !== 'pause' && unit!.keep) {
             keptFrames++;
             if (keptBandShare(f) > 0.08) keptFramesBlue++;
           }
           // The fixtures paint pauses red as well: a red band is wrong only over cut speech,
-          // or where the EDL says a kept word is playing.
-          if (red && (!unit || unit.kind !== 'pause')) bad.push(Number(t.toFixed(2)));
+          // or where the EDL says a kept word is playing. A frame at the edge of a pause the
+          // segment keeps as padding may match both the word and the pause.
+          if (red && !near.some((u) => u.kind === 'pause')) bad.push(Number(t.toFixed(2)));
         });
         if (bad.length) problems.push(`cut content shows at ${bad.join(', ')} s`);
         if (keptFrames && keptFramesBlue < 0.9 * keptFrames) problems.push(`only ${keptFramesBlue}/${keptFrames} frames of kept speech show the kept band`);
