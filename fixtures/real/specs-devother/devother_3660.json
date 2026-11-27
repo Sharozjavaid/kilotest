@@ -1,0 +1,75 @@
+{
+  "id": "devother_3660",
+  "title": "Real speech, LibriSpeech speaker 3660 (M)",
+  "mode": "general",
+  "speaker": "3660",
+  "script": true,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 1.14,
+      "tail": 0.66,
+      "pieces": [
+        {
+          "utt": "3660-172182-0018",
+          "role": "line",
+          "gainDb": -1.3
+        },
+        {
+          "pause": 0.28
+        },
+        {
+          "utt": "3660-172182-0019",
+          "role": "line",
+          "gainDb": 0
+        },
+        {
+          "pause": 0.61
+        },
+        {
+          "utt": "3660-172182-0021",
+          "words": 5,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 1
+        },
+        {
+          "pause": 0.88
+        },
+        {
+          "utt": "3660-172182-0021",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.4
+        },
+        {
+          "pause": 0.63
+        },
+        {
+          "utt": "3660-172182-0023",
+          "role": "line",
+          "gainDb": -1.1
+        },
+        {
+          "pause": 0.69
+        },
+        {
+          "utt": "3660-172182-0025",
+          "role": "line",
+          "gainDb": 0.1
+        },
+        {
+          "pause": 0.6
+        },
+        {
+          "utt": "3660-172182-0027",
+          "role": "line",
+          "gainDb": 0.7
+        }
+      ]
+    }
+  ]
+}

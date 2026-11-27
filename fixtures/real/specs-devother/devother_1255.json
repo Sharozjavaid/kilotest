@@ -1,0 +1,123 @@
+{
+  "id": "devother_1255",
+  "title": "Real speech, LibriSpeech speaker 1255 (M)",
+  "mode": "general",
+  "speaker": "1255",
+  "script": true,
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.31,
+      "tail": 1.09,
+      "pieces": [
+        {
+          "utt": "1255-90407-0008",
+          "role": "line",
+          "gainDb": -0.4
+        },
+        {
+          "pause": 0.65
+        },
+        {
+          "utt": "1255-90407-0009",
+          "role": "line",
+          "gainDb": -1.3
+        },
+        {
+          "pause": 0.87
+        },
+        {
+          "utt": "1255-90407-0011",
+          "role": "line",
+          "gainDb": 1.2
+        }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": -6.4,
+      "leadIn": 0.53,
+      "tail": 0.8,
+      "pieces": [
+        {
+          "utt": "1255-90407-0012",
+          "role": "line",
+          "gainDb": -0.3
+        },
+        {
+          "pause": 0.29
+        },
+        {
+          "utt": "1255-90407-0014",
+          "words": 2,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 0.8
+        },
+        {
+          "pause": 0.62
+        },
+        {
+          "utt": "1255-90407-0014",
+          "words": 5,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 0
+        },
+        {
+          "pause": 1.03
+        },
+        {
+          "utt": "1255-90407-0014",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.7
+        },
+        {
+          "pause": 1.82
+        },
+        {
+          "utt": "1255-90407-0015",
+          "role": "line",
+          "gainDb": 0.4
+        }
+      ]
+    },
+    {
+      "name": "part3",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": -4.1,
+      "leadIn": 1.3,
+      "tail": 1.98,
+      "pieces": [
+        {
+          "utt": "1255-90407-0016",
+          "role": "line",
+          "gainDb": -0.4
+        },
+        {
+          "pause": 0.52
+        },
+        {
+          "utt": "1255-90407-0017",
+          "role": "line",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 0.62
+        },
+        {
+          "utt": "1255-90407-0018",
+          "role": "line",
+          "gainDb": 0
+        }
+      ]
+    }
+  ]
+}

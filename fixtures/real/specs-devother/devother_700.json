@@ -1,0 +1,109 @@
+{
+  "id": "devother_700",
+  "title": "Real speech, LibriSpeech speaker 700 (F)",
+  "mode": "general",
+  "speaker": "700",
+  "script": false,
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 1.25,
+      "tail": 0.76,
+      "pieces": [
+        {
+          "utt": "700-122866-0028",
+          "role": "line",
+          "gainDb": 0.8
+        },
+        {
+          "pause": 0.65
+        },
+        {
+          "utt": "700-122866-0030",
+          "role": "line",
+          "gainDb": 0
+        },
+        {
+          "pause": 0.35
+        },
+        {
+          "utt": "700-122866-0032",
+          "words": 6,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -1.5
+        },
+        {
+          "pause": 1.38
+        },
+        {
+          "utt": "700-122866-0032",
+          "role": "line",
+          "group": "g1",
+          "gainDb": -1.5
+        },
+        {
+          "pause": 0.37
+        },
+        {
+          "utt": "700-122866-0033",
+          "role": "line",
+          "gainDb": -0.3
+        }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 4.1,
+      "leadIn": 0.33,
+      "tail": 1.76,
+      "pieces": [
+        {
+          "utt": "700-122866-0034",
+          "role": "line",
+          "gainDb": 0.4
+        },
+        {
+          "pause": 0.43
+        },
+        {
+          "utt": "700-122866-0035",
+          "role": "line",
+          "gainDb": -0.6
+        },
+        {
+          "pause": 0.32
+        },
+        {
+          "utt": "700-122866-0036",
+          "words": 6,
+          "role": "abandoned",
+          "group": "g2",
+          "gainDb": 0.3
+        },
+        {
+          "pause": 0.92
+        },
+        {
+          "utt": "700-122866-0036",
+          "role": "line",
+          "group": "g2",
+          "gainDb": -1.2
+        },
+        {
+          "pause": 2.43
+        },
+        {
+          "utt": "700-122866-0037",
+          "role": "line",
+          "gainDb": -1.5
+        }
+      ]
+    }
+  ]
+}

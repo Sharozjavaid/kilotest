@@ -192,6 +192,9 @@ function chunkClip(cw: ClipWords, punctuated: boolean): Piece[] {
         !after || endsClause(last.text) || endsSentence(last.text) || after.start - last.end >= 0.25 ||
         run[run.indexOf(last) + 1]?.filler === true;
       if (!boundedBefore || !boundedAfter) continue;
+      // "No, no, no.": the same word said again is emphasis, not an interjection breaking off what
+      // came before it.
+      if (!strong && i > 0 && ks.slice(0, i).every((k) => ks.slice(i, i + len).includes(k))) continue;
       const atStart = i === 0;
       if (atStart && after && !strong) continue; // "Wait, this part is good." is real speech
       // A one-word entry ("again") that opens a sentence going on after it is that sentence's own

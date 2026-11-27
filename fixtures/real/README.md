@@ -14,6 +14,7 @@ two people. See "What this proves" below.
 | LibriSpeech dev-clean (Panayotov et al.), with Montreal Forced Aligner word times, as packaged in `gilkeyio/librispeech-alignments` on Hugging Face (alignments by Loren Lugosch) | CC BY 4.0 | the 12 recordings and their ground truth, and the held-out and fresh sets |
 | LibriSpeech test-clean, from the same package (first 8 of its 27 row groups, 113 MB) | CC BY 4.0 | the final set (`specs-final/`) |
 | LibriSpeech test-other, from the same package (all 30 row groups, 353 MB) | CC BY 4.0 | the "other" set (`specs-other/`) |
+| LibriSpeech dev-other, from the same package (all 29 row groups, 320 MB) | CC BY 4.0 | the devother set (`specs-devother/`) |
 | DisfluencySpeech test split (`amaai-lab/DisfluencySpeech`, Wang and Herremans 2024): one speaker re-enacting Switchboard calls, every "uh" and "um" in the transcript | Apache 2.0 | how many fillers the `whisper` transcriber keeps (`npm run whisper:fillers` in packages/analyze) |
 
 Looked at and not used: PodcastFillers (real podcast fillers, but its filler annotations are
@@ -149,7 +150,7 @@ before it: LibriSpeech **test-other**, the harder, noisier half of LibriSpeech's
 33 speakers none of the other sets use. Every one of them (all have a chapter of at least 5 usable
 lines), in speaker-number order, with the final set's design cycle. Its baseline was written down in
 totals only before any code changed (`specs-other/PREREGISTRATION.md`), and it was scored once at
-the end. dev-other (33 more unheard speakers) is still untouched.
+the end. It was spent by the round after (its cuts were looked at); dev-other is the set after it.
 
 | Set | Specs | Output (gitignored) | Recordings | Clips | Length | Retake groups (as scored) | Readers |
 |---|---|---|---|---|---|---|---|
@@ -165,6 +166,29 @@ cd packages/analyze && KILO_REAL_FIXTURES=../../fixtures/real/.work/out-other np
 `check.mjs --out .work/out-other`: of 582 unit edges, 60 starts and 101 ends have 20 ms or more of
 sound just outside the aligner's edge: its edges are looser here than on any other set, ends
 especially.
+
+### The devother set
+
+The round on Whisper's punctuation and segmentation (below) was checked on LibriSpeech
+**dev-other**, the noisier half of LibriSpeech's development data, whose 33 speakers none of the
+other sets use. Same rule as `other`: every speaker no earlier set uses with a chapter of at least
+5 usable lines (all 33), in speaker-number order, the final set's design cycle. Its baseline was
+written down in totals only before any code changed (`specs-devother/PREREGISTRATION.md`), and it
+was scored once at the end.
+
+| Set | Specs | Output (gitignored) | Recordings | Clips | Length | Retake groups (as scored) | Readers |
+|---|---|---|---|---|---|---|---|
+| devother | `specs-devother/` | `.work/out-devother/` | 33 | 57 | 1739 s | 47 | 16 F, 17 M |
+
+```sh
+fixtures/real/.work/venv/bin/python -I fixtures/real/fetch.py librispeech-dev-other   # into .work/cache/librispeech-dev-other (320 MB)
+node fixtures/real/plan.mjs --set devother     # only to change the design: rewrites specs-devother/*.json
+node fixtures/real/generate.mjs --specs fixtures/real/specs-devother --out fixtures/real/.work/out-devother --cache fixtures/real/.work/cache/librispeech-dev-other
+cd packages/analyze && KILO_REAL_FIXTURES=../../fixtures/real/.work/out-devother npm run score:real   # or -- --truth
+```
+
+`check.mjs --out .work/out-devother`: of 526 units, 54 starts and 102 ends have 20 ms or more of
+sound just outside the aligner's edge, about as on the other set.
 
 ## Ground truth
 
@@ -261,6 +285,68 @@ model writes garbage and is not used.
 Caveat: wav2vec2-base-960h was fine-tuned on LibriSpeech's 960 h of training speech, other speakers
 but the same kind of audiobook audio as every set here. On a creator's phone in a noisy room it
 will hear less, and a word it hears nothing of is dropped. The gain measured here is an upper bound.
+
+### Whisper's punctuation and segmentation (this round)
+
+On the other set most retake groups that went wrong with Whisper and right with the true transcript
+came from how the decider read Whisper's text: an abandoned start Whisper closed with a full stop or
+a question mark ("To say nothing, said Montalais." then "To say nothing, said Montalais, so that
+when..."), a one-word start ("But,") whose pause Whisper's times shrank, an abandoned attempt split
+over two utterances, and, with a script, a take of one line joined to the next line. The true
+transcript is punctuated too, but perfectly (a full stop on every finished line, none on an
+abandoned start), which is why the decider does well on it. The changes (packages/analyze/src):
+
+| | What | Where |
+|---|---|---|
+| A | A sentence the next utterance says again word for word and carries on is an abandoned start, whatever its full stop | heuristic.ts `restartsOpening`, `decideByRetakes` |
+| B | With a script: a take of one line is not joined to the next line as its lead-in; a reading never joins a restart of its own opening (three words said again; two are a figure of speech) | heuristic.ts `matchSpans` |
+| C | A one-word start written with a comma or a break ties to its restart after a pause of 0.2 s, not 0.4 s | heuristic.ts `sameLine` |
+| D | "No, no, no." is one phrase, not "No," and an aside | chunks.ts |
+| E | The pieces of an abandoned attempt that the kept take says again are cut with it | heuristic.ts `decideByRetakes` |
+| G | Parallel phrases that open alike but change a word ("o eternal everywhere / o eternal nowhere"; "a hat / and a coat / and my boots") are not restarts, unless the word is the longer one's words misheard or run together | heuristic.ts `parallelOpening` |
+| H | "Ah" opening a sentence that runs straight on is a word, not a filler ("um", "uh", "er" always are) | text.ts `flagFillers` |
+
+Clipped words and retake groups right; developed on dev, held-out, fresh, final and other, devother
+scored once before and once after:
+
+| Set | Whisper + CTC, before | after | True transcript, before | after |
+|---|---|---|---|---|
+| dev (12) | 0, 22/22 | 0, 22/22 | 0, 22/22 | 0, 22/22 |
+| held-out (13) | 0, 16/16 | 0, 16/16 | 0, 16/16 | 0, 16/16 |
+| fresh (12) | 0, 13/13 | 0, 13/13 | 0, 13/13 | 0, 13/13 |
+| final (30) | 12, 36/42 | 6, 40/42 | 4, 40/42 | 0, 42/42 |
+| other (33) | 34, 38/47 | 32, 43/47 | 5, 46/47 | 0, 47/47 |
+| **devother (33), scored once** | 17, 37/47 | **17, 39/47** | 3, 45/47 | **2, 46/47** |
+
+Leave-one-out on the development sets (dev, held-out and fresh never change): without A, final
+Whisper 37/42 and other 42/47; without B, final truth 2 clipped and 40/42, other Whisper 41/47;
+without C, other Whisper 42/47; without D, final Whisper 9 clipped and 39/42; without E, other
+Whisper 42/47; without G, other 34 clipped (Whisper) and 3 (truth); without H, final 8 (Whisper) and
+2 (truth), other truth 2 clipped and 46/47. The synthetic recordings (`npm run score`, with
+`--touching` and `--jitter 0.06`), recorded, batch30, variants and broll score the same with every
+change. On devother B cost two kept lines (a script line that says its own opening twice, "How can
+you how can you speak of it"; a lead-in taken for the opening of a shorter line), so its guards are
+tuned closer to the development sets than the others.
+
+Tried and left out: a decider that ignores Whisper's punctuation, measured on top of A, B and C
+(other then 34 clipped and 42/47). Stripping it (all of it, or only sentence ends; for the decider
+only, or for snapping too) fixed a few groups the punctuation broke but lost abandoned starts
+Whisper had marked right: Whisper on the other set 38-39/47 in every variant; fresh 12/13 in every
+variant, held-out 15/16 with everything stripped. Fewer clipped words there (other 23-30) came
+with abandoned starts kept (cut units cut 86.7-90.0% against 96.7%) or, with only sentence ends
+stripped before snapping, with every pause read as inside a sentence and more dead air kept. Whisper's
+punctuation is mostly right; it is wrong in recognisable ways, and those are what the rules above
+read past. Also tried: holding a sentence-final word's end 0.25 s or 0.35 s past its last CTC letter
+(other 30 and 32 clipped, nothing else changed): the pause rules, not the hold, limit those edges.
+Not tried: a pitch or energy fall at a full stop. On these recordings an abandoned start is cut
+from the full line's own audio, so its prosody at the break is that of a sentence-internal
+boundary by construction, and a detector tuned on that would not say how a creator trails off.
+
+What is left with Whisper is mostly not punctuation: of the 32 clipped words on the other set, 20
+are a kept word cut at its edge where Whisper's time is off by more than the CTC hold allows (a cut
+word laid over the kept take's first word, a line-final word whose release the CTC model does not
+hear), and 12 are whole kept units lost to mishearing (a script line Whisper heard as other words
+matches no line and is cut as off-script; a Latin line; "Ulrica" as "a good see you").
 
 ## What this proves, and what it does not
 

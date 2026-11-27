@@ -1,5 +1,5 @@
 import type { EditSettings, SegmentReason } from '@kilo/edl';
-import type { Chunk, ClipWords } from './chunks.js';
+import { trailsOff, type Chunk, type ClipWords } from './chunks.js';
 import { ORDINALS, STOPWORDS, endsClause, fullSimilarity, keys, lcs, lineMatch, prefixSimilarity, readNumber } from './text.js';
 
 /** What a decider says about one utterance. */
@@ -38,11 +38,41 @@ class UnionFind {
   }
 }
 
+/**
+ * True when `short` and the opening of `long` open with the same word and then differ in a slot:
+ * a content word of `short` that `long` never says, where `long` says another content word.
+ */
+function parallelOpening(short: readonly string[], long: readonly string[]): boolean {
+  // They open alike: the same first word (a restart whose first word was heard differently,
+  // "Little thing was..." / "Loafing was...", is no parallel).
+  if (short.length < 2 || short[0] !== long[0]) return false;
+  // A word speech-to-text misheard or ran together ("The menwers..." / "The men were as") is the
+  // same word: spelled like one or two of `long`'s words.
+  const heardAs = (k: string) => long.some((_, i) => spelledAlike(k, long[i]!) || spelledAlike(k, long[i]! + (long[i + 1] ?? '')));
+  return slotDifferences(short, long.slice(0, short.length + 1)).some((d) => d.a.some((k) => !long.includes(k) && !heardAs(k)));
+}
+
+/** Spelling alike: at most a quarter of the longer one's letters differ. */
+function spelledAlike(a: string, b: string): boolean {
+  const n = Math.max(a.length, b.length);
+  if (!n) return true;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length]! / n <= 0.25;
+}
+
 /** True when `a` and `b` look like two takes of the same line. */
 export function sameLine(a: Chunk, b: Chunk, adjacent: boolean, gapSec: number): boolean {
   if (!a.keys.length || !b.keys.length) return false;
-  if (fullSimilarity(a.keys, b.keys) >= 0.6 && Math.min(a.keys.length, b.keys.length) >= 2) return true;
+  // Parallel phrases ("O eternal everywhere, o eternal nowhere, o eternal in vain"; "a hat, and a
+  // coat, and my boots") open alike but put a different word in the same place: not a restart.
   const [short, long] = a.keys.length <= b.keys.length ? [a, b] : [b, a];
+  if (!short.complete && parallelOpening(short.keys, long.keys)) return false;
+  if (fullSimilarity(a.keys, b.keys) >= 0.6 && Math.min(a.keys.length, b.keys.length) >= 2) return true;
   const firstMatch = short.keys[0] === long.keys[0];
   if (!short.complete && firstMatch && short.keys.length >= 2 && prefixSimilarity(short.keys, long.keys) >= 0.5) return true;
   // The same start heard differently by speech-to-text ("Little thing was all very well..." /
@@ -53,12 +83,27 @@ export function sameLine(a: Chunk, b: Chunk, adjacent: boolean, gapSec: number):
   // after a finished line that merely opens with the same word ("I obeyed." / "I declared
   // myself quite willing [pause] for it was necessary") starts a line of its own.
   if (!a.complete && short === a && firstMatch && a.keys.length <= 6 && adjacent && gapSec >= 0.4) return true;
+  // The same when speech-to-text wrote the break ("But," / "but the Stonewall gang..."), even though
+  // its word times shrank the pause.
+  const lastA = a.words.filter((w) => !w.filler).pop()?.text ?? '';
+  if (!a.complete && short === a && firstMatch && a.keys.length <= 6 && adjacent && gapSec >= 0.2 && (endsClause(lastA) || trailsOff(lastA))) return true;
   // An abandoned start that speech-to-text closed with a full stop ("Jam exclaimed, stretching his
   // neck." / "Jam exclaimed, stretching his neck and eyeing the dish."): said again at once, word
   // for word, and carried on. Only the earlier, shorter one can be the restart.
   if (short === a && adjacent && firstMatch && short.keys.length >= 3 && long.keys.length > short.keys.length &&
     prefixSimilarity(short.keys, long.keys) >= 0.8) return true;
   return false;
+}
+
+/**
+ * True when `b` opens by saying all of `a` again and goes on: `a`'s words are `b`'s first words
+ * (all of them for a two-word `a`, at least four in five for a longer one), and `b` says at least
+ * two words more.
+ */
+export function restartsOpening(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length < 2 || b.length < a.length + 2 || a[0] !== b[0]) return false;
+  if (a.length === 2) return a[1] === b[1];
+  return prefixSimilarity(a, b) >= 0.8;
 }
 
 // ---- retakes or parallel lines ---------------------------------------------------
@@ -256,14 +301,24 @@ function decideByRetakes(cands: Chunk[], offsets: Map<string, number>, out: CutD
     const strength = Math.max(prefixSimilarity(f.keys, other.keys), fullSimilarity(f.keys, other.keys));
     links.set(f.id, [...(links.get(f.id) ?? []), { other, strength, dist }]);
   };
+  // A sentence that the next utterance says again, word for word, and carries on ("To say nothing,
+  // said Montalais." / "To say nothing, said Montalais, so that when..."): an abandoned start that
+  // speech-to-text closed with a full stop. The restart outweighs the punctuation.
+  const restarted = new Set<number>();
+  for (let i = 0; i + 1 < cands.length; i++) {
+    const a = cands[i]!;
+    const b = cands[i + 1]!;
+    if (a.complete && b.clipId === a.clipId && restartsOpening(a.keys, b.keys)) restarted.add(a.id);
+  }
+  const done = (c: Chunk) => c.complete && !restarted.has(c.id);
   for (let i = 0; i < cands.length; i++) {
     const a = cands[i]!;
     for (let j = i + 1; j < Math.min(cands.length, i + 1 + WINDOW_CHUNKS); j++) {
       const b = cands[j]!;
       if (absStart(b, offsets) - absEnd(a, offsets) > WINDOW_SEC) break;
       const gap = b.clipId === a.clipId ? b.start - a.end : Infinity;
-      if (!sameLine(a, b, j === i + 1, gap)) continue;
-      if (a.complete && b.complete) {
+      if (!sameLine(a, b, j === i + 1, gap) && !(restarted.has(a.id) && j === i + 1)) continue;
+      if (done(a) && done(b)) {
         const ia = byId.get(a.id) ?? 0;
         const ib = byId.get(b.id) ?? 0;
         const verdict = separateLines(a, b, between(a, b), { before: all.slice(Math.max(0, ia - WINDOW_CHUNKS), ia), after: all.slice(ib + 1, ib + 1 + WINDOW_CHUNKS) });
@@ -271,15 +326,15 @@ function decideByRetakes(cands: Chunk[], offsets: Map<string, number>, out: CutD
         for (const c of verdict.corrections) corrections.add(c.id);
         uf.union(a.id, b.id);
       } else {
-        if (!a.complete) addLink(a, b, j - i);
-        if (!b.complete) addLink(b, a, j - i);
+        if (!done(a)) addLink(a, b, j - i);
+        if (!done(b)) addLink(b, a, j - i);
       }
     }
   }
   // Each unfinished utterance joins the one line it says the most of: a complete take
   // before another unfinished one, a later one (the redo) before an earlier one, then the nearest.
   const rank = (f: Chunk, l: { other: Chunk; strength: number; dist: number }) =>
-    [Math.round(l.strength * 1000), l.other.complete ? 1 : 0, l.other.id > f.id ? 1 : 0, -l.dist];
+    [Math.round(l.strength * 1000), done(l.other) ? 1 : 0, l.other.id > f.id ? 1 : 0, -l.dist];
   const better = (x: number[], y: number[]) => {
     for (let k = 0; k < x.length; k++) if (x[k] !== y[k]) return x[k]! > y[k]!;
     return false;
@@ -304,9 +359,29 @@ function decideByRetakes(cands: Chunk[], offsets: Map<string, number>, out: CutD
     return !!last && endsClause(last.text) && !!next && next.clipId === c.clipId && next.start - c.end <= 1 &&
       next.complete && !next.offScript && !next.fillerOnly;
   };
+  const keptOf = new Map<number, number>();
   for (const group of groups.values()) {
-    if (group.length > 1) resolveGroup(group, out, 'Last complete take', (c) => c.complete || runsOn(c));
-    else out.set(group[0]!.id, { keep: true, reason: 'speech' });
+    if (group.length > 1) {
+      const kept = resolveGroup(group, out, 'Last complete take', (c) => done(c) || runsOn(c));
+      for (const c of group) keptOf.set(c.id, kept);
+    } else out.set(group[0]!.id, { keep: true, reason: 'speech' });
+  }
+  // An abandoned attempt can run over several utterances ("Then he said, [pause] I do know." /
+  // "Then he said, well, I do not care for it."): what lies between a cut take and the take kept
+  // for it, and is said again right after the kept take's start, belongs to the abandoned attempt.
+  for (const [id, keptId] of keptOf) {
+    if (id === keptId || out.get(id)?.keep) continue;
+    const ia = byId.get(id);
+    const ik = byId.get(keptId);
+    if (ia === undefined || ik === undefined || ik <= ia + 1) continue;
+    const after = all.slice(ik, ik + 2).filter((c) => !c.fillerOnly && !c.offScript).flatMap((c) => c.keys);
+    for (const z of all.slice(ia + 1, ik)) {
+      if (keptOf.has(z.id) || z.fillerOnly || z.offScript || !out.get(z.id)?.keep || z.clipId !== all[ik]!.clipId) continue;
+      if (z.keys.length < 2 || z.keys.length > 8) continue;
+      if (lcs(z.keys, after) >= Math.max(2, Math.ceil(0.6 * z.keys.length))) {
+        out.set(z.id, { keep: false, reason: 'false_start', note: `Part of an abandoned take of utterance ${keptId}` });
+      }
+    }
   }
   for (const id of corrections) out.set(id, { keep: false, reason: 'off_script', note: 'Corrects the take before it' });
 }
@@ -334,6 +409,12 @@ function isTakeOf(c: Chunk, line: number): boolean {
 
 /** The longest pause inside one reading of a script line: "Inquired Shaggy, [pause] in the metal forest." */
 const REST_PAUSE_SEC = 2;
+
+/** True when two token lists open with the same three words (or one is all of the other's opening). */
+function opensAlike(a: readonly string[], b: readonly string[]): boolean {
+  const n = Math.min(3, a.length, b.length);
+  return n >= 2 && a.slice(0, n).join(' ') === b.slice(0, n).join(' ') && (n === 3 || Math.min(a.length, b.length) === n);
+}
 
 /** Joins neighbouring utterances of one clip when together they say one script line better. */
 function matchSpans(cands: Chunk[], script: string[][], allowed: (c: Chunk) => number[] | null): { spans: Span[]; unmatched: Chunk[] } {
@@ -371,6 +452,16 @@ function matchSpans(cands: Chunk[], script: string[][], allowed: (c: Chunk) => n
         if (n > 1 && lineMatch(group[0]!.keys, script[line] ?? []).coverage > 0 &&
           (group.slice(1).some((c) => lineMatch(c.keys, script[line] ?? []).coverage >= m.coverage - oneWord - 1e-9) ||
             lineMatch(group.slice(1).flatMap((c) => c.keys), script[line] ?? []).coverage >= m.coverage - oneWord - 1e-9)) continue;
+        // Nor join a piece that is the opening of another script line ("There there he" / "Asked
+        // Phronsie in intense interest...", the script's "There there he said soothingly..."): it is a
+        // take of that line, not a lead-in to this one. And a reading never says its own opening
+        // twice ("And the whole night the tree stood still" / "And the whole night"): that is a restart.
+        // Two shared words are a figure of speech, not a restart ("Think of Lady Glenarvan, think of
+        // Mary Grant"; "It is the compulsory of drinkers, it is a pulley").
+        if (n > 1 && group.some((c, k) =>
+          (k === 0 && c.keys.length >= 2 && script.some((other, o) => o !== line && other[0] === c.keys[0] && prefixSimilarity(c.keys, other) >= 0.8 &&
+            lineMatch(c.keys, other).coverage > lineMatch(c.keys, script[line] ?? []).coverage)) ||
+          (k > 0 && opensAlike(c.keys, group[0]!.keys)))) continue;
         // The rest of the same line, said after a short pause or split off by speech-to-text's
         // punctuation ("Have you been there last night?" / "asked Kirkland."), joins even when
         // the score rises only a little: every word it adds is the line's.

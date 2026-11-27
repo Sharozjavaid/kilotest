@@ -65,12 +65,29 @@ export function hasPunctuation(words: readonly Word[]): boolean {
   return words.some((w) => /[.,!?;:]/.test(w.text));
 }
 
+/**
+ * Fillers that are also words: "Ah" opening a sentence that runs straight on ("Ah, the swamp, the
+ * cruel swamp."; "Ah, said Dickie") is said, not hesitated. Hesitation goes on being cut where it
+ * sits inside a sentence ("I was, ah, thinking") or stands alone. "Um", "uh" and "er" are always fillers.
+ */
+const READ_INTERJECTIONS = new Set(['ah', 'ahh']);
+
+/** True when words[i] opens a sentence (clip start, after a sentence end or a long pause) and the next word follows at once. */
+function opensSentence(words: readonly Word[], i: number): boolean {
+  const w = words[i]!;
+  const prev = words[i - 1];
+  const next = words[i + 1];
+  if (!next || FILLER_WORDS.has(norm(next.text).replace(/\s+/g, '')) || endsSentence(w.text)) return false;
+  const opens = !prev || endsSentence(prev.text) || w.start - prev.end >= 0.45;
+  return opens && next.start - w.end <= 0.3;
+}
+
 /** Flags filler words with the lexicon. Never unflags what a provider already flagged. */
 export function flagFillers(words: Word[]): Word[] {
   return words.map((w, i) => {
     if (w.filler) return w;
     const k = norm(w.text).replace(/\s+/g, '');
-    if (FILLER_WORDS.has(k)) return { ...w, filler: true };
+    if (FILLER_WORDS.has(k) && !(READ_INTERJECTIONS.has(k) && opensSentence(words, i))) return { ...w, filler: true };
     const prev = words[i - 1];
     const setOffBefore = !prev || endsClause(prev.text) || endsSentence(prev.text);
     if (SOFT_FILLERS.has(k) && setOffBefore && endsClause(w.text)) return { ...w, filler: true };

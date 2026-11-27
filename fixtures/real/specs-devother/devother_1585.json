@@ -1,0 +1,64 @@
+{
+  "id": "devother_1585",
+  "title": "Real speech, LibriSpeech speaker 1585 (F)",
+  "mode": "general",
+  "speaker": "1585",
+  "script": false,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "1280x720",
+      "gainDb": 0,
+      "leadIn": 0.87,
+      "tail": 1.71,
+      "pieces": [
+        {
+          "utt": "1585-131718-0041",
+          "role": "line",
+          "gainDb": 1
+        },
+        {
+          "pause": 0.29
+        },
+        {
+          "utt": "1585-131718-0042",
+          "role": "line",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 0.58
+        },
+        {
+          "utt": "1585-131718-0043",
+          "role": "line",
+          "gainDb": 0.1
+        },
+        {
+          "pause": 0.41
+        },
+        {
+          "utt": "1585-131718-0044",
+          "role": "line",
+          "gainDb": -0.1
+        },
+        {
+          "pause": 1.08
+        },
+        {
+          "utt": "1585-131718-0045",
+          "role": "line",
+          "gainDb": 0.4
+        },
+        {
+          "pause": 0.44
+        },
+        {
+          "utt": "1585-131718-0046",
+          "role": "line",
+          "gainDb": -0.6
+        }
+      ]
+    }
+  ]
+}

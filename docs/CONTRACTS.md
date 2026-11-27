@@ -70,6 +70,8 @@ ingestBroll ──────┴───────────────�
 
 `KILO_WHISPER_ALIGN` (default `ctc`; `none` turns it off) adds a check that does not use Whisper's language model: a CTC character model (wav2vec2-base-960h, ONNX, 378 MB, pinned, downloaded by `whisper:setup` and by the image's `KILO_WITH_WHISPER=1`) reads each clip. Whisper words it heard nothing of, in a stretch with no CTC letter for 0.3 s or more, are dropped (fillers never are, since the model never writes them). Each kept word's edges are held 0.15 s past its last CTC letter and 0.05 s before its first, never shrinking a pause below a length the decider reads. It costs about 0.16 s more CPU per second of audio on two threads and about 1 GB of memory. A missing model fails the clip with a message naming the fix.
 
+The decider treats a transcriber's punctuation as evidence, not fact. A sentence that the next utterance says again word for word and carries on from is an abandoned start, whatever its full stop. Phrases that open alike but change a word are not restarts. "Ah" opening a sentence that runs straight on is kept as a word; um, uh and er are always fillers.
+
 `detectSilence` runs ffmpeg's silencedetect plus a pass against the local room tone, and settles every silence edge where the level is back at room tone, so a cut never starts inside a fading word.
 
 ### The fixture transcriber

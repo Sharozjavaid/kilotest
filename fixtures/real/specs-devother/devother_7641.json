@@ -1,0 +1,93 @@
+{
+  "id": "devother_7641",
+  "title": "Real speech, LibriSpeech speaker 7641 (M)",
+  "mode": "general",
+  "speaker": "7641",
+  "script": true,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.7,
+      "tail": 1.15,
+      "pieces": [
+        {
+          "utt": "7641-96684-0029",
+          "role": "line",
+          "gainDb": -0.9
+        },
+        {
+          "pause": 0.28
+        },
+        {
+          "utt": "7641-96684-0030",
+          "role": "line",
+          "gainDb": -0.8
+        },
+        {
+          "pause": 0.26
+        },
+        {
+          "utt": "7641-96684-0031",
+          "words": 5,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -1
+        },
+        {
+          "pause": 0.74
+        },
+        {
+          "utt": "7641-96684-0031",
+          "words": 13,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 1
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "utt": "7641-96684-0031",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.7
+        },
+        {
+          "pause": 5.34
+        },
+        {
+          "utt": "7641-96684-0032",
+          "role": "line",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 2.38
+        },
+        {
+          "utt": "7641-96684-0033",
+          "role": "line",
+          "gainDb": -0.4
+        },
+        {
+          "pause": 0.48
+        },
+        {
+          "utt": "7641-96684-0035",
+          "role": "line",
+          "gainDb": -1
+        },
+        {
+          "pause": 0.53
+        },
+        {
+          "utt": "7641-96684-0036",
+          "role": "line",
+          "gainDb": 0.4
+        }
+      ]
+    }
+  ]
+}

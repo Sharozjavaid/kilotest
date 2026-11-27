@@ -1,0 +1,72 @@
+{
+  "id": "devother_1686",
+  "title": "Real speech, LibriSpeech speaker 1686 (F)",
+  "mode": "general",
+  "speaker": "1686",
+  "script": false,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 1.5,
+      "tail": 0.55,
+      "pieces": [
+        {
+          "utt": "1686-142278-0075",
+          "role": "line",
+          "gainDb": 0.8
+        },
+        {
+          "pause": 0.31
+        },
+        {
+          "utt": "1686-142278-0076",
+          "role": "line",
+          "gainDb": 0.9
+        },
+        {
+          "pause": 2.15
+        },
+        {
+          "utt": "1686-142278-0080",
+          "role": "line",
+          "gainDb": 0.1
+        },
+        {
+          "pause": 2.9
+        },
+        {
+          "utt": "1686-142278-0085",
+          "role": "line",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 3.93
+        },
+        {
+          "utt": "1686-142278-0088",
+          "role": "line",
+          "gainDb": 0.7
+        },
+        {
+          "pause": 1.75
+        },
+        {
+          "utt": "1686-142278-0089",
+          "role": "line",
+          "gainDb": 0.5
+        },
+        {
+          "pause": 4.09
+        },
+        {
+          "utt": "1686-142278-0091",
+          "role": "line",
+          "gainDb": 0.3
+        }
+      ]
+    }
+  ]
+}

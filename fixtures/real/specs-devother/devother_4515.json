@@ -1,0 +1,108 @@
+{
+  "id": "devother_4515",
+  "title": "Real speech, LibriSpeech speaker 4515 (M)",
+  "mode": "general",
+  "speaker": "4515",
+  "script": false,
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.63,
+      "tail": 0.53,
+      "pieces": [
+        {
+          "utt": "4515-11057-0090",
+          "role": "line",
+          "gainDb": -0.3
+        },
+        {
+          "pause": 1.67
+        },
+        {
+          "utt": "4515-11057-0091",
+          "role": "line",
+          "gainDb": 0
+        },
+        {
+          "pause": 3.48
+        },
+        {
+          "utt": "4515-11057-0092",
+          "role": "line",
+          "gainDb": -0.8
+        },
+        {
+          "pause": 4.17
+        },
+        {
+          "utt": "4515-11057-0093",
+          "words": 3,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 0.7
+        },
+        {
+          "pause": 0.86
+        },
+        {
+          "utt": "4515-11057-0093",
+          "words": 7,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -0.3
+        },
+        {
+          "pause": 1.57
+        },
+        {
+          "utt": "4515-11057-0093",
+          "role": "line",
+          "group": "g1",
+          "gainDb": -0.9
+        }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": -4.9,
+      "leadIn": 0.92,
+      "tail": 1.26,
+      "pieces": [
+        {
+          "utt": "4515-11057-0096",
+          "role": "line",
+          "gainDb": -0.4
+        },
+        {
+          "pause": 2.09
+        },
+        {
+          "utt": "4515-11057-0100",
+          "role": "line",
+          "gainDb": 0.2
+        },
+        {
+          "pause": 0.33
+        },
+        {
+          "utt": "4515-11057-0101",
+          "role": "line",
+          "gainDb": 0.5
+        },
+        {
+          "pause": 0.29
+        },
+        {
+          "utt": "4515-11057-0102",
+          "role": "line",
+          "gainDb": 1
+        }
+      ]
+    }
+  ]
+}
