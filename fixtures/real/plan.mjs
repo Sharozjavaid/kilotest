@@ -63,7 +63,7 @@ function abandonAt(u, target, avoid = new Set()) {
  * speaker (LibriSpeech has a few sentences a reader says twice, or that open the same way).
  */
 const RECORDINGS = [
-  { id: 'real_174', speaker: '174', lines: 7, clips: 2, script: true, special: [{ attempts: ['174-50561-0012', '174-50561-0009'], full: '174-50561-0003', why: 'the reader says "the wandering singer" on its own twice, then the full sentence' }] },
+  { id: 'real_174', speaker: '174', lines: 5, clips: 2, script: true, special: [{ attempts: ['174-50561-0012', '174-50561-0009'], full: '174-50561-0003', why: 'the reader says "the wandering singer" on its own twice, then the full sentence' }] },
   { id: 'real_3081', speaker: '3081', lines: 8, clips: 1, script: false, special: [{ attempts: [['3081-166546-0006', 6]], full: '3081-166546-0011', why: 'two different sentences that open with the same six words: the first six words of one, then the other' }] },
   { id: 'real_777', speaker: '777', lines: 6, clips: 2, script: false, special: [{ attempts: [['777-126732-0025', 6]], full: '777-126732-0003', why: 'two sentences that open "michaelis the ticket of leave apostle": that opening from one, then the other in full' }] },
   { id: 'real_1462', speaker: '1462', lines: 8, clips: 1, script: true },
@@ -85,7 +85,15 @@ let kindTurn = 0;
 for (const rec of RECORDINGS) {
   const r = rng(Number(rec.speaker) * 7919 + 17);
   const specialIds = new Set((rec.special ?? []).flatMap((s) => [s.full, ...s.attempts.map((a) => (Array.isArray(a) ? a[0] : a))]));
-  const pool = bySpeaker.get(rec.speaker).filter((u) => usable(u) && !specialIds.has(u.id));
+  // One chapter per recording, as one recording session: the room tone stays the room's. The
+  // chapter of the special retakes if there are any, else the one with the most usable lines.
+  const usableAll = bySpeaker.get(rec.speaker).filter((u) => usable(u) && !specialIds.has(u.id));
+  const chapters = new Map();
+  for (const u of usableAll) chapters.set(u.chapter, (chapters.get(u.chapter) ?? 0) + 1);
+  const specialChapter = [...specialIds][0]?.split('-')[1];
+  const chapter = specialChapter ?? [...chapters.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const inChapter = usableAll.filter((u) => u.chapter === chapter);
+  const pool = inChapter.length >= rec.lines - (rec.special?.length ?? 0) ? inChapter : usableAll;
   // A run of consecutive lines from one chapter reads like one piece of content.
   const start = Math.floor(r() * Math.max(1, pool.length - rec.lines));
   const lines = pool.slice(start, start + rec.lines - (rec.special?.length ?? 0));

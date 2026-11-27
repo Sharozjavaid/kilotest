@@ -45,8 +45,16 @@ export function sameLine(a: Chunk, b: Chunk, adjacent: boolean, gapSec: number):
   const [short, long] = a.keys.length <= b.keys.length ? [a, b] : [b, a];
   const firstMatch = short.keys[0] === long.keys[0];
   if (!short.complete && firstMatch && short.keys.length >= 2 && prefixSimilarity(short.keys, long.keys) >= 0.5) return true;
+  // The same start heard differently by speech-to-text ("Little thing was all very well..." /
+  // "Loeffing was all very well..."): most of a longer abandoned start matches the line's start.
+  if (!short.complete && !firstMatch && short.keys.length >= 4 && prefixSimilarity(short.keys, long.keys) >= 0.75) return true;
   // A short abandoned start that restarts on the same word after a pause: "It's, it's really... um" / "It takes..."
   if (!short.complete && firstMatch && short.keys.length <= 6 && adjacent && gapSec >= 0.4) return true;
+  // An abandoned start that speech-to-text closed with a full stop ("Jam exclaimed, stretching his
+  // neck." / "Jam exclaimed, stretching his neck and eyeing the dish."): said again at once, word
+  // for word, and carried on. Only the earlier, shorter one can be the restart.
+  if (short === a && adjacent && firstMatch && short.keys.length >= 3 && long.keys.length > short.keys.length &&
+    prefixSimilarity(short.keys, long.keys) >= 0.8) return true;
   return false;
 }
 
@@ -173,7 +181,10 @@ const asks = (c: Chunk) => /\?["')\]]*$/.test(c.words[c.words.length - 1]?.text.
 function resolveGroup(group: Chunk[], out: CutDecisions, why: string): number {
   let complete = group.filter((c) => c.complete);
   // Saying a line back as a question ("It lasts all week? Yeah.") is checking it, not a take.
-  const statements = complete.filter((c) => !asks(c));
+  // A question that says more than every statement ("The boys look awake enough." / "The boys
+  // look awake enough, but who can tell?") is the take itself.
+  const longestStatement = Math.max(0, ...complete.filter((c) => !asks(c)).map((c) => c.keys.length));
+  const statements = complete.filter((c) => !asks(c) || c.keys.length > longestStatement);
   if (statements.length && statements.length < complete.length) complete = statements;
   let keep: Chunk;
   if (complete.length) keep = complete[complete.length - 1]!;
@@ -282,6 +293,9 @@ function isTakeOf(c: Chunk, line: number): boolean {
   return c.scriptLineIndex === line;
 }
 
+/** The longest pause inside one reading of a script line: "Inquired Shaggy, [pause] in the metal forest." */
+const REST_PAUSE_SEC = 2;
+
 /** Joins neighbouring utterances of one clip when together they say one script line better. */
 function matchSpans(cands: Chunk[], script: string[][], allowed: (c: Chunk) => number[] | null): { spans: Span[]; unmatched: Chunk[] } {
   const spans: Span[] = [];
@@ -291,24 +305,34 @@ function matchSpans(cands: Chunk[], script: string[][], allowed: (c: Chunk) => n
     const first = cands[i]!;
     const lines = allowed(first) ?? script.map((_, k) => k);
     let best: Span | null = null;
+    let longPause = false;
     for (let n = 1; n <= 3 && i + n <= cands.length; n++) {
       const group = cands.slice(i, i + n);
       const last = group[group.length - 1]!;
       if (last.clipId !== first.clipId) break;
       if (n > 1) {
         const prev = group[group.length - 2]!;
-        if (last.start - prev.end > 0.8) break;
+        // After a longer pause (up to REST_PAUSE_SEC) only the rest of the same line joins.
+        if (last.start - prev.end > REST_PAUSE_SEC) break;
+        if (last.start - prev.end > 0.8) longPause = true;
       }
       const ks = group.flatMap((c) => c.keys);
       for (const line of lines) {
         const m = lineMatch(ks, script[line] ?? []);
         // A restart is two takes, not one reading: never join an utterance that already says
-        // part of the line to a later one that says it at least as fully on its own
-        // ("the trick is to, the trick is to apply it"). A lead-in that says none of the
-        // line ("Honestly? Best sunscreen I've ever used.") still joins.
+        // part of the line to later ones that say it at least as fully without it, alone or
+        // together ("the trick is to, the trick is to apply it"; "Cosette was no, Cosette was
+        // no longer in rags, she was in mourning"). A lead-in that says none of the line
+        // ("Honestly? Best sunscreen I've ever used.") still joins.
         if (n > 1 && lineMatch(group[0]!.keys, script[line] ?? []).coverage > 0 &&
-          group.slice(1).some((c) => lineMatch(c.keys, script[line] ?? []).coverage >= m.coverage - 1e-9)) continue;
-        if (!best || m.f1 > best.f1 + (n > best.chunks.length ? 0.08 : 0)) best = { chunks: group, line, coverage: m.coverage, f1: m.f1 };
+          (group.slice(1).some((c) => lineMatch(c.keys, script[line] ?? []).coverage >= m.coverage - 1e-9) ||
+            lineMatch(group.slice(1).flatMap((c) => c.keys), script[line] ?? []).coverage >= m.coverage - 1e-9)) continue;
+        // The rest of the same line, said after a short pause or split off by speech-to-text's
+        // punctuation ("Have you been there last night?" / "asked Kirkland."), joins even when
+        // the score rises only a little: every word it adds is the line's.
+        const rest = best && n > best.chunks.length && line === best.line && m.coverage > best.coverage + 1e-9 &&
+          lineMatch(group.slice(best.chunks.length).flatMap((c) => c.keys), script[line] ?? []).precision >= 1 - 1e-9;
+        if (!best || rest || (!longPause && m.f1 > best.f1 + (n > best.chunks.length ? 0.08 : 0))) best = { chunks: group, line, coverage: m.coverage, f1: m.f1 };
       }
     }
     const min = best && isTakeOf(first, best.line) ? MATCH_MIN.take : MATCH_MIN.free;

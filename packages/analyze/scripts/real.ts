@@ -6,7 +6,7 @@ import type { Transcript, Word } from '@kilo/edl';
 import { readPcm16 } from '../src/silence.js';
 import { keys } from '../src/text.js';
 import type { Transcriber } from '../src/transcribe.js';
-import { WHISPER_SCRIPT, whisperOptionsFromEnv, whisperTranscriber, type WhisperOptions } from '../src/whisper.js';
+import { WHISPER_SCRIPT, runWhisperScript, whisperOptionsFromEnv, whisperTranscriber, type WhisperOptions, type WhisperRaw } from '../src/whisper.js';
 import { PKG, REPO, findFixtures, scoreFixture, type FixtureScore } from './scoring.js';
 
 /**
@@ -28,35 +28,32 @@ export interface WhisperStats {
 }
 
 /**
- * The whisper provider with its transcripts cached on disk, keyed on the audio, the model,
- * the prompt and the script, so re-scoring after a decider change does not re-transcribe.
+ * The whisper provider with Whisper's raw output cached on disk, keyed on the audio, the
+ * model, the prompt and the script, so re-scoring after an analysis change does not
+ * re-transcribe. Everything after the script (filler flags, edge refinement) runs every time.
  */
 export function cachedWhisper(opts: WhisperOptions = whisperOptionsFromEnv(), stats?: WhisperStats): Transcriber {
-  const inner = whisperTranscriber(opts);
+  const run = runWhisperScript(opts);
   const script = existsSync(WHISPER_SCRIPT) ? readFileSync(WHISPER_SCRIPT) : Buffer.alloc(0);
-  return {
-    name: 'whisper',
-    async transcribe(input) {
-      const audio = await readFile(input.audioPath);
-      const key = createHash('sha1').update(audio).update(opts.model).update(String(opts.prompt)).update(script).digest('hex').slice(0, 20);
-      const file = join(WHISPER_CACHE, `${key}.json`);
-      if (stats) stats.files++;
-      if (existsSync(file)) {
-        if (stats) stats.cached++;
-        const t = JSON.parse(readFileSync(file, 'utf8')) as Transcript;
-        return { ...t, clipId: input.clipId };
-      }
-      const t0 = Date.now();
-      const t = await inner.transcribe(input);
-      if (stats) {
-        stats.wallSec += (Date.now() - t0) / 1000;
-        stats.audioSec += input.durationSec;
-      }
-      await mkdir(WHISPER_CACHE, { recursive: true });
-      writeFileSync(file, JSON.stringify(t));
-      return t;
-    },
-  };
+  return whisperTranscriber(opts, async (input) => {
+    const audio = await readFile(input.audioPath);
+    const key = createHash('sha1').update(audio).update(opts.model).update(String(opts.prompt)).update(script).digest('hex').slice(0, 20);
+    const file = join(WHISPER_CACHE, `${key}.json`);
+    if (stats) stats.files++;
+    if (existsSync(file)) {
+      if (stats) stats.cached++;
+      return JSON.parse(readFileSync(file, 'utf8')) as WhisperRaw;
+    }
+    const t0 = Date.now();
+    const raw = await run(input);
+    if (stats) {
+      stats.wallSec += (Date.now() - t0) / 1000;
+      stats.audioSec += input.durationSec;
+    }
+    await mkdir(WHISPER_CACHE, { recursive: true });
+    writeFileSync(file, JSON.stringify(raw));
+    return raw;
+  });
 }
 
 // ---- extra measures ------------------------------------------------------------------
@@ -138,7 +135,18 @@ export function transcriptQuality(score: FixtureScore, manifest: RealManifest): 
   return q;
 }
 
+export interface ClipEvent {
+  clip: string;
+  text: string;
+  start: number;
+  end: number;
+  /** Loudest 20 ms of the removed part of the kept unit, dB over the local room tone. */
+  overRoomDb: number;
+}
+
 export interface CutSound {
+  /** Every stretch of a kept unit (aligner times) that the edit removes, with how loud it is. */
+  clipEvents: ClipEvent[];
   boundaries: number;
   /** Keep/cut boundaries where the kept side's 20 ms next to the cut is sound (>= 15 dB over room tone). */
   throughSound: string[];
@@ -152,7 +160,7 @@ export interface CutSound {
  * kept side of every keep/cut boundary.
  */
 export function cutSound(score: FixtureScore, manifest: RealManifest): CutSound {
-  const out: CutSound = { boundaries: 0, throughSound: [], margins: [] };
+  const out: CutSound = { clipEvents: [], boundaries: 0, throughSound: [], margins: [] };
   manifest.clips.forEach((mc, i) => {
     const ic = score.ingested[i]!;
     const pcm = readPcm16(readFileSync(ic.audioPath));
@@ -170,6 +178,27 @@ export function cutSound(score: FixtureScore, manifest: RealManifest): CutSound 
     const floor = frames[Math.floor(frames.length * 0.1)] ?? -90;
     const segs = score.edl.segments.filter((s) => s.clipId === ic.info.id);
     const keptUnits = mc.units.filter((u) => u.kind === 'speech' && u.keep);
+    // Local room tone: the quietest tenth of 20 ms levels within 3 s.
+    const localFloor = (t: number) => {
+      const xs: number[] = [];
+      for (let x = Math.max(0, t - 3); x + 0.02 <= Math.min(pcm.samples.length / sr, t + 3); x += 0.02) xs.push(level(x, x + 0.02));
+      xs.sort((a, b) => a - b);
+      return xs[Math.floor(xs.length * 0.1)] ?? floor;
+    };
+    for (const u of keptUnits) {
+      let t = u.start;
+      const removed: Array<[number, number]> = [];
+      for (const sg of segs.filter((x) => x.keep && x.end > u.start && x.start < u.end).sort((a, b) => a.start - b.start)) {
+        if (sg.start > t + 1e-3) removed.push([t, Math.min(sg.start, u.end)]);
+        t = Math.max(t, sg.end);
+      }
+      if (t < u.end - 1e-3) removed.push([t, u.end]);
+      for (const [a, b] of removed) {
+        let loud = -Infinity;
+        for (let x = a; x < b; x += 0.01) loud = Math.max(loud, level(x, Math.min(b, x + 0.02)));
+        out.clipEvents.push({ clip: mc.name, text: u.text, start: a, end: b, overRoomDb: loud - localFloor((a + b) / 2) });
+      }
+    }
     for (let k = 1; k < segs.length; k++) {
       const a = segs[k - 1]!;
       const b = segs[k]!;
@@ -267,9 +296,17 @@ export function formatReal(rs: RealResult[], label: string, verbose = false): st
     `Word timing against the aligner, matched words: start error p50 ${ms(quant(startErr, 0.5))} ms, p90 ${ms(quant(startErr, 0.9))} ms; end error p50 ${ms(quant(rs.flatMap((r) => r.quality.endErr), 0.5))} ms, p90 ${ms(quant(rs.flatMap((r) => r.quality.endErr), 0.9))} ms.`,
     `Kept audio between a kept unit's aligned edge and the cut beside it: min ${ms(quant(margins, 0))} ms, p10 ${ms(quant(margins, 0.1))} ms, median ${ms(quant(margins, 0.5))} ms; under 30 ms: ${margins.filter((m) => m < 0.03).length} of ${margins.length}.`,
   );
+  const events = rs.flatMap((r) => r.sound.clipEvents);
+  const band = (lo: number, hi: number) => events.filter((e) => e.overRoomDb >= lo && e.overRoomDb < hi).length;
+  lines.push(
+    `Removed stretches of kept units (aligner times): ${events.length}, ${events.reduce((n, e) => n + e.end - e.start, 0).toFixed(2)} s in all. ` +
+      `Loudest 20 ms of what was removed, over the local room tone: under 6 dB (room tone: the aligner's edge is past the sound) ${band(-Infinity, 6)}; ` +
+      `6-15 dB (a faint tail) ${band(6, 15)}; 15 dB or more (speech) ${band(15, Infinity)}.`,
+  );
   const details = rs.flatMap((r) => [
     ...r.score.clippedDetail,
     ...r.score.retakeDetail,
+    ...r.sound.clipEvents.map((e) => `${e.clip}: removed ${e.start.toFixed(3)}-${e.end.toFixed(3)} of kept "${e.text.slice(0, 50)}": loudest ${e.overRoomDb.toFixed(0)} dB over room tone`),
     ...(verbose ? [...r.score.missedCuts, ...r.sound.throughSound.map((s) => `cut in sound: ${s}`)] : []),
   ].map((d) => `  ${r.score.id}: ${d}`));
   if (details.length) lines.push('', 'Details:', ...details);

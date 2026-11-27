@@ -226,19 +226,67 @@ function chunkClip(cw: ClipWords, punctuated: boolean): Piece[] {
   return pieces;
 }
 
+/**
+ * A word written as trailing off or broken off ("upon...", "bam-"): speech-to-text (Whisper
+ * especially) writes an abandoned line this way, so it ends the utterance without finishing it.
+ */
+export function trailsOff(text: string): boolean {
+  return /(\.\.\.|…|[-–—])["')\]]*$/.test(text.trim());
+}
+
 export function isComplete(words: readonly ClipWord[], punctuated: boolean): boolean {
   const content = words.filter((w) => !w.filler);
   const last = content[content.length - 1];
   if (!last) return false;
+  if (trailsOff(last.text)) return false;
   if (punctuated) return endsSentence(last.text);
   return content.length >= 3 && !DANGLING.has(key(last.text));
+}
+
+/**
+ * A sentence that runs on into an abandoned start of a later line ("..., said the watchman,
+ * wants to..." then, up to three utterances on, "Wants to come out"): the trailing words that
+ * line opens with become an utterance of their own, so the abandoned start can be cut on its own.
+ */
+function splitRunOnStarts(all: Array<{ cw: ClipWords; p: Piece }>): Array<{ cw: ClipWords; p: Piece }> {
+  const out: Array<{ cw: ClipWords; p: Piece }> = [];
+  for (let i = 0; i < all.length; i++) {
+    const cur = all[i]!;
+    const words = cur.p.words;
+    const last = words[words.length - 1];
+    if (cur.p.offScript || !last || !trailsOff(last.text)) {
+      out.push(cur);
+      continue;
+    }
+    const ka = words.map((w) => (w.filler ? '' : key(w.text)));
+    let at = -1;
+    // The line it starts may come a little later ("..., wants to..." / another line / "Wants to come out").
+    for (const next of all.slice(i + 1, i + 4).filter((x) => !x.p.offScript)) {
+      const kb = next.p.words.filter((w) => !w.filler).map((w) => key(w.text));
+      for (let k = Math.min(6, words.length - 1, kb.length); k >= 2 && at < 0; k--) {
+        const from = words.length - k;
+        const tail = ka.slice(from);
+        if (tail.some((x) => !x) || tail.join(' ') !== kb.slice(0, k).join(' ')) continue;
+        const before = words[from - 1]!;
+        if (endsClause(before.text) || endsSentence(before.text) || words[from]!.start - before.end >= 0.2) at = from;
+      }
+      if (at >= 0) break;
+    }
+    if (at < 0) out.push(cur);
+    else {
+      out.push({ cw: cur.cw, p: { ...cur.p, words: words.slice(0, at) } });
+      out.push({ cw: cur.cw, p: { ...cur.p, words: words.slice(at) } });
+    }
+  }
+  return out;
 }
 
 export function buildChunks(clipWords: readonly ClipWords[]): Chunk[] {
   const punctuated = clipWords.some((cw) => hasPunctuation(cw.words));
   const chunks: Chunk[] = [];
-  for (const cw of clipWords) {
-    for (const p of chunkClip(cw, punctuated)) {
+  const pieces = splitRunOnStarts(clipWords.flatMap((cw) => chunkClip(cw, punctuated).map((p) => ({ cw, p }))));
+  for (const { cw, p } of pieces) {
+    {
       if (!p.words.length) continue;
       const content = p.words.filter((w) => !w.filler);
       chunks.push({

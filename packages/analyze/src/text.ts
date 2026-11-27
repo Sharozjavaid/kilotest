@@ -27,6 +27,8 @@ const CONTRACTIONS: Record<string, string> = {
   "we're": 'we', "we've": 'we', "they're": 'they', "that's": 'that', "there's": 'there', "here's": 'here',
   "what's": 'what', "don't": 'do', "doesn't": 'does', "didn't": 'did', "can't": 'can', "won't": 'will',
   "isn't": 'is', "let's": 'let', "link's": 'link',
+  // Titles speech-to-text abbreviates and a script may spell out ("Mr. North" / "mister north").
+  mr: 'mister', mrs: 'missus', dr: 'doctor',
 };
 
 /** A comparison key for one token: lowercased, contractions folded, plural s dropped. */
@@ -46,8 +48,13 @@ export function keys(text: string): string[] {
   return tokens(text).map(key).filter(Boolean);
 }
 
+/** Titles written with a full stop that never end a sentence ("Mr. North"). */
+const TITLE_ABBREVIATIONS = new Set(['mr.', 'mrs.', 'ms.', 'dr.', 'st.', 'mt.', 'prof.', 'sr.', 'jr.', 'vs.', 'messrs.']);
+
 export function endsSentence(text: string): boolean {
-  return /[.!?…]["')\]]*$/.test(text.trim());
+  const t = text.trim();
+  if (TITLE_ABBREVIATIONS.has(t.toLowerCase().replace(/^["'(\[]+/, ''))) return false;
+  return /[.!?…]["')\]]*$/.test(t);
 }
 
 export function endsClause(text: string): boolean {
