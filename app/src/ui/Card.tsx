@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
-import { color, radius, shadow } from './tokens';
+import { View, type StyleProp, type ViewStyle } from 'react-native';
+import { radius } from './tokens';
 import { PressableScale } from './PressableScale';
-import { GlassSurface } from './GlassSurface';
+import { makeStyles, useTheme } from './theme';
 import type { HapticKind } from './haptics';
 
 export interface CardProps {
@@ -16,26 +16,28 @@ export interface CardProps {
   gap?: number;
   /** Drop the soft blue shadow (cards that sit flat in the mock-up). */
   flat?: boolean;
-  /**
-   * Draw the card as glass (`GlassSurface`: Liquid Glass on iOS 26+, blur on older iOS and
-   * web, the translucent surface on Android) instead of the white-80% surface. Default false.
-   */
-  glass?: boolean;
   onPress?: () => void;
-  /** Haptic on press (tappable cards). Default `light`. */
+  /** Haptic on press (tappable cards). Default none. */
   haptic?: HapticKind | false;
   accessibilityLabel?: string;
   accessibilityHint?: string;
   testID?: string;
 }
 
-/** Glass surface: white at 80%, hairline border, soft blue shadow, radius 20. Tappable cards shrink slightly on press. */
-export function Card({ children, style, padding = 16, paddingHorizontal, gap, flat, glass, onPress, haptic = 'light', accessibilityLabel, accessibilityHint, testID }: CardProps) {
+const useStyles = makeStyles((t) => ({
+  card: { backgroundColor: t.color.surface, borderWidth: 1, borderColor: t.color.hairline, borderRadius: radius.card },
+}));
+
+/**
+ * Content card (design brief 5.2): `surface` fill, 1px `hairline`, `shadow.surface` (none in
+ * dark), radius 20, padding 16. Content, so never glass. Tappable cards use `press` (0.98).
+ */
+export function Card({ children, style, padding = 16, paddingHorizontal, gap, flat, onPress, haptic = false, accessibilityLabel, accessibilityHint, testID }: CardProps) {
+  const t = useTheme();
+  const s = useStyles();
   // Longhands only: mixing `padding` with `paddingHorizontal` resolves differently on web.
   const pad: ViewStyle = { paddingTop: padding, paddingBottom: padding, paddingLeft: paddingHorizontal ?? padding, paddingRight: paddingHorizontal ?? padding };
-  const base: StyleProp<ViewStyle> = [glass ? styles.glassCard : styles.card, !flat && shadow.surface, pad, { gap }, style];
-  // Glass is a layer behind the content, so the card keeps its own layout and padding.
-  const background = glass ? <GlassSurface radius={radius.card} style={StyleSheet.absoluteFill} pointerEvents="none" /> : null;
+  const base: StyleProp<ViewStyle> = [s.card, !flat && t.shadow.surface, pad, { gap }, style];
   if (onPress) {
     return (
       <PressableScale
@@ -48,25 +50,13 @@ export function Card({ children, style, padding = 16, paddingHorizontal, gap, fl
         testID={testID}
         style={base}
       >
-        {background}
         {children}
       </PressableScale>
     );
   }
   return (
     <View style={base} testID={testID}>
-      {background}
       {children}
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: color.surface,
-    borderWidth: 1,
-    borderColor: color.hairline,
-    borderRadius: radius.card,
-  },
-  glassCard: { borderRadius: radius.card },
-});

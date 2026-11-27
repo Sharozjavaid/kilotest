@@ -1,5 +1,10 @@
-import { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, View, type DimensionValue, type StyleProp, type ViewStyle } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Platform, StyleSheet, View, type DimensionValue, type StyleProp, type ViewStyle } from 'react-native';
+import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useColors } from './theme';
+import { useShimmer } from './motion';
+import { distances } from './motionPresets';
 import { router } from 'expo-router';
 import { errorMessage, isKiloApiError } from '@/api/errors';
 import { color, radius, space } from './tokens';
@@ -8,8 +13,46 @@ import { Icon, type IconName } from './Icon';
 import { PillButton } from './PillButton';
 import { Card } from './Card';
 
-/** A pulsing placeholder block in the track colour. */
-export function Skeleton({ width = '100%', height = 16, radius: r = radius.sm, style }: { width?: DimensionValue; height?: number; radius?: number; style?: StyleProp<ViewStyle> }) {
+type SkeletonProps = { width?: DimensionValue; height?: number; radius?: number; style?: StyleProp<ViewStyle> };
+
+/**
+ * A placeholder block in the track colour. Native: the brief's `shimmer` (a highlight band 40%
+ * wide, white at 45%, sweeping every 1400 ms on the UI thread; still under Reduce Motion).
+ * Web: the opacity pulse it always had.
+ */
+export function Skeleton(props: SkeletonProps) {
+  return Platform.OS === 'web' ? <SkeletonPulse {...props} /> : <SkeletonShimmer {...props} />;
+}
+
+function SkeletonShimmer({ width = '100%', height = 16, radius: r = radius.sm, style }: SkeletonProps) {
+  const c = useColors();
+  const t = useShimmer();
+  const [w, setW] = useState(0);
+  const band = Math.max(1, w * distances.shimmerBand);
+  const sweep = useAnimatedStyle(() => ({ transform: [{ translateX: -band + t.value * (w + band) }] }), [w, band]);
+  return (
+    <View
+      style={[{ width, height, borderRadius: r, backgroundColor: c.track, overflow: 'hidden' }, style]}
+      onLayout={(e) => {
+        const next = e.nativeEvent.layout.width;
+        if (Math.abs(next - w) > 0.5) setW(next);
+      }}
+    >
+      {w > 0 ? (
+        <Reanimated.View style={[{ position: 'absolute', top: 0, bottom: 0, left: 0, width: band }, sweep]} pointerEvents="none">
+          <LinearGradient
+            colors={['rgba(255,255,255,0)', `rgba(255,255,255,${distances.shimmerAlpha})`, 'rgba(255,255,255,0)']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={StyleSheet.absoluteFill}
+          />
+        </Reanimated.View>
+      ) : null}
+    </View>
+  );
+}
+
+function SkeletonPulse({ width = '100%', height = 16, radius: r = radius.sm, style }: SkeletonProps) {
   const opacity = useRef(new Animated.Value(0.6)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -44,11 +87,12 @@ export function SkeletonRows({ count = 3 }: { count?: number }) {
 /** An error with the message and a retry button. */
 export function ErrorState({ error, onRetry, title = "Couldn't load this" }: { error: unknown; onRetry?: () => void; title?: string }) {
   // Gone for good (deleted, or a wrong link): trying again cannot help, going home can.
+  const c = useColors();
   const gone = isKiloApiError(error) && error.isNotFound;
   const heading = gone ? "This isn't here" : title;
   return (
     <Card gap={12} padding={24} style={styles.center} accessibilityLabel={heading} testID={gone ? 'not-found' : 'error-state'}>
-      <Icon name="alert" size={28} color={color.cut} />
+      <Icon name="alert" size={28} color={c.cut} />
       <Text variant="bodyLg" center>
         {heading}
       </Text>
@@ -76,10 +120,11 @@ export function EmptyState({
   body: string;
   action?: { label: string; onPress: () => void };
 }) {
+  const c = useColors();
   return (
     <Card gap={10} padding={24} style={styles.center}>
-      <View style={styles.emptyIcon}>
-        <Icon name={icon} size={24} color={color.accent} />
+      <View style={[styles.emptyIcon, { backgroundColor: c.chipOn }]}>
+        <Icon name={icon} size={24} color={c.accent} />
       </View>
       <Text variant="bodyLg" center>
         {title}

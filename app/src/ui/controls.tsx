@@ -1,28 +1,45 @@
-import { useEffect, useState } from 'react';
-import { Platform, StyleSheet, View, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native';
-import Animated, { interpolateColor, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
-import { color, radius, size } from './tokens';
+import { useEffect } from 'react';
+import { Platform, View } from 'react-native';
+import Animated, { Easing, cancelAnimation, interpolateColor, useAnimatedProps, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import { useReducedMotionSetting } from './a11y';
+import Svg, { Circle } from 'react-native-svg';
+import { size } from './tokens';
 import { Text } from './type';
 import { PressableScale } from './PressableScale';
-import { prefersReducedMotion } from './a11y';
-import { animateTo } from './motion';
-import { motionConfig } from './motionPresets';
+import { makeStyles, useColors } from './theme';
+import { useMotionValue } from './motion';
+import { motionHaptics } from './motionPresets';
+
+export { SegmentedControl, type Segment, type SegmentedControlProps } from './SegmentedControl';
 
 /**
- * Native (iOS, Android) controls move on the UI thread: the switch knob, the segmented
- * control's selection and progress fills spring to their new place. Web keeps the static
+ * Native (iOS, Android) controls move on the UI thread: the switch knob and progress fills
+ * follow their value with the brief's `select` and `progress` motions. Web keeps the static
  * rendering it always had (the browser end-to-end suite drives it).
  */
 const native = Platform.OS !== 'web';
 
-/** Animates a shared value to `target` with a named preset whenever `target` changes (skips the first render). */
-function useAnimatedTarget(target: number, preset: 'select' | 'progress') {
-  const v = useSharedValue(target);
-  useEffect(() => {
-    v.value = animateTo(target, motionConfig(preset, prefersReducedMotion()));
-  }, [target, preset, v]);
-  return v;
-}
+const useStyles = makeStyles((t) => ({
+  toggleHit: { minHeight: size.touch, justifyContent: 'center' },
+  track: { width: 50, height: 30, borderRadius: 15, padding: 3, justifyContent: 'center' },
+  knob: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#FFFFFF' },
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  stepButton: {
+    width: size.touch,
+    height: size.touch,
+    borderRadius: size.touch / 2,
+    borderWidth: 1,
+    borderColor: t.color.outline,
+    backgroundColor: t.color.fill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepGlyph: { fontSize: 20, lineHeight: 22 },
+  stepValue: { width: 28 },
+  progressTrack: { backgroundColor: t.color.track, overflow: 'hidden', flexDirection: 'row' },
+  stepBar: { flexDirection: 'row', gap: 4 },
+  stepPill: { flex: 1, height: 8, borderRadius: 4 },
+}));
 
 // ---- Toggle -----------------------------------------------------------------
 
@@ -37,14 +54,16 @@ export interface ToggleProps {
 
 const KNOB_TRAVEL = 50 - 24 - 3 * 2;
 
-/** 50 x 30 switch from the mock-up, inside a 44pt touch target. */
+/** 50 x 30 switch from the mock-up, inside a 44pt touch target. The knob moves with `select`. */
 export function Toggle({ value, onValueChange, accessibilityLabel, disabled, testID }: ToggleProps) {
+  const s = useStyles();
+  const c = useColors();
   return (
     <PressableScale
       onPress={() => onValueChange(!value)}
       disabled={disabled}
       motion="chip"
-      haptic="selection"
+      haptic={motionHaptics.select}
       restingOpacity={disabled ? 0.4 : 1}
       accessibilityRole="switch"
       accessibilityLabel={accessibilityLabel}
@@ -52,13 +71,13 @@ export function Toggle({ value, onValueChange, accessibilityLabel, disabled, tes
       aria-checked={value}
       testID={testID}
       hitSlop={7}
-      style={styles.toggleHit}
+      style={s.toggleHit}
     >
       {native ? (
         <ToggleTrackNative value={value} />
       ) : (
-        <View style={[styles.track, { backgroundColor: value ? color.accent : color.toggleOff, alignItems: value ? 'flex-end' : 'flex-start' }]}>
-          <View style={styles.knob} />
+        <View style={[s.track, { backgroundColor: value ? c.accent : c.toggleOff, alignItems: value ? 'flex-end' : 'flex-start' }]}>
+          <View style={s.knob} />
         </View>
       )}
     </PressableScale>
@@ -66,79 +85,15 @@ export function Toggle({ value, onValueChange, accessibilityLabel, disabled, tes
 }
 
 function ToggleTrackNative({ value }: { value: boolean }) {
-  const on = useAnimatedTarget(value ? 1 : 0, 'select');
-  const track = useAnimatedStyle(() => ({ backgroundColor: interpolateColor(on.value, [0, 1], [color.toggleOff, color.accent]) }));
+  const s = useStyles();
+  const c = useColors();
+  const on = useMotionValue(value ? 1 : 0, 'select');
+  const track = useAnimatedStyle(() => ({ backgroundColor: interpolateColor(on.value, [0, 1], [c.toggleOff, c.accent]) }), [c]);
   const knob = useAnimatedStyle(() => ({ transform: [{ translateX: on.value * KNOB_TRAVEL }] }));
   return (
-    <Animated.View style={[styles.track, track]}>
-      <Animated.View style={[styles.knob, knob]} />
+    <Animated.View style={[s.track, track]}>
+      <Animated.View style={[s.knob, knob]} />
     </Animated.View>
-  );
-}
-
-// ---- SegmentedControl -------------------------------------------------------
-
-export interface Segment<T extends string> {
-  value: T;
-  label: string;
-}
-
-export interface SegmentedControlProps<T extends string> {
-  segments: readonly Segment<T>[];
-  value: T;
-  onChange: (value: T) => void;
-  accessibilityLabel: string;
-  style?: StyleProp<ViewStyle>;
-}
-
-const SEG_PAD = 4;
-const SEG_GAP = 4;
-
-/** Ink-filled selected segment on a glass track (mock-up "Kind of video"). On native the ink slides between segments. */
-export function SegmentedControl<T extends string>({ segments, value, onChange, accessibilityLabel, style }: SegmentedControlProps<T>) {
-  const index = Math.max(0, segments.findIndex((s) => s.value === value));
-  return (
-    <View style={[styles.segTrack, style]} accessibilityRole="radiogroup" accessibilityLabel={accessibilityLabel}>
-      {native ? <SegmentIndicator index={index} count={segments.length} /> : null}
-      {segments.map((s) => {
-        const selected = s.value === value;
-        return (
-          <PressableScale
-            key={s.value}
-            onPress={() => onChange(s.value)}
-            motion="chip"
-            haptic={selected ? false : 'selection'}
-            accessibilityRole="radio"
-            accessibilityLabel={s.label}
-            accessibilityState={{ selected, checked: selected }}
-            // react-native-web does not turn accessibilityState into aria-checked; say it directly.
-            aria-checked={selected}
-            style={[styles.seg, selected && !native && styles.segSelected]}
-          >
-            <Text variant="body" weight={selected ? 600 : 500} tone={selected ? 'white' : 'muted'} style={styles.segText} numberOfLines={1}>
-              {s.label}
-            </Text>
-          </PressableScale>
-        );
-      })}
-    </View>
-  );
-}
-
-/** The sliding ink pill behind the selected segment. Measures the track once per size change. */
-function SegmentIndicator({ index, count }: { index: number; count: number }) {
-  const [trackWidth, setTrackWidth] = useState(0);
-  const pos = useAnimatedTarget(index, 'select');
-  const segWidth = count > 0 && trackWidth > 0 ? (trackWidth - SEG_PAD * 2 - SEG_GAP * (count - 1)) / count : 0;
-  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: pos.value * (segWidth + SEG_GAP) }] }), [segWidth]);
-  const onLayout = (e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
-    if (Math.abs(w - trackWidth) > 0.5) setTrackWidth(w);
-  };
-  return (
-    <View style={StyleSheet.absoluteFill} onLayout={onLayout} pointerEvents="none">
-      {segWidth > 0 ? <Animated.View style={[styles.segIndicator, { width: segWidth }, slide]} /> : null}
-    </View>
   );
 }
 
@@ -154,10 +109,11 @@ export interface StepperProps {
 }
 
 export function Stepper({ value, min, max, onChange, noun }: StepperProps) {
+  const s = useStyles();
   return (
-    <View style={styles.stepper} accessibilityRole="adjustable" accessibilityLabel={noun} accessibilityValue={{ min, max, now: value }}>
+    <View style={s.stepper} accessibilityRole="adjustable" accessibilityLabel={noun} accessibilityValue={{ min, max, now: value }}>
       <StepButton label={`Fewer ${noun}`} glyph="−" disabled={value <= min} onPress={() => onChange(Math.max(min, value - 1))} />
-      <Text variant="button" weight={600} style={styles.stepValue} center>
+      <Text variant="button" weight={600} style={s.stepValue} center tabular>
         {value}
       </Text>
       <StepButton label={`More ${noun}`} glyph="+" disabled={value >= max} onPress={() => onChange(Math.min(max, value + 1))} />
@@ -166,19 +122,20 @@ export function Stepper({ value, min, max, onChange, noun }: StepperProps) {
 }
 
 function StepButton({ label, glyph, disabled, onPress }: { label: string; glyph: string; disabled: boolean; onPress: () => void }) {
+  const s = useStyles();
   return (
     <PressableScale
       onPress={onPress}
       disabled={disabled}
       motion="icon"
-      haptic="selection"
+      haptic={motionHaptics.select}
       restingOpacity={disabled ? 0.4 : 1}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
-      style={styles.stepButton}
+      style={s.stepButton}
     >
-      <Text variant="body" style={styles.stepGlyph}>
+      <Text variant="body" style={s.stepGlyph}>
         {glyph}
       </Text>
     </PressableScale>
@@ -190,104 +147,129 @@ function StepButton({ label, glyph, disabled, onPress }: { label: string; glyph:
 export interface ProgressBarProps {
   /** 0..1 */
   value: number;
+  /** 6 on cards, 3 in rows and the preview link. */
   height?: number;
   accessibilityLabel?: string;
+  /** `cut` when failed or offline. */
   tone?: 'accent' | 'cut';
 }
 
+/**
+ * Progress bar (design brief 5.6). On native the fill is full width and scales on X from the
+ * left with the `progress` motion (450 ms; a transform, so no layout per frame); it never runs
+ * backwards. Web draws the static width.
+ */
 export function ProgressBar({ value, height = 6, accessibilityLabel, tone = 'accent' }: ProgressBarProps) {
+  const s = useStyles();
+  const c = useColors();
   const pct = Math.round(Math.min(1, Math.max(0, value)) * 100);
-  const fill = tone === 'cut' ? color.cut : color.accent;
+  const fill = tone === 'cut' ? c.cut : c.accent;
   return (
     <View
       accessibilityRole="progressbar"
       accessibilityLabel={accessibilityLabel}
       accessibilityValue={{ min: 0, max: 100, now: pct }}
-      style={[styles.progressTrack, { height, borderRadius: height / 2 }]}
+      style={[s.progressTrack, { height, borderRadius: height / 2 }]}
     >
-      {native ? (
-        <ProgressFillNative pct={pct} height={height} fill={fill} />
-      ) : (
-        <View style={{ width: `${pct}%`, height, borderRadius: height / 2, backgroundColor: fill }} />
-      )}
+      {native ? <ProgressFillNative fraction={pct / 100} height={height} fill={fill} /> : <View style={{ width: `${pct}%`, height, borderRadius: height / 2, backgroundColor: fill }} />}
     </View>
   );
 }
 
+function ProgressFillNative({ fraction, height, fill }: { fraction: number; height: number; fill: string }) {
+  const p = useMotionValue(fraction, 'progress');
+  const style = useAnimatedStyle(() => ({ transform: [{ scaleX: p.value }] }));
+  return <Animated.View style={[{ flex: 1, height, borderRadius: height / 2, backgroundColor: fill, transformOrigin: 'left' }, style]} />;
+}
+
+// ---- ProgressRing -----------------------------------------------------------
+
+export interface ProgressRingProps {
+  /** 0..1, or `null` for indeterminate (a 25% arc turning once a second). */
+  value: number | null;
+  /** 20 (accessory), 28 (rows), 44 (cards and export). */
+  size?: 20 | 28 | 44 | number;
+  tone?: 'accent' | 'cut';
+  accessibilityLabel?: string;
+}
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
 /**
- * A full-width fill slid left by the missing share: moving it is a transform (no layout per
- * frame), and its rounded right end stays round at any value.
+ * Progress ring (design brief 5.6): stroke 3, round caps, `track` behind and an `accent` arc
+ * from 12 o'clock clockwise, moving with `progress` (never backwards). Show the number next to
+ * it somewhere on screen.
  */
-function ProgressFillNative({ pct, height, fill }: { pct: number; height: number; fill: string }) {
-  const [width, setWidth] = useState(0);
-  const p = useAnimatedTarget(pct / 100, 'progress');
-  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: (p.value - 1) * width }] }), [width]);
+export function ProgressRing({ value, size: d = 28, tone = 'accent', accessibilityLabel }: ProgressRingProps) {
+  const c = useColors();
+  const stroke = 3;
+  const r = (d - stroke) / 2;
+  const circumference = 2 * Math.PI * r;
+  const indeterminate = value === null;
+  const fraction = indeterminate ? 0.25 : Math.min(1, Math.max(0, value));
+  const p = useMotionValue(fraction, 'progress', { allowBackwards: indeterminate });
+  const spin = useSpin(indeterminate);
+  const arc = useAnimatedProps(() => ({ strokeDashoffset: circumference * (1 - p.value) }), [circumference]);
+  const color = tone === 'cut' ? c.cut : c.accent;
   return (
     <View
-      style={StyleSheet.absoluteFill}
-      onLayout={(e) => {
-        const w = e.nativeEvent.layout.width;
-        if (Math.abs(w - width) > 0.5) setWidth(w);
-      }}
+      accessibilityRole="progressbar"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityValue={indeterminate ? undefined : { min: 0, max: 100, now: Math.round(fraction * 100) }}
+      style={{ width: d, height: d }}
     >
-      {width > 0 ? (
-        <Animated.View style={[{ width, height, borderRadius: height / 2, backgroundColor: fill }, slide]} />
-      ) : (
-        // Until the track is measured: the static fill, so the first frame is not empty.
-        <View style={{ width: `${pct}%`, height, borderRadius: height / 2, backgroundColor: fill }} />
-      )}
+      <Animated.View style={[{ width: d, height: d }, spin]}>
+        <Svg width={d} height={d}>
+          <Circle cx={d / 2} cy={d / 2} r={r} stroke={c.track} strokeWidth={stroke} fill="none" />
+          <AnimatedCircle
+            cx={d / 2}
+            cy={d / 2}
+            r={r}
+            stroke={color}
+            strokeWidth={stroke}
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={`${circumference} ${circumference}`}
+            animatedProps={arc}
+          />
+        </Svg>
+      </Animated.View>
     </View>
   );
+}
+
+/** One linear turn a second while `on`; still under Reduce Motion (the arc alone says "working"). */
+function useSpin(on: boolean) {
+  const turn = useSharedValue(0);
+  const reduced = useReducedMotionSetting();
+  useEffect(() => {
+    if (!on || reduced || !native) {
+      cancelAnimation(turn);
+      turn.value = 0;
+      return;
+    }
+    turn.value = 0;
+    turn.value = withRepeat(withTiming(1, { duration: 1000, easing: Easing.linear }), -1, false);
+    return () => cancelAnimation(turn);
+  }, [on, reduced, turn]);
+  return useAnimatedStyle(() => ({ transform: [{ rotate: `${-90 + turn.value * 360}deg` }] }));
 }
 
 /** One pill per step, filled up to `done` (the weekly goal bar). */
 export function StepBar({ done, total, accessibilityLabel }: { done: number; total: number; accessibilityLabel: string }) {
+  const s = useStyles();
+  const c = useColors();
   const steps = Math.max(1, total);
   return (
     <View
-      style={styles.stepBar}
+      style={s.stepBar}
       accessibilityRole="progressbar"
       accessibilityLabel={accessibilityLabel}
       accessibilityValue={{ min: 0, max: steps, now: Math.min(done, steps) }}
     >
       {Array.from({ length: steps }, (_, i) => (
-        <View key={i} style={[styles.stepPill, { backgroundColor: i < done ? color.accent : color.track }]} />
+        <View key={i} style={[s.stepPill, { backgroundColor: i < done ? c.accent : c.track }]} />
       ))}
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  toggleHit: { minHeight: size.touch, justifyContent: 'center' },
-  track: { width: 50, height: 30, borderRadius: 15, padding: 3, justifyContent: 'center' },
-  knob: { width: 24, height: 24, borderRadius: 12, backgroundColor: color.white },
-  segTrack: {
-    flexDirection: 'row',
-    backgroundColor: color.surface,
-    borderWidth: 1,
-    borderColor: color.hairline,
-    borderRadius: radius.lg,
-    padding: SEG_PAD,
-    gap: SEG_GAP,
-  },
-  seg: { flex: 1, height: size.touch, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
-  segSelected: { backgroundColor: color.ink },
-  segIndicator: { position: 'absolute', top: SEG_PAD, left: SEG_PAD, height: size.touch, borderRadius: radius.md, backgroundColor: color.ink },
-  segText: { fontSize: 14 },
-  stepper: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  stepButton: {
-    width: size.touch,
-    height: size.touch,
-    borderRadius: size.touch / 2,
-    borderWidth: 1,
-    borderColor: color.outline,
-    backgroundColor: color.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepGlyph: { fontSize: 20, lineHeight: 22 },
-  stepValue: { width: 28 },
-  progressTrack: { backgroundColor: color.track, overflow: 'hidden', flexDirection: 'row' },
-  stepBar: { flexDirection: 'row', gap: 6 },
-  stepPill: { flex: 1, height: 8, borderRadius: 4 },
-});

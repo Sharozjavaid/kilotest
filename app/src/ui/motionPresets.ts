@@ -1,9 +1,12 @@
+import type { HapticKind } from './haptics';
+
 /**
- * Every spring and duration in the app, in one place. Pure data (no Reanimated import) so
- * the choices can be tested; `motion.ts` turns them into Reanimated animations.
+ * The motion set of `docs/design/ios-redesign.md` section 6: every spring, duration, easing and
+ * haptic in the app, in one place. Pure data (no Reanimated import) so the choices can be
+ * tested; `motion.ts` turns them into Reanimated animations and layout animations.
  *
- * Springs use stiffness/damping/mass (Reanimated 4 `withSpring`). As a guide: damping ratio
- * = damping / (2 * sqrt(stiffness * mass)); 1 settles without overshoot, lower bounces.
+ * Springs are Reanimated 4 `withSpring` configs (mass, damping, stiffness). Timings carry an
+ * easing name from `easings` (cubic-bezier control points).
  */
 
 export interface Spring {
@@ -14,60 +17,92 @@ export interface Spring {
   overshootClamping?: boolean;
 }
 
+export type EasingName = keyof typeof easings;
+
 export interface Timing {
   duration: number;
+  easing?: EasingName;
 }
 
-/** Named springs. */
+/** Cubic-bezier control points. */
+export const easings = {
+  /** Most things arriving or changing. */
+  standard: [0.2, 0.8, 0.2, 1],
+  /** Things leaving. */
+  exit: [0.4, 0, 1, 1],
+  /** Progress fills and rings. */
+  progress: [0.25, 0.1, 0.25, 1],
+  linear: [0, 0, 1, 1],
+} as const satisfies Record<string, readonly [number, number, number, number]>;
+
+/** The springs of the motion set. */
 export const springs = {
-  /** Finger down: quick, no bounce, so the control answers at once. */
-  pressIn: { stiffness: 700, damping: 42, mass: 0.6, overshootClamping: true },
-  /** Finger up: a little life on the way back. */
-  pressOut: { stiffness: 420, damping: 20, mass: 0.6 },
-  /** A selection moving: segment indicator, toggle knob, selected chip. */
-  select: { stiffness: 520, damping: 34, mass: 0.8 },
-  /** Things arriving on screen. */
-  appear: { stiffness: 260, damping: 26, mass: 1 },
-  /** Rows sliding to make room in a list. */
-  list: { stiffness: 320, damping: 32, mass: 1 },
-  /** A small pop when something succeeds (check mark, "Posted"). */
-  success: { stiffness: 380, damping: 12, mass: 0.7 },
-  /** Progress fills: settle without overshooting past the real value. */
-  progress: { stiffness: 140, damping: 24, mass: 1, overshootClamping: true },
-  /** Sheets and panels. */
-  sheet: { stiffness: 300, damping: 30, mass: 1 },
+  /** `press`: scale down on press-in, back on release. */
+  press: { mass: 0.5, damping: 18, stiffness: 420 },
+  /** `select`: segment thumb, chip fill, toggle knob, scrub knob (settles in about 250 ms). */
+  select: { mass: 0.8, damping: 22, stiffness: 320 },
+  /** `listInsert` and the layout shift of `listRemove`. */
+  list: { mass: 0.7, damping: 20, stiffness: 260 },
+  /** `success`: the pop after the check draws. */
+  success: { mass: 0.6, damping: 12, stiffness: 260 },
+  /** `toast` in. */
+  toast: { mass: 0.7, damping: 24, stiffness: 300 },
+  /** `sheetIn`: Kilo's own bottom panels only (welcome). */
+  sheetIn: { mass: 0.9, damping: 26, stiffness: 240 },
+  /** `record`: the record button's inner circle to rounded square and back. */
+  record: { mass: 0.6, damping: 16, stiffness: 300 },
 } as const satisfies Record<string, Spring>;
 
-export type SpringName = keyof typeof springs;
+/** Durations (ms) and distances (pt) of the timed motions. */
+export const timings = {
+  cutFill: { duration: 160, easing: 'standard' },
+  cutStrike: { duration: 200, easing: 'standard' },
+  numberRoll: { duration: 240, easing: 'standard' },
+  appear: { duration: 240, easing: 'standard' },
+  listRemove: { duration: 160, easing: 'exit' },
+  progress: { duration: 450, easing: 'progress' },
+  successCheck: { duration: 260, easing: 'standard' },
+  toastOut: { duration: 180, easing: 'exit' },
+  countdownIn: { duration: 300, easing: 'standard' },
+  countdownOut: { duration: 200, easing: 'standard' },
+  shimmer: { duration: 1400, easing: 'linear' },
+  shake: { duration: 240, easing: 'linear' },
+  /** What a moving or scaling motion becomes under Reduce Motion: a short cross-fade. */
+  reducedFade: { duration: 150, easing: 'standard' },
+} as const satisfies Record<string, Timing>;
 
-/** Durations for the few things that should not spring. */
-export const durations = {
-  /** Cross-fades and the Reduce Motion replacement for movement. */
-  fade: 180,
-  /** Leaving: faster than arriving. */
-  exit: 140,
-  /** Stagger between list items appearing together. */
-  stagger: 30,
+export const distances = {
+  appearY: 8,
+  appearStagger: 35,
+  /** Only the first eight items of a list stagger. */
+  appearStaggerMax: 8,
+  listScaleFrom: 0.97,
+  successPop: 1.06,
+  toastInY: 20,
+  toastOutY: 8,
+  sheetInY: 40,
+  countdownFrom: 1.25,
+  shimmerBand: 0.4,
+  shimmerAlpha: 0.45,
+  shakeX: [0, -6, 6, -3, 0] as readonly number[],
 } as const;
 
-/** How far a control shrinks under the finger, by kind. */
+/** How far a control shrinks under the finger, by kind. Buttons 0.97, cards and rows 0.98. */
 export const pressScales = {
-  /** Primary and secondary pill buttons. */
-  button: 0.96,
-  /** Round icon buttons and chips: small things move more to be seen. */
-  icon: 0.9,
-  chip: 0.94,
-  /** Cards: large, so a small change reads as a lot. */
+  button: 0.97,
+  icon: 0.97,
+  chip: 0.97,
   card: 0.98,
-  /** List rows: barely, and mostly through opacity. */
-  row: 0.985,
-  /** Tiles on Home. */
-  tile: 0.97,
+  row: 0.98,
+  tile: 0.98,
 } as const;
 
 export type PressKind = keyof typeof pressScales;
 
-/** Opacity while pressed, by kind. The values the components used before motion (web keeps only this). */
+/**
+ * Opacity while pressed, by kind: what the controls showed before motion. Web keeps only
+ * this; on native it is the Reduce Motion replacement for the scale.
+ */
 export const pressOpacities: Record<PressKind, number> = {
   button: 0.85,
   icon: 0.6,
@@ -80,48 +115,126 @@ export const pressOpacities: Record<PressKind, number> = {
 export interface PressMotion {
   /** Scale while pressed (1 = none). */
   scale: number;
-  /** Opacity while pressed. */
+  /** Opacity while pressed (1 = none). */
   opacity: number;
   pressIn: Spring | Timing;
   pressOut: Spring | Timing;
 }
 
 /**
- * What a press does for a kind of control. Under Reduce Motion nothing changes size: the
- * press shows as a quick opacity change only, which is not motion.
+ * What a press does: a spring scale with no dimming; under Reduce Motion no change in size,
+ * only a cross-fade of 150 ms to the old pressed opacity and back.
  */
 export function pressMotion(kind: PressKind, reduceMotion: boolean): PressMotion {
   if (reduceMotion) {
-    // Rows already read through opacity; others get a slightly stronger dim to make up for
-    // the missing scale.
-    const opacity = Math.min(pressOpacities[kind], 0.75);
-    return { scale: 1, opacity, pressIn: { duration: 0 }, pressOut: { duration: durations.fade } };
+    return { scale: 1, opacity: pressOpacities[kind], pressIn: { duration: 0 }, pressOut: timings.reducedFade };
   }
-  return { scale: pressScales[kind], opacity: pressOpacities[kind], pressIn: springs.pressIn, pressOut: springs.pressOut };
+  return { scale: pressScales[kind], opacity: 1, pressIn: springs.press, pressOut: springs.press };
 }
 
-export type MotionName = 'press' | 'select' | 'appear' | 'list' | 'success' | 'progress' | 'sheet';
+/** The 13 named custom motions (the 14th row of the spec, page and sheet transitions, is native). */
+export type MotionName =
+  | 'press'
+  | 'select'
+  | 'cutToggle'
+  | 'appear'
+  | 'listInsert'
+  | 'listRemove'
+  | 'progress'
+  | 'success'
+  | 'toast'
+  | 'sheetIn'
+  | 'record'
+  | 'countdown'
+  | 'shimmer'
+  | 'shake';
 
 /**
- * The animation config for a named motion: its spring, or under Reduce Motion a short
- * timing (fades) or none at all (movement jumps to the end).
+ * The animation config of a named motion. Under Reduce Motion: translate and scale motions
+ * become cross-fades of 150 ms; progress and the record button jump to their value; stagger,
+ * shimmer, pop and shake are off (`motionEnabled`).
  */
 export function motionConfig(name: MotionName, reduceMotion: boolean): Spring | Timing {
-  if (!reduceMotion) return name === 'press' ? springs.pressOut : springs[name];
+  if (reduceMotion) {
+    switch (name) {
+      case 'progress':
+      case 'record':
+      case 'shimmer':
+      case 'shake':
+      case 'success':
+        return { duration: 0 };
+      case 'cutToggle':
+        // A colour cross-fade, not movement: it stays as it is.
+        return timings.cutFill;
+      default:
+        return timings.reducedFade;
+    }
+  }
   switch (name) {
-    // Fades stay, shortened: they carry meaning (something arrived) without movement.
-    case 'appear':
-    case 'list':
-      return { duration: durations.fade };
-    // Progress still has to reach its value; it gets there without travelling.
-    case 'progress':
     case 'press':
+      return springs.press;
     case 'select':
+      return springs.select;
+    case 'cutToggle':
+      return timings.cutFill;
+    case 'appear':
+      return timings.appear;
+    case 'listInsert':
+      return springs.list;
+    case 'listRemove':
+      return timings.listRemove;
+    case 'progress':
+      return timings.progress;
     case 'success':
-    case 'sheet':
-      return { duration: 0 };
+      return springs.success;
+    case 'toast':
+      return springs.toast;
+    case 'sheetIn':
+      return springs.sheetIn;
+    case 'record':
+      return springs.record;
+    case 'countdown':
+      return timings.countdownIn;
+    case 'shimmer':
+      return timings.shimmer;
+    case 'shake':
+      return timings.shake;
   }
 }
+
+/** Motions that are switched off entirely under Reduce Motion (their state shows without them). */
+export function motionEnabled(_name: 'stagger' | 'shimmer' | 'pop' | 'shake', reduceMotion: boolean): boolean {
+  return !reduceMotion;
+}
+
+/** Delay for the n-th item of a list appearing together: 35 ms apart, first eight only, none under Reduce Motion. */
+export function staggerDelay(index: number, reduceMotion: boolean): number {
+  if (reduceMotion || index <= 0) return 0;
+  return Math.min(index, distances.appearStaggerMax) * distances.appearStagger;
+}
+
+/** The haptic of each moment in the spec. Only these; never on scroll or press-in. */
+export const motionHaptics = {
+  /** A primary call to action committed (press released on it). Every other press: none. */
+  primaryPress: 'light',
+  /** A value changed in a Kilo-drawn control (native controls already play it). */
+  select: 'selection',
+  /** A line cut. */
+  cut: 'light',
+  /** A cut line put back. */
+  restore: 'soft',
+  /** A destructive delete, after the confirm. */
+  remove: 'warning',
+  /** A long task finished (export, batch created). */
+  success: 'success',
+  toastError: 'error',
+  recordStart: 'medium',
+  recordStop: 'light',
+  countdownTick: 'selection',
+  countdownGo: 'medium',
+  /** The shake of a refused input. */
+  shake: 'error',
+} as const satisfies Record<string, HapticKind>;
 
 export function isSpring(c: Spring | Timing): c is Spring {
   return 'stiffness' in c;

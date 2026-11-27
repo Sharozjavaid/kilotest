@@ -2,7 +2,7 @@ import type { SFSymbol } from 'sf-symbols-typescript';
 import type { IconName } from './Icon';
 
 /**
- * The one mapping from Kilo's icon names to SF Symbols. iOS draws the SF Symbol; every other
+ * The one mapping (tab and menu symbols follow the design brief, section 3) from Kilo's icon names to SF Symbols. iOS draws the SF Symbol; every other
  * platform draws the line icon of the same name (`Icon.tsx`). `fill` is the selected or
  * emphasised form where one exists (tab bar, a toggled button).
  *
@@ -11,7 +11,7 @@ import type { IconName } from './Icon';
  */
 export const SF_SYMBOLS: Record<IconName, { sf: SFSymbol; fill?: SFSymbol }> = {
   settings: { sf: 'slider.horizontal.3' },
-  upload: { sf: 'icloud.and.arrow.up', fill: 'icloud.and.arrow.up.fill' },
+  upload: { sf: 'photo.on.rectangle.angled' },
   camera: { sf: 'video', fill: 'video.fill' },
   chevronRight: { sf: 'chevron.right' },
   chevronLeft: { sf: 'chevron.left' },
@@ -19,9 +19,9 @@ export const SF_SYMBOLS: Record<IconName, { sf: SFSymbol; fill?: SFSymbol }> = {
   chevronDown: { sf: 'chevron.down' },
   play: { sf: 'play.fill' },
   pause: { sf: 'pause.fill' },
-  videos: { sf: 'play.rectangle.on.rectangle', fill: 'play.rectangle.on.rectangle.fill' },
+  videos: { sf: 'film.stack', fill: 'film.stack.fill' },
   broll: { sf: 'square.on.square', fill: 'square.fill.on.square.fill' },
-  styles: { sf: 'paintbrush', fill: 'paintbrush.fill' },
+  styles: { sf: 'slider.horizontal.3' },
   user: { sf: 'person.crop.circle', fill: 'person.crop.circle.fill' },
   download: { sf: 'square.and.arrow.down', fill: 'square.and.arrow.down.fill' },
   share: { sf: 'square.and.arrow.up', fill: 'square.and.arrow.up.fill' },
@@ -39,7 +39,8 @@ export const SF_SYMBOLS: Record<IconName, { sf: SFSymbol; fill?: SFSymbol }> = {
   mail: { sf: 'envelope', fill: 'envelope.fill' },
   trash: { sf: 'trash', fill: 'trash.fill' },
   flip: { sf: 'arrow.triangle.2.circlepath.camera', fill: 'arrow.triangle.2.circlepath.camera.fill' },
-  list: { sf: 'list.bullet' },
+  list: { sf: 'rectangle.stack', fill: 'rectangle.stack.fill' },
+  more: { sf: 'ellipsis' },
   bell: { sf: 'bell', fill: 'bell.fill' },
   search: { sf: 'magnifyingglass' },
 };

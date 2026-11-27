@@ -5,8 +5,10 @@
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/metro-runtime": "~58.0.17",
+    "@expo/ui": "~58.0.29",
     "@kilo/edl": "file:../packages/edl",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@shopify/flash-list": "2.3.2",
     "@supabase/supabase-js": "^2.119.2",
     "@tanstack/react-query": "^5.108.4",
     "expo": "~58.0.26",
@@ -80,6 +82,10 @@
     ],
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/src/$1"
-    }
+    },
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
+    ],
+    "resolver": "react-native-reanimated/jest/resolver"
   }
 }

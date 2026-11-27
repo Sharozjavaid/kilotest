@@ -34,6 +34,64 @@ export const color = {
   player: '#2B3038',
 } as const;
 
+/** Every colour token, by name. Light and dark sets have the same keys. */
+export type Palette = { [K in keyof typeof color]: string } & {
+  /** "White" fills that are content, not text: secondary pills on cards, off chips, step buttons. */
+  fill: string;
+  /** Text and glyphs on `accent` or the gloss. White in both modes. */
+  onAccent: string;
+  /** A pressed list row's background (shown at once, before the press motion). */
+  pressedRow: string;
+  /** Segmented control track and thumb (Android and web; iOS draws the native control). */
+  segTrack: string;
+  segThumb: string;
+  /** Selected chip fill (with `accent` text). */
+  chipOn: string;
+};
+
+/** The light set: `color` plus the semantic additions. */
+export const lightColors: Palette = {
+  ...color,
+  fill: '#FFFFFF',
+  onAccent: '#FFFFFF',
+  pressedRow: 'rgba(12,24,48,0.04)',
+  segTrack: 'rgba(12,24,48,0.06)',
+  segThumb: '#FFFFFF',
+  chipOn: color.skyTint,
+};
+
+/** The dark set (CONTRACTS section 6, "Dark mode"). Shadows are dropped in dark; borders carry the edges. */
+export const darkColors: Palette = {
+  ground: '#0A0F1A',
+  skyTint: '#11244D',
+  surface: 'rgba(28,34,48,0.85)',
+  surfaceStrong: 'rgba(28,34,48,0.92)',
+  white: '#FFFFFF',
+  ink: '#F2F5FA',
+  muted: '#9AA4B5',
+  accent: '#4C7DFF',
+  accentPressed: '#3A6AF0',
+  glossTop: '#3A72FF',
+  glossBottom: '#2257F0',
+  track: '#2A3346',
+  hairline: 'rgba(255,255,255,0.08)',
+  outline: 'rgba(255,255,255,0.16)',
+  cut: '#F0875A',
+  record: '#FF5A45',
+  cameraScrim: '#2B3038',
+  toggleOff: '#3A4458',
+  cutRowBorder: '#5A667A',
+  dropBorder: '#3A5A99',
+  dropFill: 'rgba(255,255,255,0.04)',
+  player: '#2B3038',
+  fill: '#1C2230',
+  onAccent: '#FFFFFF',
+  pressedRow: 'rgba(255,255,255,0.06)',
+  segTrack: 'rgba(255,255,255,0.08)',
+  segThumb: '#2A3346',
+  chipOn: '#11244D',
+};
+
 /** Vertical gradient of the screen ground: sky tint fading into ground at 36%. */
 export const groundGradient = {
   colors: [color.skyTint, color.ground, color.ground] as const,

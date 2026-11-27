@@ -1,7 +1,8 @@
 import { View, type StyleProp, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 import { useStableUrl } from '@/lib/stableUrl';
-import { color, radius } from './tokens';
+import { radius } from './tokens';
+import { useColors } from './theme';
 
 /**
  * Thumbnail with the track-colour placeholder of the mock-up (40 x 56 by default).
@@ -31,6 +32,7 @@ export function Thumb({
   onStale?: () => void;
 }) {
   const stable = useStableUrl(uri ?? null, cacheKey);
+  const color = useColors();
   return (
     <View style={[{ width, height, borderRadius: r, backgroundColor: color.track, overflow: 'hidden', flexShrink: 0 }, style]}>
       {stable.url ? <Image source={{ uri: stable.url }} style={{ width, height }} contentFit="cover" onError={() => {

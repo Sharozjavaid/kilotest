@@ -1,14 +1,27 @@
 import type { ReactNode } from 'react';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Platform, View, type StyleProp, type ViewStyle } from 'react-native';
 import { router } from 'expo-router';
-import { color, size } from './tokens';
+import { size } from './tokens';
 import { Text } from './type';
 import type { IconName } from './Icon';
 import { SymbolIcon } from './SymbolIcon';
 import { PressableScale } from './PressableScale';
-import { GlassSurface } from './GlassSurface';
-import { hasLiquidGlass } from './glass';
+import { Glass } from './Glass';
+import { makeStyles, useColors } from './theme';
 import type { HapticKind } from './haptics';
+
+const useStyles = makeStyles((t) => ({
+  header: { flexDirection: 'row', alignItems: 'center', gap: 8, height: size.touch },
+  back: { width: size.touch, height: size.touch, marginLeft: -12, alignItems: 'center', justifyContent: 'center' },
+  title: { flex: 1 },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  rowText: { flex: 1, gap: 2 },
+  divider: { borderTopWidth: 1, borderTopColor: t.color.hairline },
+  section: { paddingBottom: 4 },
+  iconButton: { width: size.touch, height: size.touch, borderRadius: size.touch / 2, alignItems: 'center', justifyContent: 'center' },
+  iconPlain: { borderWidth: 1, borderColor: t.color.hairline, backgroundColor: t.color.surface },
+  iconGlass: { width: size.touch, height: size.touch, alignItems: 'center', justifyContent: 'center' },
+}));
 
 // ---- Header -----------------------------------------------------------------
 
@@ -25,17 +38,22 @@ export interface HeaderProps {
   size?: 'title' | 'titleSm';
 }
 
-/** 44pt header row: back chevron, title, muted meta. */
+/**
+ * 44pt in-content header row: back chevron, title, muted meta. On iOS route screens prefer
+ * `<Screen header={…}>`, which uses the native navigation bar instead; sheets and modals keep this.
+ */
 export function Header({ title, meta, right, onBack, noBack, size: titleSize = 'title' }: HeaderProps) {
+  const s = useStyles();
+  const c = useColors();
   const back = onBack ?? (() => (router.canGoBack() ? router.back() : router.replace('/')));
   return (
-    <View style={styles.header}>
+    <View style={s.header}>
       {noBack ? null : (
-        <PressableScale onPress={back} motion="icon" haptic={false} accessibilityRole="button" accessibilityLabel="Back" hitSlop={4} style={styles.back}>
-          <SymbolIcon name="chevronLeft" size={22} strokeWidth={2.2} />
+        <PressableScale onPress={back} motion="icon" accessibilityRole="button" accessibilityLabel="Back" hitSlop={4} style={s.back}>
+          <SymbolIcon name="chevronLeft" size={22} strokeWidth={2.2} color={c.ink} />
         </PressableScale>
       )}
-      <Text variant={titleSize} style={styles.title} numberOfLines={1} accessibilityRole="header">
+      <Text variant={titleSize} style={s.title} numberOfLines={1} accessibilityRole="header">
         {title}
       </Text>
       {right ?? (meta ? <Text variant="secondary" tone="muted">{meta}</Text> : null)}
@@ -61,12 +79,15 @@ export interface RowProps {
   left?: ReactNode;
   titleWeight?: 400 | 500 | 600;
   chevron?: boolean;
-  /** Haptic on press (tappable rows). Default `light`. */
+  /** Haptic on press. Default none (the brief keeps row taps silent). */
   haptic?: HapticKind | false;
   testID?: string;
 }
 
-/** A settings or list row: title, optional subtitle, something on the right. */
+/**
+ * A settings or list row: title, optional subtitle, something on the right. Tappable rows show
+ * the pressed background at once and the `press` scale (0.98) on native.
+ */
 export function Row({
   title,
   subtitle,
@@ -80,13 +101,15 @@ export function Row({
   left,
   titleWeight = 500,
   chevron,
-  haptic = 'light',
+  haptic = false,
   testID,
 }: RowProps) {
+  const s = useStyles();
+  const c = useColors();
   const content = (
     <>
       {left}
-      <View style={styles.rowText}>
+      <View style={s.rowText}>
         <Text variant="body" weight={titleWeight} numberOfLines={2}>
           {title}
         </Text>
@@ -97,21 +120,17 @@ export function Row({
         ) : null}
       </View>
       {right}
-      {chevron ? <SymbolIcon name="chevronRight" size={18} color={color.muted} /> : null}
+      {chevron ? <SymbolIcon name="chevronRight" size={Platform.OS === 'ios' ? 14 : 18} color={c.muted} /> : null}
     </>
   );
-  const rowStyle = [
-    styles.row,
-    { minHeight: minHeight ?? (subtitle ? 56 : 52) },
-    divider && styles.divider,
-    style,
-  ];
+  const rowStyle = [s.row, { minHeight: minHeight ?? (subtitle ? 56 : 52) }, divider && s.divider, style];
   if (onPress) {
     return (
       <PressableScale
         onPress={onPress}
         motion="row"
         haptic={haptic}
+        pressedBackgroundColor={c.pressedRow}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel ?? (subtitle ? `${title}, ${subtitle}` : title)}
         accessibilityHint={accessibilityHint}
@@ -131,16 +150,18 @@ export function Row({
 
 /** Muted section label above a list ("Ready to review"). */
 export function SectionLabel({ children }: { children: string }) {
+  const s = useStyles();
   return (
-    <Text variant="secondary" tone="muted" style={styles.section} accessibilityRole="header">
+    <Text variant="secondary" tone="muted" style={s.section} accessibilityRole="header">
       {children}
     </Text>
   );
 }
 
 /**
- * Small icon-only round button (44pt), glass or plain. With `glass` it is Liquid Glass on
- * iOS 26+ (interactive) and the translucent surface with a hairline elsewhere.
+ * Small icon-only round button (44pt). With `glass` (default) it is `<Glass kind="button">` on
+ * iOS (Liquid Glass on 26, interactive; blur before) and the translucent surface with a
+ * hairline elsewhere. Native nav-bar buttons are not this: use `Screen`'s `header.actions`.
  */
 export function IconButton({
   icon,
@@ -148,7 +169,8 @@ export function IconButton({
   onPress,
   glass = true,
   disabled,
-  haptic = 'light',
+  haptic = false,
+  testID,
 }: {
   icon: IconName;
   label: string;
@@ -156,9 +178,12 @@ export function IconButton({
   glass?: boolean;
   disabled?: boolean;
   haptic?: HapticKind | false;
+  testID?: string;
 }) {
-  const liquid = glass && hasLiquidGlass();
-  const glyph = <SymbolIcon name={icon} size={20} />;
+  const s = useStyles();
+  const c = useColors();
+  const native = glass && Platform.OS === 'ios';
+  const glyph = <SymbolIcon name={icon} size={Platform.OS === 'ios' ? 17 : 20} strokeWidth={Platform.OS === 'ios' ? 2.2 : 2} color={c.ink} />;
   return (
     <PressableScale
       onPress={onPress}
@@ -169,34 +194,16 @@ export function IconButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: !!disabled }}
-      style={[styles.iconButton, glass && !liquid && styles.iconGlass]}
+      testID={testID}
+      style={[s.iconButton, glass && !native && s.iconPlain]}
     >
-      {liquid ? (
-        <GlassSurface interactive radius={size.touch / 2} bordered={false} style={styles.iconLiquid}>
+      {native ? (
+        <Glass kind="button" interactive style={s.iconGlass}>
           {glyph}
-        </GlassSurface>
+        </Glass>
       ) : (
         glyph
       )}
     </PressableScale>
   );
 }
-
-const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', gap: 8, height: size.touch },
-  back: { width: size.touch, height: size.touch, marginLeft: -12, alignItems: 'center', justifyContent: 'center' },
-  title: { flex: 1 },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  rowText: { flex: 1, gap: 2 },
-  divider: { borderTopWidth: 1, borderTopColor: color.hairline },
-  section: { paddingBottom: 4 },
-  iconButton: {
-    width: size.touch,
-    height: size.touch,
-    borderRadius: size.touch / 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconGlass: { borderWidth: 1, borderColor: color.hairline, backgroundColor: color.surface },
-  iconLiquid: { width: size.touch, height: size.touch, alignItems: 'center', justifyContent: 'center' },
-});

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { IconName } from './Icon';
+import type { MenuItem } from './ActionMenu.types';
 
 /** A button in the screen header: a glass bar button on iOS 26, an icon button elsewhere. */
 export interface HeaderAction {
@@ -11,6 +12,8 @@ export interface HeaderAction {
   prominent?: boolean;
   disabled?: boolean;
   testID?: string;
+  /** Makes the button open this menu instead of calling `onPress` (native header menu on iOS, Kilo's popover elsewhere). */
+  menu?: MenuItem[];
 }
 
 /**

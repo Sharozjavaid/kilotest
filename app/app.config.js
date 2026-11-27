@@ -8,6 +8,19 @@
 // A store build (EAS profile `production`) must point at the real API and sign in with
 // Supabase. Without EXPO_PUBLIC_SUPABASE_URL the app falls back to development sign-in,
 // which a production server refuses, so such a build is stopped here instead of shipping.
+//
+// A local iOS build signed with a free Apple "Personal Team" cannot carry the Push
+// Notifications capability (expo-notifications adds `aps-environment`). With
+// KILO_IOS_PERSONAL_TEAM=1 the prebuild leaves that entitlement out; push is then off in that
+// build, everything else works. See README "iOS build".
+const { withEntitlementsPlist } = require('expo/config-plugins');
+
+const withoutPushEntitlement = (cfg) =>
+  withEntitlementsPlist(cfg, (c) => {
+    delete c.modResults['aps-environment'];
+    return c;
+  });
+
 module.exports = ({ config }) => {
   const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? '';
   if (process.env.EAS_BUILD_PROFILE === 'production') {
@@ -20,8 +33,8 @@ module.exports = ({ config }) => {
   const buildProperties = {
     android: { usesCleartextTraffic: cleartext },
   };
-  return {
-    ...config,
-    plugins: (config.plugins ?? []).map((p) => (p === 'expo-build-properties' ? ['expo-build-properties', buildProperties] : p)),
-  };
+  const plugins = (config.plugins ?? []).map((p) => (p === 'expo-build-properties' ? ['expo-build-properties', buildProperties] : p));
+  // First in the list: mods registered first run last, after expo-notifications has added the key.
+  if (process.env.KILO_IOS_PERSONAL_TEAM === '1') plugins.unshift(withoutPushEntitlement);
+  return { ...config, plugins };
 };

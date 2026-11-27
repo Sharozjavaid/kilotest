@@ -37,7 +37,8 @@ export type IconName =
   | 'flip'
   | 'list'
   | 'bell'
-  | 'search';
+  | 'search'
+  | 'more';
 
 export interface IconProps {
   name: IconName;
@@ -170,6 +171,14 @@ function renderIcon(name: IconName, c: Common, fill: string) {
         <>
           <Circle cx={11} cy={11} r={6.5} {...c} />
           <Path d="M16 16l4.5 4.5" {...c} />
+        </>
+      );
+    case 'more':
+      return (
+        <>
+          <Circle cx={5.5} cy={12} r={1.6} fill={fill} stroke="none" />
+          <Circle cx={12} cy={12} r={1.6} fill={fill} stroke="none" />
+          <Circle cx={18.5} cy={12} r={1.6} fill={fill} stroke="none" />
         </>
       );
     case 'bell':

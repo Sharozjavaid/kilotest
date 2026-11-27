@@ -3,6 +3,7 @@
 // and be allowed to resolve modules from there.
 const path = require('path');
 const { getDefaultConfig } = require('expo/metro-config');
+const { wrapWithReanimatedMetroConfig } = require('react-native-reanimated/metro-config');
 
 const projectRoot = __dirname;
 const edlRoot = path.resolve(projectRoot, '../packages/edl');
@@ -15,4 +16,6 @@ config.resolver.nodeModulesPaths = [
   path.resolve(edlRoot, 'node_modules'),
 ];
 
-module.exports = config;
+// Reanimated's wrapper only folds its own frames out of error stacks (worklets need no Metro
+// setup: babel-preset-expo adds the react-native-worklets plugin when the package is installed).
+module.exports = wrapWithReanimatedMetroConfig(config);

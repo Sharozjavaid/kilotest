@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { color, size } from '@/ui/tokens';
+import { size } from '@/ui/tokens';
+import { DEFAULT_SCREEN_APPEARANCE, resolveScheme, themeFor, useSystemScheme } from '@/ui/theme';
 import { Icon, type IconName } from '@/ui/Icon';
 import { Text } from '@/ui/type';
 
@@ -17,11 +18,18 @@ const TABS: Record<string, { label: string; icon: IconName }> = {
   you: { label: 'You', icon: 'user' },
 };
 
-/** 72pt glass tab bar from the mock-up: icon over a 12pt label, accent when active. */
+/**
+ * 72pt glass tab bar from the mock-up: icon over a 12pt label, accent when active. Web only
+ * (iOS and Android use the native tab bar). Follows the screens' appearance.
+ */
 export function KiloTabBar({ state, emitter, navigateToTab }: TabBarProps) {
   const insets = useSafeAreaInsets();
+  const color = themeFor(resolveScheme(DEFAULT_SCREEN_APPEARANCE, useSystemScheme())).color;
   return (
-    <View style={[styles.bar, { height: size.tabBar + insets.bottom, paddingBottom: insets.bottom }]} accessibilityRole="tablist">
+    <View
+      style={[styles.bar, { height: size.tabBar + insets.bottom, paddingBottom: insets.bottom, backgroundColor: color.surfaceStrong, borderTopColor: color.hairline }]}
+      accessibilityRole="tablist"
+    >
       {state.routes.map((route, i) => {
         const tab = TABS[route.name];
         if (!tab) return null;
@@ -55,9 +63,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    backgroundColor: 'rgba(255,255,255,0.85)',
     borderTopWidth: 1,
-    borderTopColor: color.hairline,
   },
   item: { minWidth: 72, minHeight: size.touch, alignItems: 'center', justifyContent: 'center', gap: 4 },
 });

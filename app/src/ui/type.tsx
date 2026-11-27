@@ -1,5 +1,6 @@
 import { Text as RNText, type TextProps as RNTextProps, type TextStyle, StyleSheet } from 'react-native';
-import { color, fontFamily, type Weight } from './tokens';
+import { fontFamily, type Weight } from './tokens';
+import { useColors } from './theme';
 
 /** Type scale taken from the mock-up. Body 15, secondary 13, label 12. */
 export const typeScale = {
@@ -37,25 +38,22 @@ export interface TextProps extends RNTextProps {
   tone?: 'ink' | 'muted' | 'accent' | 'cut' | 'white';
   strike?: boolean;
   center?: boolean;
+  /** Tabular figures, for numbers that change (lengths, timers, percentages). */
+  tabular?: boolean;
 }
 
-const toneColor = {
-  ink: color.ink,
-  muted: color.muted,
-  accent: color.accent,
-  cut: color.cut,
-  white: color.white,
-} as const;
-
-export function Text({ variant = 'body', weight, tone = 'ink', strike, center, style, ...rest }: TextProps) {
+/** Text in the theme's colours (`white` stays white: it is text on the accent or over video). */
+export function Text({ variant = 'body', weight, tone = 'ink', strike, center, tabular, style, ...rest }: TextProps) {
+  const c = useColors();
   return (
     <RNText
       {...rest}
       style={[
         typeStyle(variant, weight),
-        { color: toneColor[tone] },
+        { color: tone === 'white' ? c.white : c[tone] },
         strike && styles.strike,
         center && styles.center,
+        tabular && styles.tabular,
         style,
       ]}
     />
@@ -64,6 +62,7 @@ export function Text({ variant = 'body', weight, tone = 'ink', strike, center, s
 
 /** Lowercase "kilo", weight 700, letter-spacing -1.2 at 28px. */
 export function Wordmark({ size = 28 }: { size?: number }) {
+  const color = useColors();
   return (
     <RNText
       accessibilityRole="header"
@@ -78,4 +77,5 @@ export function Wordmark({ size = 28 }: { size?: number }) {
 const styles = StyleSheet.create({
   strike: { textDecorationLine: 'line-through' },
   center: { textAlign: 'center' },
+  tabular: { fontVariant: ['tabular-nums'] },
 });
