@@ -245,14 +245,25 @@ export function ensureTouchingFixtures(): string[] {
 
 const analyze = createAnalyze({ decider: 'heuristic', transcriber: fixtureTranscriber(), stock: null, log: () => {} });
 
+/**
+ * A cached ingest result is reused only if it is newer than its source and every file it
+ * points to still exists: a cache written from another checkout (a copy of the package made
+ * for a before/after comparison, since deleted) would otherwise send the scorer to missing files.
+ */
+function readCache<T>(infoPath: string, src: string): T | null {
+  if (!existsSync(infoPath) || statSync(infoPath).mtimeMs <= statSync(src).mtimeMs) return null;
+  const cached = JSON.parse(readFileSync(infoPath, 'utf8')) as T;
+  const paths = Object.values(cached as Record<string, unknown>).filter((v): v is string => typeof v === 'string' && v.startsWith('/'));
+  return paths.every((p) => existsSync(p)) ? cached : null;
+}
+
 /** Ingest with a cache keyed on the source file's mtime, so re-scoring does not re-encode. */
 async function cachedIngest(fixture: string, dir: string, clip: ManifestClip): Promise<IngestedClip> {
   const workDir = join(CACHE, fixture, clip.name);
   const infoPath = join(workDir, 'ingested.json');
   const src = join(dir, clip.file);
-  if (existsSync(infoPath) && statSync(infoPath).mtimeMs > statSync(src).mtimeMs) {
-    return JSON.parse(readFileSync(infoPath, 'utf8')) as IngestedClip;
-  }
+  const hit = readCache<IngestedClip>(infoPath, src);
+  if (hit) return hit;
   await mkdir(workDir, { recursive: true });
   const ingested = await analyze.ingestClip({
     clipId: `${fixture}-${clip.name}`,
@@ -270,9 +281,8 @@ async function cachedBroll(fixture: string, dir: string, b: Manifest['broll'][nu
   const workDir = join(CACHE, fixture, `broll-${i}`);
   const infoPath = join(workDir, 'ingested.json');
   const src = join(dir, b.file);
-  if (existsSync(infoPath) && statSync(infoPath).mtimeMs > statSync(src).mtimeMs) {
-    return JSON.parse(readFileSync(infoPath, 'utf8')) as IngestedBroll;
-  }
+  const hit = readCache<IngestedBroll>(infoPath, src);
+  if (hit) return hit;
   const r = await analyze.ingestBroll({ assetId: `b${i + 1}`, inputPath: src, workDir, source: 'user', filename: b.file.split('/').pop() });
   writeFileSync(infoPath, JSON.stringify(r));
   return r;
