@@ -194,9 +194,14 @@ function chunkClip(cw: ClipWords, punctuated: boolean): Piece[] {
       if (!boundedBefore || !boundedAfter) continue;
       const atStart = i === 0;
       if (atStart && after && !strong) continue; // "Wait, this part is good." is real speech
+      // A one-word entry ("again") that opens a sentence going on after it is that sentence's own
+      // first word ("Again, the rain came down..."): meta talk only when it stands on its own.
+      if (atStart && after && len === 1) continue;
       const cutAt = run.indexOf(first);
       const head = run.slice(0, cutAt);
-      if (strong && after && !atStart) {
+      // Meta talk that opens a run ("Let me start again, the trick is...") goes on its own; what
+      // follows it is judged on its own too, never swallowed into the aside.
+      if (strong && after) {
         // Meta talk mid-sentence: only the phrase goes; the rest is judged on its own.
         const endAt = run.indexOf(last) + 1;
         if (head.length) pieces.push({ words: head, offScript: false, interrupted: false });
@@ -254,16 +259,21 @@ function splitRunOnStarts(all: Array<{ cw: ClipWords; p: Piece }>): Array<{ cw: 
     const cur = all[i]!;
     const words = cur.p.words;
     const last = words[words.length - 1];
-    if (cur.p.offScript || !last || !trailsOff(last.text)) {
+    // Written as broken off ("wants to..."), or left open by a comma where speech-to-text ran a
+    // line on into the start of the next one ("...the messengers of Egypt, by the vigilance of
+    // Memnon," / "By the vigilance of Memnon, the churches were shut").
+    if (cur.p.offScript || !last || !(trailsOff(last.text) || endsClause(last.text))) {
       out.push(cur);
       continue;
     }
     const ka = words.map((w) => (w.filler ? '' : key(w.text)));
+    // A comma alone is weaker evidence than a broken-off word: it takes three words said again.
+    const minK = trailsOff(last.text) ? 2 : 3;
     let at = -1;
     // The line it starts may come a little later ("..., wants to..." / another line / "Wants to come out").
     for (const next of all.slice(i + 1, i + 4).filter((x) => !x.p.offScript)) {
       const kb = next.p.words.filter((w) => !w.filler).map((w) => key(w.text));
-      for (let k = Math.min(6, words.length - 1, kb.length); k >= 2 && at < 0; k--) {
+      for (let k = Math.min(6, words.length - 1, kb.length); k >= minK && at < 0; k--) {
         const from = words.length - k;
         const tail = ka.slice(from);
         if (tail.some((x) => !x) || tail.join(' ') !== kb.slice(0, k).join(' ')) continue;

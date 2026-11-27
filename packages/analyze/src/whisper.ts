@@ -1,11 +1,13 @@
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Transcript, type SilenceGap, type Word } from '@kilo/edl';
 import { ChildFailedError, mediaTimeoutMs, spawnChecked } from './proc.js';
 import { detectSilence, readPcm16, speechTimer } from './silence.js';
-import { endsClause, endsSentence } from './text.js';
+import { CHUNK_PAUSE_SEC } from './chunks.js';
+import { endsClause, endsSentence, key, lcs } from './text.js';
 import { cleanWords, type TranscribeInput, type Transcriber } from './transcribe.js';
 
 /**
@@ -25,9 +27,10 @@ export const WHISPER_SCRIPT = join(PKG, 'whisper', 'kilo_whisper.py');
 export const DEFAULT_WHISPER_VENV = join(PKG, '.work', 'whisper-venv');
 export const DEFAULT_WHISPER_CACHE_DIR = join(PKG, '.work', 'whisper-models');
 /**
- * base.en: the smallest model whose word timings and filler retention held up on the
- * real-speech recordings (fixtures/real/README.md); about 0.15 s of CPU per second of audio
- * on two threads.
+ * base.en: on the real-speech recordings (fixtures/real/README.md) it keeps the right take more
+ * often than small.en or large-v3-turbo (the bigger models tidy a repeated phrase into one copy
+ * more often), at about 0.1 s of CPU per second of audio on two threads for the first pass and
+ * 0.3-0.4 s with the second look. small.en and large-v3-turbo stay selectable (KILO_WHISPER_MODEL).
  */
 export const DEFAULT_WHISPER_MODEL = 'base.en';
 export const DEFAULT_WHISPER_THREADS = 2;
@@ -86,6 +89,8 @@ interface ScriptLine {
   words?: ScriptWord[];
   loadSec?: number;
   transcribeSec?: number;
+  /** CPU time of the script on this file, all threads. */
+  cpuSec?: number;
 }
 
 /** Parses the script's JSON lines: the last result, or a WhisperSetupError for a reported error. */
@@ -125,8 +130,54 @@ export function isLikelyHallucination(w: ScriptWord): boolean {
   return (w.probability < 0.1 && dur <= 0.2) || (w.probability < 0.25 && dur < 0.02) || !/[\p{L}\p{N}]/u.test(w.text);
 }
 
+/** Shorter than this, a word has no audio of its own. */
+const ZERO_LEN_SEC = 0.02;
+/** Letters per second no one speaks at: read speech runs at about 12-15, fast talk under 25. */
+const MAX_LETTERS_PER_SEC = 40;
+
+const letters = (t: string) => t.replace(/[^\p{L}\p{N}]/gu, '').length;
+
+/**
+ * Words Whisper wrote without hearing them, found by their times alone:
+ *
+ * - two or more words in a row with no duration: text Whisper finished at the end of a 30 s
+ *   window ("The sun, [as you see, tells quite another story...]" all at 29.98 s) and then wrote
+ *   again from the audio in the next window;
+ * - two or more unlikely words in a row (each under 0.6, mean under 0.5) packed into less time than
+ *   their letters take to say: an echo of the words before ("Christmas. This is Christmas." in
+ *   0.2 s).
+ *
+ * Returns the indices to drop. A single short word stays: Whisper gives real short words very
+ * little time now and then.
+ */
+export function inventedWords(words: readonly ScriptWord[]): Set<number> {
+  const drop = new Set<number>();
+  let i = 0;
+  while (i < words.length) {
+    let j = i;
+    while (j < words.length && words[j]!.end - words[j]!.start < ZERO_LEN_SEC) j++;
+    if (j - i >= 2) for (let k = i; k < j; k++) drop.add(k);
+    i = Math.max(i + 1, j);
+  }
+  // Packed runs: grow each run of unlikely words and test it as a whole.
+  for (let a = 0; a < words.length; a++) {
+    for (let b = a + 1; b < Math.min(words.length, a + 8); b++) {
+      const run = words.slice(a, b + 1);
+      if (run.some((w) => (w.probability ?? 1) >= 0.6)) break;
+      const p = run.reduce((n, w) => n + (w.probability ?? 1), 0) / run.length;
+      if (p >= 0.5) continue;
+      const span = run[run.length - 1]!.end - run[0]!.start;
+      const n = run.reduce((m, w) => m + letters(w.text), 0);
+      if (n >= 4 && span * MAX_LETTERS_PER_SEC < n) for (let k = a; k <= b; k++) drop.add(k);
+    }
+  }
+  return drop;
+}
+
 /** Turns the script's words into Kilo words: likely hallucinations and echoes dropped, fillers flagged by the shared lexicon, times cleaned. */
-export function whisperWords(words: readonly ScriptWord[], durationSec: number): Word[] {
+export function whisperWords(input: readonly ScriptWord[], durationSec: number): Word[] {
+  const invented = inventedWords(input);
+  const words = input.filter((_, i) => !invented.has(i));
   // An echo of the word before's ending, right after it ("border." "order.", or an unlikely
   // "Vladimir." "mirror."): one word Whisper wrote twice. It goes, and the word before ends
   // where the echo did. A likely repeat ("that, that place") is the speaker's and stays.
@@ -141,7 +192,12 @@ export function whisperWords(words: readonly ScriptWord[], durationSec: number):
     let overlap = 0;
     for (let k = 3; k <= Math.min(a.length, b.length); k++) if (a.endsWith(b.slice(0, k))) overlap = k;
     const unlikely = typeof w.probability === 'number' && w.probability < 0.35 && w.end - w.start <= 0.4;
-    const echo = (b.length >= 3 && a.length > b.length && a.endsWith(b)) || (overlap >= 3 && unlikely);
+    // Or a word that only rhymes with the one before, almost certainly not heard ("mortification."
+    // "presentation." at 2%): the long word's own ending, written again as another word.
+    let suffix = 0;
+    while (suffix < Math.min(a.length, b.length) && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) suffix++;
+    const unheard = typeof w.probability === 'number' && w.probability < 0.05 && w.end - w.start <= 0.4;
+    const echo = (b.length >= 3 && a.length > b.length && a.endsWith(b)) || (overlap >= 3 && unlikely) || (suffix >= 4 && unheard);
     if (prev && echo && w.start - prev.end < 0.05) {
       kept[kept.length - 1] = { ...prev, end: Math.max(prev.end, w.end) };
       continue;
@@ -166,6 +222,57 @@ export const MAX_END_EXTEND_SEC = 1;
 export const UNCONFIRMED_END_SEC = 0.1;
 /** A pause inside one reported word at least this long means Whisper stretched the word over it. */
 const INNER_PAUSE_SEC = 0.25;
+
+/** How far a word's end is leaned into the pause after it: its soft release runs on below the level silence detection settles at. */
+export const SOFT_END_SEC = 0.08;
+/** How far a word's start is leaned into the pause before it: a soft onset ("H", "wh") starts below that level too. */
+export const SOFT_START_SEC = 0.05;
+/**
+ * At the very start and end of a clip there is no pause to keep short and no word to run into, so
+ * the first word's start and the last word's end lean further, into at most half the lead-in or tail.
+ */
+export const CLIP_EDGE_LEAN_SEC = 0.2;
+/** Pauses shorter than this are inside a phrase: their edges are not leaned. */
+const LEAN_MIN_PAUSE_SEC = 0.25;
+/**
+ * Pause lengths the decider reads between words (chunks.ts: 0.2 s and 0.25 s around a restart or
+ * an aside, CHUNK_PAUSE_SEC 0.45 s between utterances; heuristic.ts: 0.4 s before a restart, 0.8 s,
+ * 1 s and 2 s inside a line). Leaning never takes a pause below one it reached, so the words fall
+ * into the same utterances either way.
+ */
+const DECIDER_PAUSES_SEC = [0.2, 0.25, 0.4, CHUNK_PAUSE_SEC, 0.8, 1, 2];
+
+/**
+ * The measured silences settle where the level is back within a few dB of the room tone, so a
+ * word edge moved onto one is where the sound is gone, not where the word is: a final consonant's
+ * release or a soft onset runs on a little below that level, and a forced aligner (or a listener)
+ * counts it as the word's. At a pause, a word's end is leaned SOFT_END_SEC into it and the next
+ * word's start SOFT_START_SEC, never past a third of the pause each, so cuts beside a pause keep
+ * that much more of the word. Only edges that sit on a silence move.
+ */
+export function leanIntoPauses(words: readonly Word[], gaps: readonly SilenceGap[], durationSec = Infinity): Word[] {
+  const out = words.map((w) => ({ ...w }));
+  const first = out[0];
+  const last = out[out.length - 1];
+  // Nothing is said before the first word or after the last: the silence beside each is lead-in or tail.
+  const lead = gaps.find((x) => Math.abs(x.end - (first?.start ?? -1)) < 1e-6);
+  const tail = gaps.find((x) => x.end <= durationSec + 1e-6 && Math.abs(x.start - (last?.end ?? -1)) < 1e-6);
+  if (first && lead) first.start = lead.end - Math.min(CLIP_EDGE_LEAN_SEC, (lead.end - lead.start) / 2);
+  if (last && tail) last.end = tail.start + Math.min(CLIP_EDGE_LEAN_SEC, (tail.end - tail.start) / 2);
+  for (const x of gaps) {
+    const len = x.end - x.start;
+    if (len < LEAN_MIN_PAUSE_SEC || x === lead || x === tail) continue;
+    // What the pause may lose: down to the longest decider threshold it reaches, at most a third each side.
+    const floor = Math.max(...DECIDER_PAUSES_SEC.filter((t) => t <= len + 1e-9));
+    const room = Math.max(0, len - floor - 0.005);
+    const share = Math.min(1, room / (SOFT_END_SEC + SOFT_START_SEC));
+    const before = out.filter((w) => Math.abs(w.end - x.start) < 1e-6).pop();
+    const after = out.find((w) => Math.abs(w.start - x.end) < 1e-6);
+    if (before && !out.some((w) => w !== before && w.start > before.end - 1e-9 && w.start < x.end - 1e-9)) before.end = x.start + Math.min(SOFT_END_SEC * share, len / 3);
+    if (after && !out.some((w) => w !== after && w.end > x.start + 1e-9 && w.end < after.start + 1e-9 && w !== before)) after.start = x.end - Math.min(SOFT_START_SEC * share, len / 3);
+  }
+  return out;
+}
 
 /**
  * Whisper's word times come from attention, not from the sound: on real speech they are
@@ -205,7 +312,10 @@ export function refineWordTimes(
       const last = inner[inner.length - 1]!;
       // The word is on the side with more speech.
       const sound = speechTime ?? ((a: number, b: number) => (b - a) - g.reduce((n, x) => n + Math.max(0, Math.min(b, x.end) - Math.max(a, x.start)), 0));
-      if (sound(last.end, w.end) > sound(w.start, first.start)) w.start = last.end;
+      // A sentence's first word that runs straight into the next word ("another. The [pause]
+      // next...") is said after the pause, with it.
+      const opensNext = i > 0 && endsSentence(words[i - 1]!.text) && /^\p{Lu}/u.test(w.text) && nextStart - w.end < 0.05;
+      if (opensNext || sound(last.end, w.end) > sound(w.start, first.start)) w.start = last.end;
       else w.end = first.start;
     }
     let s = inside(w.start);
@@ -261,6 +371,27 @@ export function refineWordTimes(
     const prev = out[i - 1]!;
     if (pause.start - prev.end <= MAX_END_EXTEND_SEC) prev.end = Math.max(prev.end, pause.start);
   }
+  // The first word of a restart that Whisper ran on into the pause before it ("Harry gave his
+  // farewells with Harry [pause] gave his farewells with deep..."): its end lay in the pause, the
+  // words after the pause carry on from it, and together they say the opening of what came before
+  // again. It is said after the pause, with the word after it.
+  const k = words.map((w) => key(w.text));
+  for (let i = 1; i + 2 < out.length; i++) {
+    const pause = endIn[i];
+    const w = out[i]!;
+    const next = out[i + 1]!;
+    if (!pause || pause.end - pause.start < 0.3 || next.start < pause.end - 0.05 || !k[i]) continue;
+    let restart = false;
+    for (let j = Math.max(0, i - 10); j < i && !restart; j++) restart = k[j] === k[i] && k[j + 1] === k[i + 1] && k[j + 2] === k[i + 2] && j + 2 < i;
+    if (!restart) continue;
+    const take = Math.min(w.end - w.start, (next.end - next.start) / 2);
+    w.start = next.start;
+    w.end = next.start + take;
+    next.start = w.end;
+    // The abandoned take before it now runs up to the pause.
+    const prev = out[i - 1]!;
+    if (pause.start - prev.end <= MAX_END_EXTEND_SEC) prev.end = Math.max(prev.end, pause.start);
+  }
   if (speechTime) {
     // A word with no speech under it, right before a word that starts after a pause: Whisper put
     // it in the pause ("None" in the silence, then "of" stretched over "None of"). It belongs
@@ -283,6 +414,8 @@ export function refineWordTimes(
 export interface WhisperRaw {
   language?: string;
   words: ScriptWord[];
+  /** CPU seconds (all threads) the script spent on the file, model load excluded. */
+  cpuSec?: number;
 }
 export type WhisperRunner = (input: TranscribeInput) => Promise<WhisperRaw>;
 
@@ -318,23 +451,251 @@ export function runWhisperScript(opts: WhisperOptions): WhisperRunner {
       throw err;
     }
     const result = parseWhisperOutput(stdout, opts);
-    return { ...(result.language ? { language: result.language } : {}), words: result.words ?? [] };
+    return {
+      ...(result.language ? { language: result.language } : {}),
+      words: result.words ?? [],
+      ...(typeof result.cpuSec === 'number' ? { cpuSec: result.cpuSec } : {}),
+    };
   };
 }
 
-/** The `whisper` transcriber: the script's words, fillers flagged, edges moved to the measured silences. */
+// ---- a second look at stretches Whisper got wrong ---------------------------------------
+
+/** A stretch of speech between pauses, as the audio measures it. */
+export interface SpeechIsland {
+  start: number;
+  end: number;
+  /** Seconds of plain speech in it. */
+  speechSec: number;
+}
+
+/** Pauses at least this long separate two islands: shorter ones are inside a phrase. */
+const ISLAND_PAUSE_SEC = 0.3;
+/** An island with less speech than this is a click or a breath. */
+const ISLAND_MIN_SPEECH_SEC = 0.08;
+
+/** The stretches of plain speech of a clip, split at pauses of ISLAND_PAUSE_SEC or more. */
+export function speechIslands(speechTime: (a: number, b: number) => number, durationSec: number, stepSec = 0.01): SpeechIsland[] {
+  const out: SpeechIsland[] = [];
+  let cur: SpeechIsland | null = null;
+  for (let t = 0; t < durationSec; t += stepSec) {
+    if (speechTime(t, t + stepSec) <= 0) continue;
+    if (cur && t - cur.end < ISLAND_PAUSE_SEC) {
+      cur.end = t + stepSec;
+      cur.speechSec += stepSec;
+    } else {
+      if (cur) out.push(cur);
+      cur = { start: t, end: t + stepSec, speechSec: stepSec };
+    }
+  }
+  if (cur) out.push(cur);
+  return out.filter((x) => x.speechSec >= ISLAND_MIN_SPEECH_SEC);
+}
+
+/** Slack around an island within which a word's middle still counts as in it. */
+const ISLAND_SLACK_SEC = 0.15;
+/** Below this share of the clip's own letters per second of speech, an island is missing words. */
+export const SPARSE_RATE = 0.5;
+/** Only a stretch with at least this much speech is looked at again: a shorter one's rate says little. */
+const SPARSE_MIN_SPEECH_SEC = 0.3;
+/** Letters per second of plain speech when a clip has too few transcribed islands to measure its own (read speech runs at 12-20). */
+const DEFAULT_PACE = 12;
+/** Sparse islands closer than this are one stretch ("Then [pause] darkness [pause] like death"). */
+const SPARSE_JOIN_SEC = 1;
+
+const midIn = (w: { start: number; end: number }, x: { start: number; end: number }) => {
+  const m = (w.start + w.end) / 2;
+  return m >= x.start - ISLAND_SLACK_SEC && m < x.end + ISLAND_SLACK_SEC;
+};
+
+/**
+ * Stretches of speech that hold far fewer written letters than they take to say, measured
+ * against the clip's own pace (the median letters per second of its islands): where Whisper wrote
+ * one copy of a phrase said twice ("All afternoon he [pause] All afternoon he sat in the dining
+ * room" as one sentence stretched over both), or left speech out ("Then darkness like death."
+ * said a third time, not written). Neighbouring sparse islands make one stretch, which must hold
+ * SPARSE_MIN_SPEECH_SEC of speech.
+ */
+export function sparseIslands(words: readonly { text: string; start: number; end: number }[], islands: readonly SpeechIsland[]): SpeechIsland[] {
+  const lettersIn = (x: SpeechIsland) => words.filter((w) => midIn(w, x)).reduce((n, w) => n + letters(w.text), 0);
+  // The clip's pace from the islands that have words: where Whisper wrote nothing for most of a
+  // clip (a whole 30 s window lost), the empty ones must not set it.
+  const rates = islands.filter((x) => x.speechSec >= 0.5 && lettersIn(x) > 0).map((x) => lettersIn(x) / x.speechSec).sort((a, b) => a - b);
+  const pace = rates.length >= 2 ? rates[Math.floor(rates.length / 2)]! : DEFAULT_PACE;
+  const sparse = islands.map((x) => lettersIn(x) < SPARSE_RATE * pace * x.speechSec);
+  const out: SpeechIsland[] = [];
+  let cur: SpeechIsland | null = null;
+  islands.forEach((x, i) => {
+    if (!sparse[i]) {
+      cur = null;
+      return;
+    }
+    if (cur && x.start - cur.end < SPARSE_JOIN_SEC) {
+      cur.end = x.end;
+      cur.speechSec += x.speechSec;
+    } else {
+      cur = { ...x };
+      out.push(cur);
+    }
+  });
+  return out.filter((x) => x.speechSec >= SPARSE_MIN_SPEECH_SEC);
+}
+
+/** A pause at least this long before a stretch that opens mid-sentence: the stretch may have lost its opening. */
+const CONTINUED_PAUSE_SEC = 0.6;
+
+/**
+ * Stretches that open mid-sentence after a long pause, after words that end no sentence ("..., so
+ * [1 s] that nor night nor sleep..."): where Whisper wrote a phrase said twice only once, the
+ * second take often loses its opening this way, its first words folded into the first take.
+ */
+export function continuedIslands(words: readonly { text: string; start: number; end: number }[], islands: readonly SpeechIsland[]): SpeechIsland[] {
+  const out: SpeechIsland[] = [];
+  for (let k = 1; k < islands.length; k++) {
+    const x = islands[k]!;
+    const prev = islands[k - 1]!;
+    if (x.start - prev.end < CONTINUED_PAUSE_SEC || x.speechSec < SPARSE_MIN_SPEECH_SEC) continue;
+    const first = words.find((w) => midIn(w, x));
+    // The word before it, in the island before or stretched into the pause.
+    const before = first ? words[words.indexOf(first) - 1] : undefined;
+    if (!first || !before || (before.start + before.end) / 2 < prev.start - ISLAND_SLACK_SEC) continue;
+    if (/^\p{Ll}/u.test(first.text.trim()) && !endsSentence(before.text)) out.push(x);
+  }
+  return out;
+}
+
+/** A word Whisper wrote for a stretch heard alone needs at least this probability: with little context it guesses. */
+const EXCERPT_MIN_PROBABILITY = 0.3;
+/** ... and at least this much time: the words it invents past the end of the speech get almost none. */
+const EXCERPT_MIN_WORD_SEC = 0.05;
+
+/** Room left around an island when it is transcribed on its own, at most (never into the next island). */
+const EXCERPT_MARGIN_SEC = 0.3;
+
+/** A 16-bit mono WAV of samples [a, b) of `pcm`. */
+export function wavExcerpt(pcm: { sampleRate: number; samples: Int16Array }, a: number, b: number): Buffer {
+  const i0 = Math.max(0, Math.round(a * pcm.sampleRate));
+  const i1 = Math.min(pcm.samples.length, Math.round(b * pcm.sampleRate));
+  const n = Math.max(0, i1 - i0);
+  const buf = Buffer.alloc(44 + 2 * n);
+  buf.write('RIFF', 0, 'ascii');
+  buf.writeUInt32LE(36 + 2 * n, 4);
+  buf.write('WAVE', 8, 'ascii');
+  buf.write('fmt ', 12, 'ascii');
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(pcm.sampleRate, 24);
+  buf.writeUInt32LE(pcm.sampleRate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write('data', 36, 'ascii');
+  buf.writeUInt32LE(2 * n, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(pcm.samples[i0 + i]!, 44 + 2 * i);
+  return buf;
+}
+
+/** Marks the runner calls that transcribe an excerpt of a clip, not the clip (for speed accounting). */
+export const EXCERPT_CLIP_SUFFIX = '#excerpt';
+
+/**
+ * The second look: each sparse island is transcribed on its own, with a little of the pause on
+ * either side, where Whisper cannot fold it into a neighbouring take. Its new words replace the
+ * old ones in it only when they say clearly more (at least a third more letters, and 4 or more):
+ * a stretch heard alone loses context, so it must earn its place.
+ */
+export async function secondLook(
+  input: TranscribeInput,
+  raw: readonly ScriptWord[],
+  pcm: { sampleRate: number; samples: Int16Array },
+  speechTime: (a: number, b: number) => number,
+  gaps: readonly SilenceGap[],
+  run: WhisperRunner,
+): Promise<ScriptWord[]> {
+  const islands = speechIslands(speechTime, input.durationSec);
+  // Judged on the words as they will be placed (edges moved to the measured silences).
+  const placed = refineWordTimes(whisperWords(raw, input.durationSec), gaps, input.durationSec, speechTime);
+  const sparse = [...sparseIslands(placed, islands), ...continuedIslands(placed, islands)]
+    .sort((p, q) => p.start - q.start)
+    .filter((x, i, all) => i === 0 || x.start >= all[i - 1]!.end - 1e-9);
+  if (!sparse.length) return [...raw];
+  let words = [...raw];
+  const dir = await mkdtemp(join(tmpdir(), 'kilo-whisper-'));
+  try {
+    for (const [n, x] of sparse.entries()) {
+      const prev = islands.filter((y) => y.end <= x.start + 1e-9).pop();
+      const next = islands.find((y) => y.start >= x.end - 1e-9);
+      const a = Math.max(prev ? prev.end : 0, x.start - EXCERPT_MARGIN_SEC);
+      const b = Math.min(next ? next.start : input.durationSec, x.end + EXCERPT_MARGIN_SEC);
+      const file = join(dir, `island-${n}.wav`);
+      await writeFile(file, wavExcerpt(pcm, a, b));
+      const again = await run({ clipId: `${input.clipId}${EXCERPT_CLIP_SUFFIX}`, audioPath: file, durationSec: b - a });
+      const fresh = again.words
+        .map((w) => ({ ...w, start: Math.min(b, w.start + a), end: Math.min(b, w.end + a) }))
+        // Heard alone, a stretch tempts Whisper to go on past what was said ("...all about it? All
+        // right, now I'm going to move forward."): only words with time of their own that start
+        // before the stretch's speech ends are taken.
+        .filter((w) => midIn(w, x) && w.start < x.end && w.end - w.start >= EXCERPT_MIN_WORD_SEC && (w.probability ?? 1) >= EXCERPT_MIN_PROBABILITY);
+      // And a trailing run of unlikely words goes ("...buried now. Now we're going to go.").
+      let t = fresh.length;
+      while (t > 0 && (fresh[t - 1]!.probability ?? 1) < 0.6) t--;
+      const tail = fresh.slice(t);
+      if (tail.length && tail.reduce((m, w) => m + (w.probability ?? 1), 0) / tail.length < 0.5) fresh.splice(t);
+      const kept = whisperWords(fresh, input.durationSec);
+      const old = words.filter((w) => midIn(w, x));
+      const had = whisperWords(old, input.durationSec).reduce((m, w) => m + letters(w.text), 0);
+      const has = kept.reduce((m, w) => m + letters(w.text), 0);
+      // Clearly more, or the old words and three or more besides ("so [pause] that nor night..."
+      // heard again as "Ye keep your watch in the eternal day so that nor night...").
+      const ok = kept.map((w) => key(w.text)).filter(Boolean);
+      const ko = whisperWords(old, input.durationSec).map((w) => key(w.text)).filter(Boolean);
+      const contains = ok.length >= ko.length + 3 && lcs(ok, ko) >= ko.length - 1;
+      if (!contains && (has < had + 4 || has < (4 / 3) * had)) continue;
+      words = [...words.filter((w) => !midIn(w, x)), ...fresh].sort((p, q) => p.start - q.start);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+  return words;
+}
+
+/** A word laid over silence: most of its span holds no speech, and very little does. */
+const OVER_SILENCE_SHARE = 0.15;
+const OVER_SILENCE_MAX_SPEECH_SEC = 0.15;
+/** ... and nothing is said for this long after it (or the clip ends). */
+const OVER_SILENCE_AFTER_SEC = 1;
+
+/**
+ * Drops a word Whisper laid over the silence after the last thing said ("another. The" with "The"
+ * stretched 1.3 s over room tone): almost none of its span is speech, and no word follows it soon.
+ * A word that does have a word right after it is moved, not dropped (refineWordTimes).
+ */
+export function dropWordsOverSilence(words: readonly ScriptWord[], speechTime: (a: number, b: number) => number, durationSec: number): ScriptWord[] {
+  return words.filter((w, i) => {
+    const len = w.end - w.start;
+    if (len < 0.3) return true;
+    const next = words[i + 1];
+    if (next && next.start - w.end < OVER_SILENCE_AFTER_SEC && next.start < durationSec) return true;
+    const sp = speechTime(w.start, w.end);
+    return !(sp <= OVER_SILENCE_MAX_SPEECH_SEC && sp <= OVER_SILENCE_SHARE * len);
+  });
+}
+
+/** The `whisper` transcriber: the script's words, a second look at stretches it got wrong, fillers flagged, edges moved to the measured silences. */
 export function whisperTranscriber(opts: WhisperOptions = whisperOptionsFromEnv(), run: WhisperRunner = runWhisperScript(opts)): Transcriber {
   return {
     name: 'whisper',
     async transcribe(input) {
       const raw = await run(input);
       const gaps = await detectSilence({ clipId: input.clipId, audioPath: input.audioPath });
-      const speechTime = speechTimer(readPcm16(await readFile(input.audioPath)));
+      const pcm = readPcm16(await readFile(input.audioPath));
+      const speechTime = speechTimer(pcm);
+      const words = dropWordsOverSilence(await secondLook(input, raw.words, pcm, speechTime, gaps, run), speechTime, input.durationSec);
       return Transcript.parse({
         clipId: input.clipId,
         language: (raw.language ?? 'en').slice(0, 2),
         durationSec: input.durationSec,
-        words: refineWordTimes(whisperWords(raw.words, input.durationSec), gaps, input.durationSec, speechTime),
+        words: leanIntoPauses(refineWordTimes(whisperWords(words, input.durationSec), gaps, input.durationSec, speechTime), gaps, input.durationSec),
       });
     },
   };

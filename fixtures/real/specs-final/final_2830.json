@@ -1,0 +1,83 @@
+{
+  "id": "final_2830",
+  "title": "Real speech, LibriSpeech speaker 2830 (M)",
+  "mode": "general",
+  "speaker": "2830",
+  "script": true,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 1.02,
+      "tail": 1.95,
+      "pieces": [
+        {
+          "utt": "2830-3980-0044",
+          "role": "line",
+          "gainDb": 0.1
+        },
+        {
+          "pause": 1.99
+        },
+        {
+          "utt": "2830-3980-0050",
+          "role": "line",
+          "gainDb": -0.8
+        },
+        {
+          "pause": 0.4
+        },
+        {
+          "utt": "2830-3980-0055",
+          "words": 6,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 1.16
+        },
+        {
+          "utt": "2830-3980-0055",
+          "role": "line",
+          "group": "g1",
+          "gainDb": -1.1
+        },
+        {
+          "pause": 0.52
+        },
+        {
+          "utt": "2830-3980-0057",
+          "role": "line",
+          "gainDb": 0.3
+        },
+        {
+          "pause": 2.46
+        },
+        {
+          "utt": "2830-3980-0060",
+          "role": "line",
+          "gainDb": 0.2
+        },
+        {
+          "pause": 0.56
+        },
+        {
+          "utt": "2830-3980-0063",
+          "role": "line",
+          "gainDb": 0.5
+        },
+        {
+          "pause": 0.48
+        },
+        {
+          "utt": "2830-3980-0070",
+          "role": "line",
+          "gainDb": 0.1
+        }
+      ]
+    }
+  ]
+}

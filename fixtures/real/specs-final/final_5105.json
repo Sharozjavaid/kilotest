@@ -1,0 +1,67 @@
+{
+  "id": "final_5105",
+  "title": "Real speech, LibriSpeech speaker 5105 (M)",
+  "mode": "general",
+  "speaker": "5105",
+  "script": false,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 1.12,
+      "tail": 0.53,
+      "pieces": [
+        {
+          "utt": "5105-28240-0005",
+          "role": "line",
+          "gainDb": 0
+        },
+        {
+          "pause": 3.78
+        },
+        {
+          "utt": "5105-28240-0013",
+          "role": "line",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 1.81
+        },
+        {
+          "utt": "5105-28240-0014",
+          "words": 3,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -1.1
+        },
+        {
+          "pause": 0.92
+        },
+        {
+          "utt": "5105-28240-0014",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.2
+        },
+        {
+          "pause": 2.02
+        },
+        {
+          "utt": "5105-28240-0016",
+          "role": "line",
+          "gainDb": -1
+        },
+        {
+          "pause": 4.79
+        },
+        {
+          "utt": "5105-28240-0019",
+          "role": "line",
+          "gainDb": -1
+        }
+      ]
+    }
+  ]
+}

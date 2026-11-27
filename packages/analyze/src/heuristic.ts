@@ -1,6 +1,6 @@
 import type { EditSettings, SegmentReason } from '@kilo/edl';
 import type { Chunk, ClipWords } from './chunks.js';
-import { ORDINALS, STOPWORDS, endsClause, fullSimilarity, keys, lineMatch, prefixSimilarity, readNumber } from './text.js';
+import { ORDINALS, STOPWORDS, endsClause, fullSimilarity, keys, lcs, lineMatch, prefixSimilarity, readNumber } from './text.js';
 
 /** What a decider says about one utterance. */
 export interface ChunkDecision {
@@ -48,8 +48,11 @@ export function sameLine(a: Chunk, b: Chunk, adjacent: boolean, gapSec: number):
   // The same start heard differently by speech-to-text ("Little thing was all very well..." /
   // "Loeffing was all very well..."): most of a longer abandoned start matches the line's start.
   if (!short.complete && !firstMatch && short.keys.length >= 4 && prefixSimilarity(short.keys, long.keys) >= 0.75) return true;
-  // A short abandoned start that restarts on the same word after a pause: "It's, it's really... um" / "It takes..."
-  if (!short.complete && firstMatch && short.keys.length <= 6 && adjacent && gapSec >= 0.4) return true;
+  // A short abandoned start that the next line restarts on the same word after a pause: "It's,
+  // it's really... um" / "It takes...". Only the earlier one can be the abandoned start: a fragment
+  // after a finished line that merely opens with the same word ("I obeyed." / "I declared
+  // myself quite willing [pause] for it was necessary") starts a line of its own.
+  if (!a.complete && short === a && firstMatch && a.keys.length <= 6 && adjacent && gapSec >= 0.4) return true;
   // An abandoned start that speech-to-text closed with a full stop ("Jam exclaimed, stretching his
   // neck." / "Jam exclaimed, stretching his neck and eyeing the dish."): said again at once, word
   // for word, and carried on. Only the earlier, shorter one can be the restart.
@@ -148,7 +151,13 @@ function diffRegions(a: readonly string[], b: readonly string[]): Array<{ a: str
  *
  * `between` is every utterance between the two in natural order.
  */
-export function separateLines(a: Chunk, b: Chunk, between: readonly Chunk[]): { separate: boolean; corrections: Chunk[] } {
+export function separateLines(
+  a: Chunk,
+  b: Chunk,
+  between: readonly Chunk[],
+  /** Utterances just before `a` and just after `b`, in natural order (for a repeated passage). */
+  around: { before: readonly Chunk[]; after: readonly Chunk[] } = { before: [], after: [] },
+): { separate: boolean; corrections: Chunk[] } {
   const subs = slotDifferences(a.keys, b.keys);
   const changed = new Set(subs.flatMap((s) => [...s.a, ...s.b]));
   const unlike = (c: Chunk) => fullSimilarity(c.keys, a.keys) < 0.5 && fullSimilarity(c.keys, b.keys) < 0.5;
@@ -156,9 +165,25 @@ export function separateLines(a: Chunk, b: Chunk, between: readonly Chunk[]): { 
   const ea = enumeration(a.keys);
   const eb = enumeration(b.keys);
   if (ea !== null && eb !== null) return ea === eb ? { separate: false, corrections } : { separate: true, corrections: [] };
-  const movedOn = between.some((c) => c.complete && !c.offScript && !c.fillerOnly && c.keys.length >= 3 && unlike(c) && !corrections.includes(c));
+  // A passage said twice ("I tried it yesterday. It set my brains on fire." twice over): what lies
+  // between two takes of one sentence is the rest of the first take of the passage when it is
+  // said again right after the second (or was said right before the first), so the speaker did
+  // not move on.
+  const content = (cs: readonly Chunk[]) => cs.filter((c) => !c.fillerOnly && !c.offScript);
+  const n = content(between).length;
+  const nearby = [...content(around.before).slice(-n), ...content(around.after).slice(0, n)];
+  const repeated = (c: Chunk) => c.keys.length >= 3 && nearby.some((x) => fullSimilarity(c.keys, x.keys) >= 0.8);
+  const movedOn = between.some((c) => c.complete && !c.offScript && !c.fillerOnly && c.keys.length >= 3 && unlike(c) && !corrections.includes(c) && !repeated(c));
   if (movedOn) return { separate: true, corrections: [] };
   if (!subs.length) return { separate: false, corrections: [] };
+  // The earlier take stops where the later one goes on, differing only in its own last word or two
+  // ("Delighted with such a fortunate resolve." / "Delighted with such a fortunate result, we lay
+  // down again."): the word the speaker broke off on, heard wrong. An abandoned start, not a slot.
+  const regions = diffRegions(a.keys, b.keys);
+  const tailOnly = regions.length === 1 && subs.length === 1 && subs[0]!.a.length <= 2 &&
+    a.keys.slice(-subs[0]!.a.length).join(' ') === subs[0]!.a.join(' ') && b.keys.length >= a.keys.length + 2 &&
+    lcs(a.keys, b.keys) >= a.keys.length - 2 && a.keys.length >= 4;
+  if (tailOnly) return { separate: false, corrections: [] };
   const isNum = (k: string) => readNumber([k], 0) !== null;
   const numberChanged = subs.some((s) => s.a.some(isNum) && s.b.some(isNum));
   const words = (ks: readonly string[]) => new Set(ks.filter((k) => !STOPWORDS.has(k) && !isNum(k)));
@@ -239,7 +264,9 @@ function decideByRetakes(cands: Chunk[], offsets: Map<string, number>, out: CutD
       const gap = b.clipId === a.clipId ? b.start - a.end : Infinity;
       if (!sameLine(a, b, j === i + 1, gap)) continue;
       if (a.complete && b.complete) {
-        const verdict = separateLines(a, b, between(a, b));
+        const ia = byId.get(a.id) ?? 0;
+        const ib = byId.get(b.id) ?? 0;
+        const verdict = separateLines(a, b, between(a, b), { before: all.slice(Math.max(0, ia - WINDOW_CHUNKS), ia), after: all.slice(ib + 1, ib + 1 + WINDOW_CHUNKS) });
         if (verdict.separate) continue;
         for (const c of verdict.corrections) corrections.add(c.id);
         uf.union(a.id, b.id);
@@ -336,9 +363,14 @@ function matchSpans(cands: Chunk[], script: string[][], allowed: (c: Chunk) => n
         // together ("the trick is to, the trick is to apply it"; "Cosette was no, Cosette was
         // no longer in rags, she was in mourning"). A lead-in that says none of the line
         // ("Honestly? Best sunscreen I've ever used.") still joins.
+        // Said again all but a word counts too (speech-to-text drops or mishears a restart's first
+        // word), when the rest does say the first piece's words again ("Ye keep your watch in the
+        // eternal day so" / "keep your watch in the eternal day so that..."), not just goes on from it.
+        const saidAgain = lcs(group[0]!.keys, group.slice(1).flatMap((c) => c.keys)) >= Math.max(2, group[0]!.keys.length - 1);
+        const oneWord = saidAgain ? 1 / Math.max(1, (script[line] ?? []).length) : 0;
         if (n > 1 && lineMatch(group[0]!.keys, script[line] ?? []).coverage > 0 &&
-          (group.slice(1).some((c) => lineMatch(c.keys, script[line] ?? []).coverage >= m.coverage - 1e-9) ||
-            lineMatch(group.slice(1).flatMap((c) => c.keys), script[line] ?? []).coverage >= m.coverage - 1e-9)) continue;
+          (group.slice(1).some((c) => lineMatch(c.keys, script[line] ?? []).coverage >= m.coverage - oneWord - 1e-9) ||
+            lineMatch(group.slice(1).flatMap((c) => c.keys), script[line] ?? []).coverage >= m.coverage - oneWord - 1e-9)) continue;
         // The rest of the same line, said after a short pause or split off by speech-to-text's
         // punctuation ("Have you been there last night?" / "asked Kirkland."), joins even when
         // the score rises only a little: every word it adds is the line's.

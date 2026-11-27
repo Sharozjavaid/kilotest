@@ -12,7 +12,7 @@ import { PKG, REPO } from './scoring.js';
  * DisfluencySpeech test split (one speaker re-enacting Switchboard calls, Apache 2.0), whose
  * transcripts keep every filled pause. Run fixtures/real/fetch.py first.
  *
- *   npm run whisper:fillers [-- --limit N]
+ *   npm run whisper:fillers [-- --limit N] [--prompt-only]
  *
  * Each utterance is transcribed with Kilo's disfluent prompt and with no prompt, so the
  * effect of the prompt shows. Counts are per utterance: a filler Whisper writes counts as
@@ -25,6 +25,8 @@ const CACHE = join(PKG, '.work/score-real/whisper-fillers');
 const args = process.argv.slice(2);
 const li = args.indexOf('--limit');
 const limit = li >= 0 ? Number(args[li + 1]) : Infinity;
+/** Skip the no-prompt pass (it only shows what the prompt buys). */
+const promptOnly = args.includes('--prompt-only');
 
 if (!existsSync(SRC)) {
   console.error(`No DisfluencySpeech audio in ${SRC}. Run: fixtures/real/.work/venv/bin/python -I fixtures/real/fetch.py disfluency`);
@@ -73,7 +75,8 @@ const lines: string[] = [];
 lines.push(`Whisper ${opts.model || DEFAULT_WHISPER_MODEL}, ${opts.threads} threads, on ${metas.length} DisfluencySpeech test utterances.`);
 const refTotal = metas.reduce((n, m) => n + fillersIn(m.transcript_a), 0);
 lines.push(`Reference: ${refTotal} filled pauses ("uh", "um" and the like) in transcript_a.`);
-for (const [label, prompt] of [[opts.prompt !== undefined ? `KILO_WHISPER_PROMPT "${opts.prompt}"` : 'Kilo prompt (default)', opts.prompt], ['no prompt', '']] as const) {
+const passes = [[opts.prompt !== undefined ? `KILO_WHISPER_PROMPT "${opts.prompt}"` : 'Kilo prompt (default)', opts.prompt], ['no prompt', '']] as const;
+for (const [label, prompt] of promptOnly ? passes.slice(0, 1) : passes) {
   const { raws, audioSec, wallSec } = await transcribeAll(prompt);
   let kept = 0;
   let extra = 0;

@@ -1,0 +1,126 @@
+{
+  "id": "final_237",
+  "title": "Real speech, LibriSpeech speaker 237 (F)",
+  "mode": "general",
+  "speaker": "237",
+  "script": true,
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 1.49,
+      "tail": 1.95,
+      "pieces": [
+        {
+          "utt": "237-126133-0003",
+          "role": "line",
+          "gainDb": 0.7
+        },
+        {
+          "pause": 0.55
+        },
+        {
+          "utt": "237-126133-0004",
+          "role": "line",
+          "gainDb": 1.1
+        },
+        {
+          "pause": 0.52
+        },
+        {
+          "utt": "237-126133-0008",
+          "role": "line",
+          "gainDb": -0.2
+        }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": 2.5,
+      "leadIn": 0.73,
+      "tail": 1.27,
+      "pieces": [
+        {
+          "utt": "237-126133-0012",
+          "words": 3,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 0.7
+        },
+        {
+          "pause": 0.45
+        },
+        {
+          "utt": "237-126133-0014",
+          "role": "line",
+          "gainDb": -1
+        },
+        {
+          "pause": 0.45
+        },
+        {
+          "utt": "237-126133-0018",
+          "role": "line",
+          "gainDb": -1.3
+        }
+      ]
+    },
+    {
+      "name": "part3",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": -4.2,
+      "leadIn": 0.82,
+      "tail": 1.54,
+      "pieces": [
+        {
+          "utt": "237-126133-0012",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.1
+        },
+        {
+          "pause": 0.33
+        },
+        {
+          "utt": "237-126133-0019",
+          "words": 6,
+          "role": "abandoned",
+          "group": "g2",
+          "gainDb": -0.7
+        },
+        {
+          "pause": 0.88
+        },
+        {
+          "utt": "237-126133-0019",
+          "words": 13,
+          "role": "abandoned",
+          "group": "g2",
+          "gainDb": 0.7
+        },
+        {
+          "pause": 1.35
+        },
+        {
+          "utt": "237-126133-0019",
+          "role": "line",
+          "group": "g2",
+          "gainDb": 0.6
+        },
+        {
+          "pause": 0.31
+        },
+        {
+          "utt": "237-126133-0020",
+          "role": "line",
+          "gainDb": 1
+        }
+      ]
+    }
+  ]
+}

@@ -6,7 +6,7 @@ import type { Transcript, Word } from '@kilo/edl';
 import { readPcm16 } from '../src/silence.js';
 import { keys } from '../src/text.js';
 import type { Transcriber } from '../src/transcribe.js';
-import { WHISPER_SCRIPT, runWhisperScript, whisperOptionsFromEnv, whisperTranscriber, type WhisperOptions, type WhisperRaw } from '../src/whisper.js';
+import { EXCERPT_CLIP_SUFFIX, WHISPER_SCRIPT, runWhisperScript, whisperOptionsFromEnv, whisperTranscriber, type WhisperOptions, type WhisperRaw } from '../src/whisper.js';
 import { PKG, REPO, findFixtures, scoreFixture, type FixtureScore } from './scoring.js';
 
 /**
@@ -25,6 +25,13 @@ export interface WhisperStats {
   cached: number;
   audioSec: number;
   wallSec: number;
+  /** CPU seconds of the script, all threads, model load excluded (0 when it does not report it). */
+  cpuSec?: number;
+  /** Stretches transcribed again on their own (whisper.ts secondLook). */
+  excerpts?: number;
+  /** Every clip's audio and the CPU seconds its transcription took (cached ones as recorded), second looks included. */
+  allAudioSec?: number;
+  allCpuSec?: number;
 }
 
 /**
@@ -39,17 +46,31 @@ export function cachedWhisper(opts: WhisperOptions = whisperOptionsFromEnv(), st
     const audio = await readFile(input.audioPath);
     const key = createHash('sha1').update(audio).update(opts.model).update(String(opts.prompt)).update(script).digest('hex').slice(0, 20);
     const file = join(WHISPER_CACHE, `${key}.json`);
-    if (stats) stats.files++;
+    const excerpt = input.clipId.endsWith(EXCERPT_CLIP_SUFFIX);
+    if (stats) {
+      if (excerpt) stats.excerpts = (stats.excerpts ?? 0) + 1;
+      else stats.files++;
+    }
+    const account = (raw: WhisperRaw) => {
+      if (!stats) return;
+      if (!excerpt) stats.allAudioSec = (stats.allAudioSec ?? 0) + input.durationSec;
+      stats.allCpuSec = (stats.allCpuSec ?? 0) + (raw.cpuSec ?? 0);
+    };
     if (existsSync(file)) {
-      if (stats) stats.cached++;
-      return JSON.parse(readFileSync(file, 'utf8')) as WhisperRaw;
+      if (stats && !excerpt) stats.cached++;
+      const raw = JSON.parse(readFileSync(file, 'utf8')) as WhisperRaw;
+      account(raw);
+      return raw;
     }
     const t0 = Date.now();
     const raw = await run(input);
     if (stats) {
       stats.wallSec += (Date.now() - t0) / 1000;
-      stats.audioSec += input.durationSec;
+      // A second look at a stretch costs time but is not more audio.
+      if (!input.clipId.endsWith(EXCERPT_CLIP_SUFFIX)) stats.audioSec += input.durationSec;
+      stats.cpuSec = (stats.cpuSec ?? 0) + (raw.cpuSec ?? 0);
     }
+    account(raw);
     await mkdir(WHISPER_CACHE, { recursive: true });
     writeFileSync(file, JSON.stringify(raw));
     return raw;

@@ -1,0 +1,104 @@
+{
+  "id": "final_61",
+  "title": "Real speech, LibriSpeech speaker 61 (M)",
+  "mode": "general",
+  "speaker": "61",
+  "script": true,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.66,
+      "tail": 1.81,
+      "pieces": [
+        {
+          "utt": "61-70968-0006",
+          "role": "line",
+          "gainDb": -1.2
+        },
+        {
+          "pause": 3.63
+        },
+        {
+          "utt": "61-70968-0007",
+          "role": "line",
+          "gainDb": -1
+        },
+        {
+          "pause": 0.49
+        },
+        {
+          "utt": "61-70968-0009",
+          "words": 5,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -0.5
+        },
+        {
+          "pause": 0.78
+        },
+        {
+          "utt": "61-70968-0009",
+          "role": "line",
+          "group": "g1",
+          "gainDb": -0.1
+        },
+        {
+          "pause": 0.43
+        },
+        {
+          "utt": "61-70968-0026",
+          "role": "line",
+          "gainDb": -0.5
+        },
+        {
+          "pause": 0.63
+        },
+        {
+          "utt": "61-70968-0029",
+          "role": "line",
+          "gainDb": 0.4
+        },
+        {
+          "pause": 0.45
+        },
+        {
+          "utt": "61-70968-0032",
+          "words": 4,
+          "role": "abandoned",
+          "group": "g2",
+          "gainDb": -0.3
+        },
+        {
+          "pause": 1.5
+        },
+        {
+          "utt": "61-70968-0032",
+          "words": 9,
+          "role": "abandoned",
+          "group": "g2",
+          "gainDb": -0.1
+        },
+        {
+          "pause": 1.6
+        },
+        {
+          "utt": "61-70968-0032",
+          "role": "line",
+          "group": "g2",
+          "gainDb": 1.5
+        },
+        {
+          "pause": 0.53
+        },
+        {
+          "utt": "61-70968-0037",
+          "role": "line",
+          "gainDb": 1.3
+        }
+      ]
+    }
+  ]
+}

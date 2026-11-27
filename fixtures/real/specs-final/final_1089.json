@@ -1,0 +1,111 @@
+{
+  "id": "final_1089",
+  "title": "Real speech, LibriSpeech speaker 1089 (M)",
+  "mode": "general",
+  "speaker": "1089",
+  "script": true,
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.64,
+      "tail": 0.97,
+      "pieces": [
+        {
+          "utt": "1089-134686-0001",
+          "role": "line",
+          "gainDb": 1.4
+        },
+        {
+          "pause": 0.34
+        },
+        {
+          "utt": "1089-134686-0003",
+          "role": "line",
+          "gainDb": 0.3
+        },
+        {
+          "pause": 0.57
+        },
+        {
+          "utt": "1089-134686-0008",
+          "words": 4,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 1.1
+        },
+        {
+          "pause": 1.54
+        },
+        {
+          "utt": "1089-134686-0008",
+          "words": 9,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 1.5
+        },
+        {
+          "pause": 1.33
+        },
+        {
+          "utt": "1089-134686-0008",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.3
+        },
+        {
+          "pause": 0.51
+        },
+        {
+          "utt": "1089-134686-0016",
+          "role": "line",
+          "gainDb": -1.1
+        }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": -7.7,
+      "leadIn": 0.5,
+      "tail": 0.59,
+      "pieces": [
+        {
+          "utt": "1089-134686-0025",
+          "role": "line",
+          "gainDb": 0.4
+        },
+        {
+          "pause": 1.88
+        },
+        {
+          "utt": "1089-134686-0036",
+          "words": 3,
+          "role": "abandoned",
+          "group": "g2",
+          "gainDb": -1.3
+        },
+        {
+          "pause": 1.21
+        },
+        {
+          "utt": "1089-134686-0036",
+          "role": "line",
+          "group": "g2",
+          "gainDb": -1.3
+        },
+        {
+          "pause": 2.04
+        },
+        {
+          "utt": "1089-134686-0037",
+          "role": "line",
+          "gainDb": -0.3
+        }
+      ]
+    }
+  ]
+}

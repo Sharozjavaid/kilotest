@@ -5,19 +5,22 @@ Runs an open Whisper model on the CPU with faster-whisper (CTranslate2, int8) an
 one JSON object per input file on stdout, one per line:
 
   {"file": ..., "language": "en", "durationSec": ..., "words": [{"text", "start", "end", "probability"}],
-   "loadSec": ..., "transcribeSec": ...}
+   "loadSec": ..., "transcribeSec": ..., "cpuSec": ...}
+
+cpuSec is the process's CPU time (all threads, user + system) spent on that file.
 
 Errors are printed (on stdout and stderr) as {"error": <code>, "message": <text>} and exit with status 2 so the
 Node side can tell the user exactly what to install. Nothing here touches the network
 unless --allow-download is given; the model must already be in --cache-dir otherwise.
 
 Usage:
-  kilo_whisper.py --model base.en --cache-dir DIR [--threads 2] [--prompt TEXT] [--allow-download] FILE...
+  kilo_whisper.py --model base.en --cache-dir DIR [--threads 2] [--prompt TEXT] [--language en] [--allow-download] FILE...
   kilo_whisper.py --model base.en --cache-dir DIR --download-only
 """
 import argparse
 import json
 import os
+import resource
 import sys
 import time
 
@@ -27,9 +30,12 @@ import time
 PINNED = {
     'tiny.en': ('Systran/faster-whisper-tiny.en', None),
     'base.en': ('Systran/faster-whisper-base.en', '3d3d5dee26484f91867d81cb899cfcf72b96be6c'),
-    'small.en': ('Systran/faster-whisper-small.en', None),
+    'small.en': ('Systran/faster-whisper-small.en', 'd1d751a5f8271d482d14ca55d9e2deeebbae577f'),
     'base': ('Systran/faster-whisper-base', None),
     'small': ('Systran/faster-whisper-small', None),
+    # OpenAI's large-v3-turbo (MIT), already quantized to int8 for CTranslate2 (814 MB instead of
+    # 1.6 GB in float16), from a community conversion: multilingual.
+    'large-v3-turbo': ('Zoont/faster-whisper-large-v3-turbo-int8-ct2', '846f74797293e5f605d509a6ab5395a1f2f2874e'),
 }
 
 # Whisper learned to tidy speech up; a disfluent prompt makes it write the "um"s and "uh"s
@@ -96,6 +102,7 @@ def main() -> None:
     ap.add_argument('--threads', type=int, default=2)
     ap.add_argument('--prompt', default=None, help='initial prompt; "" for none')
     ap.add_argument('--beam-size', type=int, default=5)
+    ap.add_argument('--language', default=None, help='language code; default: English for an .en model, else detected')
     ap.add_argument('--allow-download', action='store_true')
     ap.add_argument('--download-only', action='store_true')
     ap.add_argument('files', nargs='*')
@@ -115,11 +122,16 @@ def main() -> None:
     prompt = DEFAULT_PROMPT if a.prompt is None else (a.prompt or None)
     english_only = a.model.endswith('.en') or path.rstrip('/').endswith('.en')
 
+    def cpu() -> float:
+        r = resource.getrusage(resource.RUSAGE_SELF)
+        return r.ru_utime + r.ru_stime
+
     for f in a.files:
         t1 = time.time()
+        c1 = cpu()
         segments, info = model.transcribe(
             load_wav(f),
-            language='en' if english_only else None,
+            language=a.language or ('en' if english_only else None),
             beam_size=a.beam_size,
             word_timestamps=True,
             initial_prompt=prompt,
@@ -142,6 +154,7 @@ def main() -> None:
             'words': words,
             'loadSec': round(load_sec, 3),
             'transcribeSec': round(time.time() - t1, 3),
+            'cpuSec': round(cpu() - c1, 3),
         }), flush=True)
 
 

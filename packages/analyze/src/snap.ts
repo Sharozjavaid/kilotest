@@ -21,8 +21,13 @@ import { endsSentence, hasPunctuation } from './text.js';
 
 /** Slivers shorter than this many frames are merged away. */
 export const MIN_FRAMES = 3;
-/** How far a silence may start before a word's reported end and still count as its end. */
-const SILENCE_SLOP = 0.05;
+/**
+ * How far a silence may start before a word's reported end (or end after its start) and still
+ * count as its edge: transcribers that place edges on the measured silences lean them a little
+ * into the pause (whisper.ts SOFT_END_SEC), since a word's soft release runs on below the level
+ * the silence edge is settled at.
+ */
+const SILENCE_SLOP = 0.1;
 
 interface WordState {
   word: ClipWord;

@@ -4,11 +4,13 @@
 // speaker) and only needs the cache `fetch.py` filled. The specs are committed; rerun this only
 // to change the design, then `node fixtures/real/generate.mjs` to rebuild the media.
 //
-// Usage: node fixtures/real/plan.mjs [--set dev|heldout|fresh] [--cache <dir>] [--specs <dir>]
+// Usage: node fixtures/real/plan.mjs [--set dev|heldout|fresh|final] [--cache <dir>] [--specs <dir>]
 //
 // `--set dev` (the default) is the 12 recordings in specs/. `heldout` and `fresh` are two more
 // sets of other speakers, built by the same rules, for checking a pipeline change on recordings it
-// was not designed on: specs-heldout/ and specs-fresh/ (see README.md, "Held-out sets").
+// was not designed on: specs-heldout/ and specs-fresh/ (see README.md, "Held-out sets"). `final`
+// is built the same way from LibriSpeech test-clean (cache .work/cache/librispeech-test, filled by
+// `fetch.py librispeech-test`), whose speakers none of the other sets use: specs-final/.
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,17 +19,17 @@ const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i += 2) {
   if (!['--cache', '--specs', '--set'].includes(args[i]) || args[i + 1] === undefined) {
-    console.error(`plan.mjs: unknown or incomplete argument "${args[i]}". Usage: [--set dev|heldout|fresh] [--cache <dir>] [--specs <dir>]`);
+    console.error(`plan.mjs: unknown or incomplete argument "${args[i]}". Usage: [--set dev|heldout|fresh|final] [--cache <dir>] [--specs <dir>]`);
     process.exit(2);
   }
 }
 const argOf = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
 const set = argOf('--set') ?? 'dev';
-if (!['dev', 'heldout', 'fresh'].includes(set)) {
-  console.error(`plan.mjs: --set must be dev, heldout or fresh, not "${set}"`);
+if (!['dev', 'heldout', 'fresh', 'final'].includes(set)) {
+  console.error(`plan.mjs: --set must be dev, heldout, fresh or final, not "${set}"`);
   process.exit(2);
 }
-const cache = resolve(argOf('--cache') ?? join(here, '.work/cache/librispeech'));
+const cache = resolve(argOf('--cache') ?? join(here, set === 'final' ? '.work/cache/librispeech-test' : '.work/cache/librispeech'));
 const specDir = resolve(argOf('--specs') ?? join(here, set === 'dev' ? 'specs' : `specs-${set}`));
 
 function rng(seed) {
@@ -123,7 +125,41 @@ function otherSets() {
   return sets;
 }
 
-const RECORDINGS = set === 'dev' ? DEV : otherSets()[set];
+/**
+ * The final set, fixed before any of it was scored and before the changes it is meant to check: every
+ * test-clean speaker in the cache that no other set uses whose best chapter has at least 5 usable
+ * lines, in speaker-number order, with the designs cycling as in the held-out sets.
+ */
+function finalSet() {
+  const used = new Set(DEV.map((r) => r.speaker));
+  for (const dir of ['specs', 'specs-heldout', 'specs-fresh']) {
+    for (const f of readdirSync(join(here, dir)).filter((x) => x.endsWith('.json'))) used.add(JSON.parse(readFileSync(join(here, dir, f), 'utf8')).speaker);
+  }
+  const eligible = [...bySpeaker.keys()]
+    .filter((s) => !used.has(s))
+    .map((s) => {
+      const per = new Map();
+      for (const u of bySpeaker.get(s).filter(usable)) per.set(u.chapter, (per.get(u.chapter) ?? 0) + 1);
+      return { speaker: s, best: Math.max(0, ...per.values()) };
+    })
+    .filter((x) => x.best >= 5)
+    .sort((a, b) => Number(a.speaker) - Number(b.speaker));
+  return eligible.map((x, i) => {
+    const lines = Math.min(x.best, [7, 8, 9, 6, 8, 7, 9][i % 7]);
+    const clips = Math.min(lines >= 7 ? 3 : 2, [1, 2, 3, 1, 2, 1, 2][i % 7]);
+    return {
+      id: `final_${x.speaker}`,
+      speaker: x.speaker,
+      lines,
+      clips,
+      script: i % 2 === 0,
+      ...(i % 5 === 2 ? { fps: 60 } : {}),
+      ...(i % 10 === 3 ? { size: '1280x720' } : {}),
+    };
+  });
+}
+
+const RECORDINGS = set === 'dev' ? DEV : set === 'final' ? finalSet() : otherSets()[set];
 
 /** Retake designs, used in turn: one abandoned start; two abandoned starts; a start left at the end of a clip. */
 const KINDS = ['abandon', 'abandon2', 'abandon', 'clip_restart', 'abandon2'];

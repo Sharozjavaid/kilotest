@@ -9,10 +9,14 @@ Writes, under fixtures/real/.work/cache/ (gitignored, never committed):
 
   librispeech/<utterance id>.flac   LibriSpeech dev-clean audio, as published
   librispeech/<utterance id>.json   its transcript and Montreal Forced Aligner word times
+  librispeech-test/<id>.flac + .json  the same from test-clean, for the final set (specs-final/)
   disfluency/<n>.flac + .json       DisfluencySpeech test split, for the filler-retention check
 
+    fixtures/real/.work/venv/bin/python -I fixtures/real/fetch.py librispeech-test   # only the final set's audio
+
 Only the parquet row groups the specs use are read (HTTP range requests), so the
-download stays near 140 MB for LibriSpeech and 71 MB for DisfluencySpeech.
+download stays near 140 MB for LibriSpeech dev-clean, 115 MB for test-clean and 71 MB for
+DisfluencySpeech.
 Both datasets are pinned to a revision so the recordings rebuild identically.
 """
 import io
@@ -33,6 +37,10 @@ LIBRI_FILE = 'data/dev_clean-00000-of-00001.parquet'
 # Row groups of 100 rows each. These hold the same-speaker near-repeats the specs use
 # (speakers 174, 777, 2078, 3081) and enough lines for every other speaker.
 LIBRI_ROW_GROUPS = [3, 6, 7, 14, 15, 16, 20, 21, 25, 26]
+# test-clean, for the final set: its 40 speakers are none of dev-clean's. Rows are spread over the
+# row groups, so the first 8 (about 115 MB) give 30 speakers a chapter of 5 or more usable lines.
+LIBRI_TEST_FILE = 'data/test_clean-00000-of-00001.parquet'
+LIBRI_TEST_ROW_GROUPS = list(range(8))
 
 # DisfluencySpeech (Apache 2.0): one speaker re-enacting Switchboard calls, fillers included.
 DISFL_REPO = 'datasets/amaai-lab/DisfluencySpeech'
@@ -40,13 +48,13 @@ DISFL_REV = 'b7da294fe3a70dd96df6640893f2a5dfc2c87638'
 DISFL_FILE = 'data/test-00000-of-00001.parquet'
 
 
-def fetch_libri(fs: HfFileSystem) -> int:
-    out = os.path.join(CACHE, 'librispeech')
+def fetch_libri(fs: HfFileSystem, folder: str = 'librispeech', file: str = LIBRI_FILE, groups=LIBRI_ROW_GROUPS, split: str = 'dev-clean') -> int:
+    out = os.path.join(CACHE, folder)
     os.makedirs(out, exist_ok=True)
     n = 0
-    with fs.open(f'{LIBRI_REPO}@{LIBRI_REV}/{LIBRI_FILE}', 'rb', block_size=1 << 22) as f:
+    with fs.open(f'{LIBRI_REPO}@{LIBRI_REV}/{file}', 'rb', block_size=1 << 22) as f:
         pf = pq.ParquetFile(f)
-        for g in LIBRI_ROW_GROUPS:
+        for g in groups:
             for r in pf.read_row_group(g).to_pylist():
                 uid = r['id']
                 flac = os.path.join(out, f'{uid}.flac')
@@ -62,12 +70,12 @@ def fetch_libri(fs: HfFileSystem) -> int:
                     'sex': r['sex'],
                     'transcript': r['transcript'],
                     'words': [{'text': w['word'], 'start': w['start'], 'end': w['end']} for w in r['words']],
-                    'source': f'LibriSpeech dev-clean {uid} (CC BY 4.0), MFA alignment via {LIBRI_REPO}@{LIBRI_REV[:8]}',
+                    'source': f'LibriSpeech {split} {uid} (CC BY 4.0), MFA alignment via {LIBRI_REPO}@{LIBRI_REV[:8]}',
                 }
                 with open(os.path.join(out, f'{uid}.json'), 'w') as w:
                     json.dump(meta, w)
                 n += 1
-            print(f'librispeech row group {g}: done', flush=True)
+            print(f'librispeech {split} row group {g}: done', flush=True)
     return n
 
 
@@ -98,6 +106,8 @@ def main() -> None:
     fs = HfFileSystem()
     if 'librispeech' in which:
         print('librispeech utterances:', fetch_libri(fs))
+    if 'librispeech-test' in which:
+        print('librispeech test-clean utterances:', fetch_libri(fs, 'librispeech-test', LIBRI_TEST_FILE, LIBRI_TEST_ROW_GROUPS, 'test-clean'))
     if 'disfluency' in which:
         print('disfluency utterances:', fetch_disfluency(fs))
 

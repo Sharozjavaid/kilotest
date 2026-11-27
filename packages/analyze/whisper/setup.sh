@@ -2,8 +2,15 @@
 # Sets up the local `whisper` transcriber: a Python virtual environment with faster-whisper and
 # the model, both in gitignored folders under packages/analyze/.work (or where the variables say).
 #
-#   npm run whisper:setup                       # base.en into .work/whisper-models
-#   KILO_WHISPER_MODEL=small.en npm run whisper:setup
+#   npm run whisper:setup                                  # base.en (default, 145 MB) into .work/whisper-models
+#   KILO_WHISPER_MODEL=small.en npm run whisper:setup        # 485 MB
+#   KILO_WHISPER_MODEL=large-v3-turbo npm run whisper:setup  # 815 MB, int8, multilingual
+#
+# base.en is the default: on the real-speech recordings (fixtures/real/README.md) it keeps the
+# right take more often than small.en or large-v3-turbo, at about 0.35 s of CPU per second of
+# audio on two threads (second look included); small.en takes about 0.45 s and large-v3-turbo
+# about 2.5 s, over a worker's budget of about 1 s. Pinned revisions are in kilo_whisper.py
+# (PINNED); any other name is a Hugging Face repo id or a local folder.
 #
 # Then run with KILO_TRANSCRIBER=whisper. Nothing else in Kilo needs Python.
 set -eu

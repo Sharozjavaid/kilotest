@@ -34,7 +34,10 @@ RUN npx -y playwright@1.49.1 install --with-deps chromium-headless-shell \
 # Optional: the local, free `whisper` transcriber (KILO_TRANSCRIBER=whisper), an open Whisper model
 # on the CPU through faster-whisper. Off by default, so the image needs no Python; build with
 #   docker build -f server/Dockerfile --build-arg KILO_WITH_WHISPER=1 [--build-arg KILO_WHISPER_MODEL=small.en] .
-# The model (base.en, about 145 MB) is downloaded from Hugging Face at build time, never at run time.
+# The model is downloaded from Hugging Face at build time, never at run time: base.en (the default,
+# about 145 MB, about 0.35 s of CPU per second of audio on two threads), small.en (485 MB, 0.45 s) or
+# large-v3-turbo (815 MB int8, about 2.5 s: over a worker's budget), each pinned in kilo_whisper.py.
+# base.en keeps the right take most often on the real-speech recordings (fixtures/real/README.md).
 # NOT YET BUILT: these steps were run by hand outside Docker (packages/analyze/whisper/setup.sh), not here.
 ARG KILO_WITH_WHISPER=0
 ARG KILO_WHISPER_MODEL=base.en

@@ -11,7 +11,8 @@ two people. See "What this proves" below.
 
 | Data | Licence | Used for |
 |---|---|---|
-| LibriSpeech dev-clean (Panayotov et al.), with Montreal Forced Aligner word times, as packaged in `gilkeyio/librispeech-alignments` on Hugging Face (alignments by Loren Lugosch) | CC BY 4.0 | the 12 recordings and their ground truth |
+| LibriSpeech dev-clean (Panayotov et al.), with Montreal Forced Aligner word times, as packaged in `gilkeyio/librispeech-alignments` on Hugging Face (alignments by Loren Lugosch) | CC BY 4.0 | the 12 recordings and their ground truth, and the held-out and fresh sets |
+| LibriSpeech test-clean, from the same package (first 8 of its 27 row groups, 113 MB) | CC BY 4.0 | the final set (`specs-final/`) |
 | DisfluencySpeech test split (`amaai-lab/DisfluencySpeech`, Wang and Herremans 2024): one speaker re-enacting Switchboard calls, every "uh" and "um" in the transcript | Apache 2.0 | how many fillers the `whisper` transcriber keeps (`npm run whisper:fillers` in packages/analyze) |
 
 Looked at and not used: PodcastFillers (real podcast fillers, but its filler annotations are
@@ -114,6 +115,31 @@ cd packages/analyze && KILO_REAL_FIXTURES=../../fixtures/real/.work/out-heldout 
 
 `plan.mjs` with no `--set` (or `--set dev`) still writes exactly the committed `specs/`.
 
+### The final set
+
+Once held-out and fresh had been looked at, neither could give a clean number. The final set was
+built before the next round of pipeline changes and scored once, at the end of it: LibriSpeech
+**test-clean**, whose 40 speakers are none of dev-clean's. Every test-clean speaker in the cache
+with a chapter of at least 5 usable lines, in speaker-number order, with the same design cycle.
+Its score on the code as it stood was written down before any change, in totals only
+(`specs-final/PREREGISTRATION.md`); nobody looked at its cuts until the changes were finished.
+
+| Set | Specs | Output (gitignored) | Recordings | Clips | Length | Retake groups (as scored) | Readers |
+|---|---|---|---|---|---|---|---|
+| final | `specs-final/` | `.work/out-final/` | 30 | 50 | 1480 s | 42 | 16 F, 14 M |
+
+```sh
+fixtures/real/.work/venv/bin/python -I fixtures/real/fetch.py librispeech-test   # into .work/cache/librispeech-test (113 MB)
+node fixtures/real/plan.mjs --set final        # only to change the design: rewrites specs-final/*.json
+node fixtures/real/generate.mjs --specs fixtures/real/specs-final --out fixtures/real/.work/out-final --cache fixtures/real/.work/cache/librispeech-test
+cd packages/analyze && KILO_REAL_FIXTURES=../../fixtures/real/.work/out-final npm run score:real   # or -- --truth
+```
+
+`check.mjs --out .work/out-final`: of 868 unit edges, 43 starts and 47 ends have 20 ms or more of
+sound just outside the aligner's edge, about as in held-out and fresh. (The manifests in
+`.work/out-final/` were built before `generate.mjs` named the split in its `source` line, so they
+say dev-clean there; a rebuild into another folder is identical apart from that line.)
+
 ## Ground truth
 
 Units are the runs of a line's words between pauses of 0.1 s or more (MFA times moved onto the
@@ -132,6 +158,39 @@ and a few are late: scoring found three MFA edges that sit in room tone well pas
 (real_251 "which" starts 0.4 s before its sound, real_3081 "me" is placed 0.2 s after it, real_2277
 "work" ends 30 ms late). Those are counted as clipped words all the same: the scorer measures
 against MFA's times and is not adjusted.
+
+## Results (heuristic decider, 2026-11-27)
+
+Clipped words and retake groups right, per set, before and after the round that added the final
+set (decider fixes, a second look at stretches Whisper got wrong, edges leaned into pauses; see
+packages/analyze/src/whisper.ts). Rules were developed on dev, held-out and fresh; the final set
+was scored once before and once after, nothing in between.
+
+| Set | Whisper base.en, before | after | True transcript, before | after |
+|---|---|---|---|---|
+| dev (12) | 4, 22/22 | 2, 22/22 | 0, 22/22 | 0, 22/22 |
+| held-out (13) | 6, 13/16 | 0, 16/16 | 1, 16/16 | 0, 16/16 |
+| fresh (12) | 12, 8/13 | 0, 13/13 | 0, 13/13 | 0, 13/13 |
+| **final (30)** | 33, 32/42 | **20, 36/42** | 4, 40/42 | **4, 40/42** |
+
+The two clipped words left on dev are one word, real_3081 "me.", which the aligner places 0.2 s
+after its sound. On the final set phase 0's line is not met with either transcriber: with Whisper,
+7 of the 20 are line-final words cut inside their sound (Whisper ended them early), and 6 retake
+groups go wrong, 4 of them from Whisper's text; with the true transcript the 4 clipped words are
+a read "Ah" cut by the filler lexicon (counted twice) and the end of a kept take cut with the
+abandoned starts before it (two units), and 2 groups go wrong.
+
+Models, with the code as it now stands (dev / held-out / fresh; CPU seconds per audio second on 2
+threads, all threads counted, second look included; fillers kept with Kilo's prompt, DisfluencySpeech):
+
+| Model | Retakes right | Clipped | CPU s per audio s | Fillers kept |
+|---|---|---|---|---|
+| base.en (default) | 22/22, 16/16, 13/13 | 2, 0, 0 | 0.31-0.38 (first pass 0.10-0.12) | 92/134 (69%); 29/42 on the first 60 |
+| small.en | 20/22, 13/16, 11/13 | 1, 2, 2 | 0.44-0.49 (first pass 0.28-0.32) | 99/134 (74%); 28/42 on the first 60 |
+| large-v3-turbo (int8) | 18/22, 14/16, 10/13 | 2, 5, 0 | 2.4-2.7 (first pass 1.33-1.50) | 33/42 (79%) on the first 60 |
+
+The bigger models write a phrase said twice as one copy more often (a better language model tidies
+the speech), which is exactly what cutting retakes needs to see, so base.en stays the default.
 
 ## What this proves, and what it does not
 

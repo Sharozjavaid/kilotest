@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Assembles "recordings" from real read speech (LibriSpeech dev-clean, CC BY 4.0) with known
+// Assembles "recordings" from real read speech (LibriSpeech dev-clean, or test-clean for the final
+// set; CC BY 4.0) with known
 // right answers. Needs ffmpeg and the cache `fetch.py` fills. These are NOT creator
 // recordings: see README.md for what they are and are not.
 //
@@ -327,7 +328,7 @@ for (const name of readdirSync(specDir).filter((f) => f.endsWith('.json')).sort(
     script,
     clips,
     broll: [],
-    source: 'Assembled from LibriSpeech dev-clean read speech (CC BY 4.0) with MFA word alignments; not a creator recording. See fixtures/real/README.md.',
+    source: `Assembled from LibriSpeech ${/LibriSpeech (\S+)/.exec(utterance([...lineIndex.keys()][0]).source ?? '')?.[1] ?? 'dev-clean'} read speech (CC BY 4.0) with MFA word alignments; not a creator recording. See fixtures/real/README.md.`,
     speaker: spec.speaker,
   };
   writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
