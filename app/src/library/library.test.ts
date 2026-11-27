@@ -48,14 +48,20 @@ describe('the library list', () => {
     const expected = [...created].reverse().flat();
     const seen: string[] = [];
     let after: string | undefined;
+    let pages = 0;
     for (;;) {
       const page = await api.listVideos({ order: 'batch', limit: LIBRARY_PAGE, after });
+      pages++;
       seen.push(...page.videos.map((v) => v.id));
-      if (page.videos.length < LIBRARY_PAGE) break;
-      after = page.videos.at(-1)!.id;
+      expect(page.total).toBe(320);
+      if (!page.nextCursor) break;
+      expect(page.nextCursor).toBe(page.videos.at(-1)!.id);
+      after = page.nextCursor;
     }
     expect(seen).toEqual(expected);
     expect(seen).toHaveLength(320);
+    // 320 is a whole number of pages: the last full page says it is the last, so no empty fetch follows.
+    expect(pages).toBe(320 / LIBRARY_PAGE);
     const found = await api.listVideos({ order: 'batch', q: 'COFFEE', limit: 200 });
     expect(found.videos).toHaveLength(32);
     expect((await api.listVideos({ status: LIBRARY_STATUSES.finished, limit: 10 })).videos).toEqual([]);

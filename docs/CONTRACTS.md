@@ -88,7 +88,7 @@ Base path `/v1`. JSON in and out. Bodies are the zod schemas in `packages/edl/sr
 | `GET /v1/batches/:id` | | `BatchDetail` | |
 | `POST /v1/uploads/complete` | `CompleteUploadsRequest` | `CompleteUploadsResponse` | Answers 200 with a result per id; one bad id never fails the others. A video is queued once every clip and B-roll file it was created with is in. |
 | `POST /v1/uploads/targets` | `ReissueUploadsRequest` | `ReissueUploadsResponse` | Fresh upload targets for files not yet in, after a target expired. |
-| `GET /v1/videos` | query `status`, `batchId`, `q`, `order`, `limit`, `after` | `ListVideosResponse` | `status`: one status or several, comma-separated. `q`: words in the title. `order`: `created` (default, newest first) or `batch` (newest batch first, each batch in its own order). `limit` 1..200 pages the list (without it, up to 500 rows); `after` is the last video id of the previous page. A page shorter than `limit` is the last. 400 for an unknown status, order or cursor. |
+| `GET /v1/videos` | query `status`, `batchId`, `q`, `order`, `limit`, `after` | `ListVideosResponse` | `status`: one status or several, comma-separated. `q`: words in the title. `order`: `created` (default, newest first) or `batch` (newest batch first, each batch in its own order). `limit` 1..200 pages the list (without it, up to 500 rows); `after` takes the previous page's `nextCursor`, which is null on the last page. `total` counts every video matching the filters. 400 for an unknown status, order or cursor. |
 | `GET /v1/videos/:id` | | `VideoDetail` | |
 | `DELETE /v1/videos/:id` | | 204 | |
 | `POST /v1/videos/:id/retry` | | `VideoSummary` | Only from `failed`. |

@@ -363,7 +363,11 @@ describe.skipIf(!process.env.KILO_TEST_REAL)('acceptance: the real pipeline end 
         expect(o.durationSec).toBeLessThanOrEqual(spec.maxDurationSec);
       }
       if (m.broll.length) expect(edl0.overlays.some((o) => o.type === 'broll')).toBe(true);
-      expect(edl0.overlays.some((o) => o.type === 'graphic')).toBe(true);
+      // The creator's own B-roll takes its line first and an automatic graphic in its way gives
+      // way, so a short video full of B-roll may have no graphic in its base cut. Without B-roll
+      // the base cut must have one; either way some cut carries a graphic, which is rendered below.
+      if (!m.broll.length) expect(edl0.overlays.some((o) => o.type === 'graphic')).toBe(true);
+      expect([...edl0.overlays, ...edl0.variants.flatMap((v) => v.overlays)].some((o) => o.type === 'graphic')).toBe(true);
 
       // ---- restore one cut segment and save -----------------------------------------
       const restoredSeg = edl0.segments.find((s) => !s.keep && (s.reason === 'retake' || s.reason === 'false_start') && s.end - s.start > 0.8) as Segment;

@@ -165,7 +165,8 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
    * - `order`: `created` (default, newest first) or `batch` (newest batch first, a batch's videos in its own order).
    * - `limit`: 1..200 for a page; without it up to 500 rows, as before paging existed.
    * - `after`: the id of the last video of the previous page; the next page follows it in the same order.
-   *   `ListVideosResponse` has no cursor field, so a page shorter than `limit` is the last one.
+   *   The response's `nextCursor` is that id for the next page, or null on the last page;
+   *   `total` counts every video matching the filters.
    */
   app.get('/videos', async (c) => {
     const userId = c.get('userId');
@@ -199,12 +200,21 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
       : order === 'created'
         ? db`and (v.created_at < ${cv} or (v.created_at = ${cv} and v.id > ${after}))`
         : db`and (b.created_at < ${cb} or (b.created_at = ${cb} and (b.id > ${cbid} or (b.id = ${cbid} and (v.created_at > ${cv} or (v.created_at = ${cv} and v.id > ${after}))))))`;
-    const where = db`v.user_id = ${userId}
+    const filters = db`v.user_id = ${userId}
       ${statuses.length ? db`and v.status in ${db(statuses)}` : db``}
       ${batchId ? db`and v.batch_id = ${batchId.toLowerCase()}` : db``}
-      ${like ? db`and v.title ilike ${like}` : db``}
-      ${page}`;
-    const body: ListVideosResponse = { videos: await videoSummaries(db, storage, where, order, limit) };
+      ${like ? db`and v.title ilike ${like}` : db``}`;
+    const where = db`${filters} ${page}`;
+    // One row past the page says whether another page follows.
+    const rows = await videoSummaries(db, storage, where, order, limit + 1);
+    const videos = rows.slice(0, limit);
+    const more = rows.length > limit;
+    const [count] = await db<{ n: number }[]>`select count(*)::int as n from videos v where ${filters}`;
+    const body: ListVideosResponse = {
+      videos,
+      nextCursor: more && videos.length ? videos[videos.length - 1]!.id : null,
+      total: Number(count?.n ?? 0),
+    };
     return c.json(body);
   });
 

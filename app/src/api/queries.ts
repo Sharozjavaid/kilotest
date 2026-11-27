@@ -126,8 +126,7 @@ export const LIBRARY_STATUSES: Record<LibraryFilter, ListVideosQuery['status']> 
 
 /**
  * The library (All videos): pages of GET /videos in batch order, newest batch first. The
- * next page starts after the last video of the one before (ListVideosResponse has no
- * cursor; a short page is the last). Never polls: a list of hundreds refreshes when the
+ * next page starts at the cursor the page before returned (null on the last page). Never polls: a list of hundreds refreshes when the
  * screen comes back to the front or is pulled.
  */
 export function useLibrary(filter: LibraryFilter, q: string) {
@@ -137,7 +136,7 @@ export function useLibrary(filter: LibraryFilter, q: string) {
     queryFn: ({ pageParam }) =>
       getApi().listVideos({ status: LIBRARY_STATUSES[filter], q: q.trim() || undefined, order: 'batch', limit: LIBRARY_PAGE, after: pageParam ?? undefined }),
     initialPageParam: null as string | null,
-    getNextPageParam: (last) => (last.videos.length < LIBRARY_PAGE ? undefined : last.videos[last.videos.length - 1]!.id),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     subscribed: focused,
     staleTime: 30_000,
   });

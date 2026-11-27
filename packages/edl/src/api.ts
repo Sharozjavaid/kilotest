@@ -94,6 +94,7 @@ export type CreateBatchRequest = z.infer<typeof CreateBatchRequest>;
 export const BatchSummary = z.object({
   id: z.string(),
   createdAt: z.string(),
+  /** The batch's default settings as created. A video may override them (`NewVideo.settings`). */
   settings: EditSettings,
   total: z.number().int(),
   /** Videos per status; statuses with no videos may be absent. */
@@ -222,7 +223,13 @@ export const VideoDetail = VideoSummary.extend({
 });
 export type VideoDetail = z.infer<typeof VideoDetail>;
 
-export const ListVideosResponse = z.object({ videos: z.array(VideoSummary) });
+export const ListVideosResponse = z.object({
+  videos: z.array(VideoSummary),
+  /** Pass as `after` for the next page; null when this page is the last. */
+  nextCursor: z.string().nullable().default(null),
+  /** How many videos match the filters, across all pages. */
+  total: z.number().int().nonnegative().optional(),
+});
 export type ListVideosResponse = z.infer<typeof ListVideosResponse>;
 
 export const BatchDetail = BatchSummary.extend({ videos: z.array(VideoSummary) });
@@ -321,7 +328,7 @@ export type UnregisterDeviceRequest = z.infer<typeof UnregisterDeviceRequest>;
 
 export const HomeResponse = z.object({
   goal: GoalView,
-  /** Batches with at least one video not yet ready. */
+  /** Batches with at least one video not yet done (and not deleted). */
   activeBatches: z.array(BatchSummary),
   readyToReview: z.array(VideoSummary),
   /** The latest 50 videos that are exporting or done, most recently updated first. */

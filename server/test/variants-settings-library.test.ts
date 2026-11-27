@@ -192,13 +192,24 @@ describe('hidden overlays, per-video settings and the library', () => {
       expect(all.videos.map((v) => v.id)).toEqual([...second.ids, ...first.ids]);
       const seen: string[] = [];
       let after: string | undefined;
-      for (let page = 0; page < 5; page++) {
+      const total = second.ids.length + first.ids.length;
+      let pages = 0;
+      for (let page = 0; page < 10; page++) {
         const res = await user.ok(ListVideosResponse, 'GET', `/v1/videos?order=batch&limit=2${after ? `&after=${after}` : ''}`);
+        pages++;
         seen.push(...res.videos.map((v) => v.id));
-        if (res.videos.length < 2) break;
-        after = res.videos.at(-1)!.id;
+        expect(res.total).toBe(total);
+        if (seen.length < total) expect(res.nextCursor).toBe(res.videos.at(-1)!.id);
+        else expect(res.nextCursor).toBeNull();
+        if (!res.nextCursor) break;
+        after = res.nextCursor;
       }
       expect(seen).toEqual([...second.ids, ...first.ids]);
+      // No empty last page, even when the total is a multiple of the page size.
+      expect(pages).toBe(Math.ceil(total / 2));
+      const exact = await user.ok(ListVideosResponse, 'GET', `/v1/videos?order=batch&limit=${total}`);
+      expect(exact.videos).toHaveLength(total);
+      expect(exact.nextCursor).toBeNull();
       // Newest first (the default order), paged the same way.
       const created = await user.ok(ListVideosResponse, 'GET', '/v1/videos');
       const p1 = await user.ok(ListVideosResponse, 'GET', '/v1/videos?limit=3');

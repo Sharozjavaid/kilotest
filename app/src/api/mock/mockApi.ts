@@ -311,7 +311,10 @@ export class MockKiloApi implements KiloApi {
       const at = rank.get(query.after)!;
       videos = videos.filter((s) => rank.get(s.id)! > at);
     }
-    return clone({ videos: videos.slice(0, query.limit ?? 500) });
+    const limit = query.limit ?? 500;
+    const page = videos.slice(0, limit);
+    const total = query.after === undefined ? videos.length : matching.length;
+    return clone({ videos: page, nextCursor: videos.length > limit && page.length ? page[page.length - 1]!.id : null, total });
   }
 
   async getVideo(videoId: string): Promise<VideoDetail> {
