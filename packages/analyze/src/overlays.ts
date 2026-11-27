@@ -15,6 +15,8 @@ import {
 export const HOOK_PROTECT_SEC = 2.0;
 /** At most one overlay per this many seconds of output. */
 export const OVERLAY_SPACING_SEC = 4.5;
+/** The most overlays a saved EDL may hold (the server's limit): even the creator's own B-roll stops there. */
+export const MAX_OVERLAYS = 40;
 /**
  * Candidates at or above these priorities are real matches (a spoken list, price or
  * figure; B-roll whose description matches the line). When both kinds have one and
@@ -121,11 +123,12 @@ export function schedule(input: {
     return false;
   };
   for (const c of creator) {
+    if (count >= MAX_OVERLAYS) break;
     if (c.dedupe && dedupe.has(c.dedupe)) continue;
     place(c);
   }
   for (const c of sorted) {
-    if (count >= input.budget) break;
+    if (count >= Math.min(input.budget, MAX_OVERLAYS)) break;
     if (c.dedupe && dedupe.has(c.dedupe)) continue;
     place(c);
   }

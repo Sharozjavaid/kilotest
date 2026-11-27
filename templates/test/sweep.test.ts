@@ -17,7 +17,7 @@ describe('Phase 4: each template renders correctly on text of any reasonable len
   it('passes every check for every template, theme and text case', async () => {
     const results = await runSweep();
     console.log(formatSweep(results));
-    expect(results.length).toBe(5 * 3 * 11);
+    expect(results.length).toBe(5 * 3 * 16);
     expect(results.filter((r) => r.problems.length).map((r) => `${r.template}/${r.theme}/${r.kind}: ${r.problems.join('; ')}`)).toEqual([]);
   }, 900_000);
 });
