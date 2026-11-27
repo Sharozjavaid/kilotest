@@ -51,7 +51,8 @@ export function resolveTimeline(edl: Edl, variantId?: string | null): ResolvedTi
   const durationSec = t;
   const startOf = new Map(items.map((i) => [i.segment.id, i.outStart]));
   const variant = variantId == null ? undefined : edl.variants.find((v) => v.id === variantId);
-  const all = [...edl.overlays, ...(variant?.overlays ?? [])];
+  const hidden = new Set(variant?.hiddenOverlayIds ?? []);
+  const all = [...edl.overlays.filter((o) => !hidden.has(o.id)), ...(variant?.overlays ?? [])];
   const overlays: TimelineOverlay[] = [];
   for (const overlay of all) {
     const anchor = startOf.get(overlay.anchorSegmentId);
@@ -176,6 +177,7 @@ export interface EdlIssue {
     | 'unknown_anchor'
     | 'unknown_variant_segment'
     | 'duplicate_variant_segment'
+    | 'unknown_hidden_overlay'
     | 'overlay_overlap'
     | 'broll_too_early'
     | 'nothing_kept';
@@ -240,7 +242,13 @@ export function validateEdl(edl: Edl, clips?: readonly ClipInfo[]): EdlIssue[] {
       issues.push({ code: 'unknown_anchor', message: `Overlay ${o.id} is anchored to unknown segment` });
     }
   }
+  const baseOverlayIds = new Set(edl.overlays.map((o) => o.id));
   for (const v of edl.variants) {
+    for (const id of v.hiddenOverlayIds) {
+      if (!baseOverlayIds.has(id)) {
+        issues.push({ code: 'unknown_hidden_overlay', message: `Variant ${v.id} hides unknown overlay ${id}` });
+      }
+    }
     const seen = new Set<string>();
     for (const id of v.segmentOrder) {
       if (!ids.has(id)) {
@@ -262,15 +270,18 @@ export function validateEdl(edl: Edl, clips?: readonly ClipInfo[]): EdlIssue[] {
 export const HOOK_PROTECT_SEC = 2;
 
 /**
- * The overlay rules every stored EDL must satisfy, checked on the base cut:
- * no two of the EDL's own overlays overlap, and no B-roll overlay starts inside
- * the first HOOK_PROTECT_SEC seconds. Overlays that belong to a variant (such as
- * its hook title) are not checked. Deciders, the app's overlay editor and the
- * server's save route all use this one function.
+ * The overlay rules every stored EDL must satisfy: no two of the EDL's own overlays
+ * overlap, and no B-roll overlay starts inside the first HOOK_PROTECT_SEC seconds.
+ * With no `variantId` this checks the base cut, which is what the server's save
+ * route and the app's overlay editor enforce. With a `variantId` it checks that
+ * variant's timeline, leaving out the overlays the variant hides. Overlays that
+ * belong to a variant (such as its hook title) are never checked. Deciders must
+ * pass both: the base cut and every variant they emit.
  */
-export function checkOverlayRules(edl: Edl): EdlIssue[] {
+export function checkOverlayRules(edl: Edl, variantId?: string | null): EdlIssue[] {
   const issues: EdlIssue[] = [];
-  const placed = resolveTimeline(edl).overlays;
+  const own = new Set(edl.overlays.map((o) => o.id));
+  const placed = resolveTimeline(edl, variantId).overlays.filter((p) => own.has(p.overlay.id));
   for (let i = 0; i < placed.length; i++) {
     const cur = placed[i]!;
     if (cur.overlay.type === 'broll' && cur.outStart < HOOK_PROTECT_SEC - EPS) {

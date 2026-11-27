@@ -112,6 +112,11 @@ export const Variant = z.object({
   hookText: z.string().default(''),
   segmentOrder: z.array(z.string()),
   overlays: z.array(Overlay).default([]),
+  /**
+   * Ids of the EDL's own overlays that this variant does not show: for example B-roll
+   * that would cover the line this variant opens on. The base cut still shows them.
+   */
+  hiddenOverlayIds: z.array(z.string()).default([]),
 });
 export type Variant = z.infer<typeof Variant>;
 

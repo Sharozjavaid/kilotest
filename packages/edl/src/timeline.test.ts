@@ -61,6 +61,14 @@ describe('resolveTimeline', () => {
     expect(t.overlays[0]).toMatchObject({ outStart: 4.5, outEnd: 6.5 });
   });
 
+  it('leaves out base overlays a variant hides, in that variant only', () => {
+    const edl = makeEdl();
+    edl.variants[1]!.hiddenOverlayIds = ['o1'];
+    expect(resolveTimeline(edl, 'hook-b').overlays).toHaveLength(0);
+    expect(resolveTimeline(edl, 'hook-a').overlays).toHaveLength(1);
+    expect(resolveTimeline(edl).overlays).toHaveLength(1);
+  });
+
   it('follows a variant order', () => {
     const t = resolveTimeline(makeEdl(), 'hook-b');
     expect(t.items.map((i) => i.segment.id)).toEqual(['s4', 's2', 's5']);
@@ -138,6 +146,21 @@ describe('checkOverlayRules', () => {
       { id: 'o4', type: 'broll', anchorSegmentId: 's2', offsetSec: 0.5, durationSec: 1, assetId: 'b1', sourceStartSec: 0 },
     );
     expect(checkOverlayRules(edl).map((i) => i.code).sort()).toEqual(['broll_too_early', 'overlay_overlap']);
+  });
+
+  it('checks a variant on its own timeline, without the overlays it hides', () => {
+    const edl = makeEdl();
+    // Hook B opens on s4, so the B-roll anchored there starts half a second in.
+    expect(checkOverlayRules(edl)).toEqual([]);
+    expect(checkOverlayRules(edl, 'hook-b').map((i) => i.code)).toEqual(['broll_too_early']);
+    edl.variants[1]!.hiddenOverlayIds = ['o1'];
+    expect(checkOverlayRules(edl, 'hook-b')).toEqual([]);
+  });
+
+  it('flags a variant that hides an overlay the EDL does not have', () => {
+    const edl = makeEdl();
+    edl.variants[0]!.hiddenOverlayIds = ['nope'];
+    expect(validateEdl(edl, clips).map((i) => i.code)).toContain('unknown_hidden_overlay');
   });
 
   it('flags a variant that repeats a segment', () => {

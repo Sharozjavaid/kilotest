@@ -77,6 +77,11 @@ export const NewVideo = z.object({
   /** In the order they should play. */
   clips: z.array(NewClip).min(1).max(60),
   broll: z.array(NewBrollAsset).max(30).default([]),
+  /**
+   * Settings for this video only, laid over the batch's settings: for example one
+   * TikTok Shop video in an otherwise general batch. Absent fields use the batch's.
+   */
+  settings: EditSettings.partial().optional(),
 });
 export type NewVideo = z.infer<typeof NewVideo>;
 
@@ -319,7 +324,7 @@ export const HomeResponse = z.object({
   /** Batches with at least one video not yet ready. */
   activeBatches: z.array(BatchSummary),
   readyToReview: z.array(VideoSummary),
-  /** Finished videos, newest first. */
+  /** The latest 50 videos that are exporting or done, most recently updated first. */
   recent: z.array(VideoSummary),
 });
 export type HomeResponse = z.infer<typeof HomeResponse>;
