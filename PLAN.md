@@ -102,16 +102,16 @@ Phases 3 to 5 are the likely paid tier. The free tier is cut, review and export.
 
 ### Where each phase stands
 
-Everything below is built and passes its checks on synthetic recordings, in a browser, against stand-ins for the outside services. None of it has run on a phone or against a real account yet.
+Each "done when" test below has a repeatable check in this repository (command in brackets). The checks run offline, against stand-ins for the outside services, on recordings with known right answers. None of it has run on a phone or against a real account yet.
 
-| Phase | Built | Still to prove |
+| Phase | Measured here | Still to prove |
 |---|---|---|
-| 0 | The `kilo edit` command and the full pipeline. On the synthetic recordings: no clipped words, every retake group keeps the right take. | The "done when" test itself: 10 real recordings. Short fillers between words that touch are sometimes left in. |
-| 1 | Sign-in, upload queue, batch screen, review with scrubbing and tap-to-fix, export, push registration. | A device build: background uploads, saving to the camera roll, the share sheet, push delivery. Supabase sign-in and storage on a real project. |
-| 2 | Script entry, teleprompter, one clip per line with keep or delete, 60 fps capture request. | 60 fps capture on real phones (the browser version is what was tested). |
-| 3 | B-roll bin, descriptions, placement, slow pan, swap and remove. | Claude's descriptions and placement with a real key; the offline decider was used in tests. |
-| 4 | Five templates in three themes. | Nothing outside this repository. Remotion's free licence covers a solo developer. |
-| 5 | Hook variations, three modes, optional burned-in captions. | Whether the variations read as distinct on real footage. |
+| 0 | Synthetic recordings (`npm run score` in packages/analyze): 0 clipped words, right take in 19 of 19 retake groups. Twelve recordings assembled from real read speech (LibriSpeech), transcribed by the local Whisper provider (`npm run score:real`): right take in 22 of 22 retake groups, but 7 kept words clipped at 3 cuts; 0 with the true transcript. | The test itself, on 10 of the creator's own recordings: real retakes, fillers and phone microphones. Whisper drops about a third of "um" and "uh". |
+| 1 | One batch of 30 videos through the real app and server in a browser (`npm run e2e:batch30` in app): upload with a dropped connection, analysis, review, fixes by tapping, every hook version exported and checked frame by frame, posted. An Android release build compiles (app/README.md). | A person doing it without help. On a phone: background uploads, saving to the gallery, the share sheet, push. Supabase sign-in and storage on a real project. iOS. |
+| 2 | Fifteen performances, each as a recorder session and as an upload (`npm run score:recorded`): recorded needs 0 fixes, uploaded 7. | 60 fps capture on a real phone (the browser recorder is what was tested). |
+| 3 | The creator's B-roll lands on its obvious line 18 of 19 times, never breaking an overlay rule (`npm run score:broll`). | Claude's descriptions and placement with a real key; the offline describer and placement were measured. Acceptance by creators. |
+| 4 | 5 templates × 3 themes × 16 kinds of text, 240 of 240 with no clipping, overflow, overlap or missing glyphs, using only bundled fonts (`npm run sweep` in templates). | Motion during entrances and exits is not measured. Scripts without a bundled font (Traditional Chinese, Bengali, Tamil and others). |
+| 5 | Every hook version of nine recordings rendered and traced frame by frame (`npm run check:variants-render`). Distinct openings: three on 4 recordings, two on 4, one on 1; short recordings fall back to title cards. | Whether the openings read as distinct on real footage, and Claude's hook choices. |
 | 6 | Weekly goal, reminders, stock B-roll lookup. | Direct posting is not built: it needs the platforms' app review. Export goes to the camera roll and the share sheet. |
 
 ## 5. Design
