@@ -43,7 +43,7 @@ export function PressableScale({
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: restingOpacity * dim.value,
     transform: [{ scale: scale.value }],
-  }));
+  }), [restingOpacity]);
 
   const handlePressIn = useCallback(
     (e: GestureResponderEvent) => {

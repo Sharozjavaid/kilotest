@@ -1,9 +1,14 @@
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { router } from 'expo-router';
 import { color, size } from './tokens';
 import { Text } from './type';
-import { Icon } from './Icon';
+import type { IconName } from './Icon';
+import { SymbolIcon } from './SymbolIcon';
+import { PressableScale } from './PressableScale';
+import { GlassSurface } from './GlassSurface';
+import { hasLiquidGlass } from './glass';
+import type { HapticKind } from './haptics';
 
 // ---- Header -----------------------------------------------------------------
 
@@ -26,9 +31,9 @@ export function Header({ title, meta, right, onBack, noBack, size: titleSize = '
   return (
     <View style={styles.header}>
       {noBack ? null : (
-        <Pressable onPress={back} accessibilityRole="button" accessibilityLabel="Back" hitSlop={4} style={styles.back}>
-          <Icon name="chevronLeft" size={22} strokeWidth={2.2} />
-        </Pressable>
+        <PressableScale onPress={back} motion="icon" haptic={false} accessibilityRole="button" accessibilityLabel="Back" hitSlop={4} style={styles.back}>
+          <SymbolIcon name="chevronLeft" size={22} strokeWidth={2.2} />
+        </PressableScale>
       )}
       <Text variant={titleSize} style={styles.title} numberOfLines={1} accessibilityRole="header">
         {title}
@@ -56,6 +61,8 @@ export interface RowProps {
   left?: ReactNode;
   titleWeight?: 400 | 500 | 600;
   chevron?: boolean;
+  /** Haptic on press (tappable rows). Default `light`. */
+  haptic?: HapticKind | false;
   testID?: string;
 }
 
@@ -73,6 +80,7 @@ export function Row({
   left,
   titleWeight = 500,
   chevron,
+  haptic = 'light',
   testID,
 }: RowProps) {
   const content = (
@@ -89,7 +97,7 @@ export function Row({
         ) : null}
       </View>
       {right}
-      {chevron ? <Icon name="chevronRight" size={18} color={color.muted} /> : null}
+      {chevron ? <SymbolIcon name="chevronRight" size={18} color={color.muted} /> : null}
     </>
   );
   const rowStyle = [
@@ -100,16 +108,18 @@ export function Row({
   ];
   if (onPress) {
     return (
-      <Pressable
+      <PressableScale
         onPress={onPress}
+        motion="row"
+        haptic={haptic}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel ?? (subtitle ? `${title}, ${subtitle}` : title)}
         accessibilityHint={accessibilityHint}
         testID={testID}
-        style={({ pressed }) => [rowStyle, pressed && styles.pressed]}
+        style={rowStyle}
       >
         {content}
-      </Pressable>
+      </PressableScale>
     );
   }
   return (
@@ -128,31 +138,47 @@ export function SectionLabel({ children }: { children: string }) {
   );
 }
 
-/** Small icon-only round button (44pt), glass or plain. */
+/**
+ * Small icon-only round button (44pt), glass or plain. With `glass` it is Liquid Glass on
+ * iOS 26+ (interactive) and the translucent surface with a hairline elsewhere.
+ */
 export function IconButton({
   icon,
   label,
   onPress,
   glass = true,
   disabled,
+  haptic = 'light',
 }: {
-  icon: Parameters<typeof Icon>[0]['name'];
+  icon: IconName;
   label: string;
   onPress: () => void;
   glass?: boolean;
   disabled?: boolean;
+  haptic?: HapticKind | false;
 }) {
+  const liquid = glass && hasLiquidGlass();
+  const glyph = <SymbolIcon name={icon} size={20} />;
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       disabled={disabled}
+      motion="icon"
+      haptic={haptic}
+      restingOpacity={disabled ? 0.6 : 1}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: !!disabled }}
-      style={({ pressed }) => [styles.iconButton, glass && styles.iconGlass, (pressed || disabled) && styles.pressed]}
+      style={[styles.iconButton, glass && !liquid && styles.iconGlass]}
     >
-      <Icon name={icon} size={20} />
-    </Pressable>
+      {liquid ? (
+        <GlassSurface interactive radius={size.touch / 2} bordered={false} style={styles.iconLiquid}>
+          {glyph}
+        </GlassSurface>
+      ) : (
+        glyph
+      )}
+    </PressableScale>
   );
 }
 
@@ -163,7 +189,6 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   rowText: { flex: 1, gap: 2 },
   divider: { borderTopWidth: 1, borderTopColor: color.hairline },
-  pressed: { opacity: 0.6 },
   section: { paddingBottom: 4 },
   iconButton: {
     width: size.touch,
@@ -173,4 +198,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconGlass: { borderWidth: 1, borderColor: color.hairline, backgroundColor: color.surface },
+  iconLiquid: { width: size.touch, height: size.touch, alignItems: 'center', justifyContent: 'center' },
 });
