@@ -6,7 +6,8 @@ import { contactSheets, formatSweep, runSweep } from './sweep.js';
 
 /**
  * Phase 4 acceptance sweep: every template x theme x text case, measured in the page.
- * `npm run sweep [-- --only <template>] [--theme <id>] [--kind <case kind>]`.
+ * `npm run sweep [-- --only <template>] [--theme <id>] [--kind <case kind>] [--system-fonts]`.
+ * The browser runs with the machine's fonts hidden unless `--system-fonts` is given.
  */
 const args = process.argv.slice(2);
 const val = (n: string) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
@@ -15,6 +16,7 @@ const results = await runSweep({
   ...(val('--only') ? { templates: val('--only')!.split(',') as TemplateId[] } : {}),
   ...(val('--theme') ? { themes: val('--theme')!.split(',') } : {}),
   ...(val('--kind') ? { kinds: val('--kind')!.split(',') } : {}),
+  ...(args.includes('--system-fonts') ? { systemFonts: true } : {}),
   log: (l) => console.log(l),
 });
 const sheets = await contactSheets(results);

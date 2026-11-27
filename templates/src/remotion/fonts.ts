@@ -1,4 +1,5 @@
 import { staticFile } from 'remotion';
+import { FALLBACK_FONTS } from './scripts';
 import { BUNDLED_DISPLAY, BUNDLED_TEXT } from './style';
 
 const FACES: Array<[family: string, file: string, weight: number]> = [
@@ -24,4 +25,17 @@ export function loadFonts(): Promise<void> {
     ).then(() => undefined);
   }
   return loading;
+}
+
+/**
+ * Loads the bundled fallback faces (fallback-fonts.css) that `text` needs: each family is
+ * split into subsets by unicode-range, and only the subsets holding a character of the
+ * text are fetched. Resolves once they are in, so text is never measured with a face
+ * that has not arrived.
+ */
+export async function loadFallbackFonts(text: string): Promise<void> {
+  const sample = `${text}${text.toUpperCase()}`.replace(/\s+/g, '');
+  if (!sample) return;
+  const fontSet = document.fonts as unknown as { load(font: string, text?: string): Promise<unknown[]> };
+  await Promise.all(FALLBACK_FONTS.flatMap((f) => ['400', '700', '800', '900'].map((w) => fontSet.load(`${w} 100px "${f.family}"`, sample))));
 }

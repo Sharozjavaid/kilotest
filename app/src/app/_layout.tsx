@@ -54,6 +54,7 @@ function Navigator() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="new-batch" />
           <Stack.Screen name="batch/[id]" />
+          <Stack.Screen name="videos" />
           <Stack.Screen name="review/[id]" />
           <Stack.Screen name="export/[id]" />
           <Stack.Screen name="record/index" />

@@ -1,4 +1,4 @@
-import type { CreateBatchResponse, EditSettings, NewBrollAsset, NewClip } from '@kilo/edl';
+import { MODE_PRESETS, type CreateBatchResponse, type EditSettings, type Mode, type NewBrollAsset, type NewClip } from '@kilo/edl';
 import type { CreateBatchRequestInput } from '@/api/types';
 import type { NewUploadJob } from '@/uploads/queue';
 
@@ -25,6 +25,50 @@ export interface DraftVideo {
   title: string;
   clips: PickedFile[];
   broll: PickedFile[];
+  /** This video's own kind of video, when it differs from the batch's. */
+  mode?: Mode;
+  /** This video's own number of openings, when it differs from the batch's. */
+  hooks?: number;
+}
+
+/** What one video is edited with: its own mode and hooks over the batch's, for its row. */
+export function effectiveVideoSettings(batch: EditSettings, v: Pick<DraftVideo, 'mode' | 'hooks'>): { mode: Mode; hooks: number; own: boolean } {
+  const mode = v.mode ?? batch.mode;
+  const hooks = v.hooks ?? batch.hookVariations;
+  return { mode, hooks, own: mode !== batch.mode || hooks !== batch.hookVariations };
+}
+
+/**
+ * The video's `NewVideo.settings`: only what differs from the batch. A different mode
+ * brings that mode's pacing (as picking the mode for the whole batch does); nothing is
+ * sent when the video follows the batch.
+ */
+export function ownSettings(batch: EditSettings, v: Pick<DraftVideo, 'mode' | 'hooks'>): Partial<EditSettings> | undefined {
+  const { mode, hooks } = effectiveVideoSettings(batch, v);
+  const out: Partial<EditSettings> = {};
+  if (mode !== batch.mode) {
+    out.mode = mode;
+    const pacing = MODE_PRESETS[mode].settings.pacing;
+    if (pacing !== batch.pacing) out.pacing = pacing;
+  }
+  if (hooks !== batch.hookVariations) out.hookVariations = hooks;
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Sets one video's mode and hooks; values equal to the batch's are stored as "follow the batch". */
+export function setVideoSettings(videos: readonly DraftVideo[], videoKey: string, batch: EditSettings, next: { mode?: Mode; hooks?: number } | null): DraftVideo[] {
+  return videos.map((v) => {
+    if (v.key !== videoKey) return v;
+    const { mode: _m, hooks: _h, ...rest } = v;
+    if (!next) return rest;
+    const mode = next.mode ?? v.mode;
+    const hooks = next.hooks ?? v.hooks;
+    return {
+      ...rest,
+      ...(mode !== undefined && mode !== batch.mode ? { mode } : {}),
+      ...(hooks !== undefined && hooks !== batch.hookVariations ? { hooks: Math.max(1, Math.min(5, hooks)) } : {}),
+    };
+  });
 }
 
 let keySeq = 0;
@@ -124,6 +168,7 @@ export function toCreateBatchRequest(settings: EditSettings, videos: readonly Dr
     videos: videos.map((v, i) => ({
       title: cleanTitle(v.title, i + 1),
       source: 'upload' as const,
+      ...(ownSettings(settings, v) ? { settings: ownSettings(settings, v) } : {}),
       clips: v.clips.map((c): NewClip => ({ filename: c.filename, contentType: c.contentType, sizeBytes: c.sizeBytes })),
       broll: v.broll.map((b): NewBrollAsset => ({ filename: b.filename, contentType: b.contentType, sizeBytes: b.sizeBytes, kind: b.kind })),
     })),

@@ -1,0 +1,58 @@
+{
+  "id": "h01",
+  "title": "Desk stretches",
+  "clips": [
+    {
+      "name": "h01_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Three stretches you can do at your desk.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "Neck rolls for thirty seconds.",
+          "group": "g1"
+        },
+        {
+          "say": "Shoulder shrugs for thirty seconds.",
+          "group": "g2"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "say": "Wrist circles for thirty,",
+          "group": "g3",
+          "keep": false,
+          "reason": "false_start"
+        },
+        {
+          "say": "hold on",
+          "keep": false,
+          "reason": "off_script"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "Wrist circles for thirty seconds.",
+          "group": "g3"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "Do them every hour.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

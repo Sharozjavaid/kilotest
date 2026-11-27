@@ -11,12 +11,15 @@ import { saveToCameraRoll, shareVideo } from '@/export/media';
 import { nextVideoHref, revisionCheck } from '@/export/revision';
 import { formatDuration, plural } from '@/lib/format';
 import { VideoModal } from '@/components/VideoModal';
+import { overlaySummary } from '@/review/variantOverlays';
 import { useStableUrl } from '@/lib/stableUrl';
 import { Card, ErrorState, Header, Icon, LoadingBlock, PillButton, ProgressBar, Row, Screen, Text, color, radius, shadow } from '@/ui';
 
 interface Version {
   /** null for the base cut. */
   variantId: string | null;
+  /** "1 B-roll · 2 graphics" as this version plays, or null. */
+  overlays: string | null;
   label: string;
   hookText: string;
   durationSec: number;
@@ -59,7 +62,8 @@ export default function ExportScreen() {
 function ExportBody({ video, reviewedRevision, refetch }: { video: VideoDetail; reviewedRevision: number | null; refetch: () => void }) {
   const qc = useQueryClient();
   const edl = video.edl!;
-  const batch = useBatch(video.batchId);
+  // For "Next video" only: not polled from here.
+  const batch = useBatch(video.batchId, { poll: false });
   const posted = useMarkPosted();
   const [requestError, setRequestError] = useState<unknown>(null);
   const [selected, setSelected] = useState(0);
@@ -73,9 +77,10 @@ function ExportBody({ video, reviewedRevision, refetch }: { video: VideoDetail; 
     const latest = (variantId: string | null) =>
       finals.filter((r) => r.variantId === variantId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
     if (edl.variants.length === 0) {
-      return [{ variantId: null, label: 'Final cut', hookText: edl.segments.find((s) => s.keep && s.text)?.text ?? '', durationSec: edlStats(edl).keptSec, render: latest(null) }];
+      return [{ variantId: null, label: 'Final cut', hookText: edl.segments.find((s) => s.keep && s.text)?.text ?? '', durationSec: edlStats(edl).keptSec, render: latest(null), overlays: overlaySummary(edl, null) }];
     }
-    return edl.variants.map((x) => ({ variantId: x.id, label: x.label, hookText: x.hookText, durationSec: edlStats(edl, x.id).keptSec, render: latest(x.id) }));
+    // What each version carries, as it plays: a variant leaves out the base overlays it hides.
+    return edl.variants.map((x) => ({ variantId: x.id, label: x.label, hookText: x.hookText, durationSec: edlStats(edl, x.id).keptSec, render: latest(x.id), overlays: overlaySummary(edl, x.id) }));
   }, [video.renders, edl]);
 
   // Ask for final renders when the edit has changed since the last export (or never was exported).
@@ -314,6 +319,9 @@ function VersionTile({ version, selected, single, thumbnailUrl, onPress }: { ver
       </View>
       <Text variant="secondary" weight={selected ? 600 : 400} tone={selected ? 'ink' : 'muted'}>
         {version.label} · {formatDuration(version.durationSec)}
+      </Text>
+      <Text variant="label" tone="muted" numberOfLines={1} testID={`version-overlays-${version.variantId ?? 'base'}`}>
+        {version.overlays ?? 'No B-roll or graphics'}
       </Text>
     </Pressable>
   );

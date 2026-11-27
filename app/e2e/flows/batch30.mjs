@@ -5,16 +5,21 @@
 // As a fresh creator, through the app's UI only (the API is read to know what the screens should
 // show and to score the edit, never to change anything):
 //   1. picks the 72 clips of fixtures/out/batch30 (two picks: the library picker takes 60 at a
-//      time), merges the multi-clip recordings in the batch editor, names them, adds B-roll, sets
-//      the batch (mode, three hooks) and starts ONE batch of 30;
+//      time), merges the multi-clip recordings in the batch editor, names them, adds B-roll, gives
+//      videos their own kind of video and number of hooks so the one batch mixes General, UGC ad
+//      and TikTok Shop with one, two and three openings, sets the batch defaults and starts ONE
+//      batch of 30;
 //   2. watches the Batch and Home screens until all 30 are ready to review: upload and analysis
-//      progress, no video failed or stuck;
+//      progress, no video failed or stuck, one video's files before the next, the connection lost
+//      for a while mid-upload (uploads pause, finished files are never sent again), Home not
+//      polled while the Batch screen is in front, Home's ready list in batch order;
 //   3. reviews every video: the transcript rows against the EDL, the automatic edit against the
 //      fixture's ground truth; fixes each wrong unit by tapping its row; on 10 videos makes a
 //      deliberate edit (cuts a kept line or restores a cut one); burns in captions on 5;
 //      "Looks good", which starts the final renders, then "Next video";
-//   4. waits for every final render, then downloads every version from each Export screen
-//      ("Download all 3"), reached from Home's Finished list;
+//   4. waits for every final render (the batch stays on Home while it exports), then downloads
+//      every version from each Export screen ("Download all n"), reached through All videos
+//      (the library: Finished filter, search by title);
 //   5. checks every file: 1080x1920, the EDL's frame rate, duration within two frames of the
 //      saved edit, about -14 LUFS, and every frame traced back to the fixture unit it shows (no
 //      cut line, the band colours agree; deliberately restored lines are there, deliberately cut
@@ -23,8 +28,8 @@
 // Measurements and every finding go to .work/e2e/batch30/report.json and the log.
 //
 // Options (environment): E2E_BATCH30_COUNT=n uses only the first n recordings (to develop the
-// flow; the phase 1 claim needs all 30). E2E_BATCH30_MODE=general|ugc_ad|tiktok_shop (default
-// general; mode and hooks are per batch, see the report).
+// flow; the phase 1 claim needs all 30). E2E_BATCH30_MODE=general|ugc_ad|tiktok_shop: the batch's
+// default (general); each video's own mode and hooks follow VIDEO_PLAN below.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -47,6 +52,23 @@ const PICK_LIMIT = 60;
 /** Videos (by index in the batch) that get a deliberate edit, and those that get captions. */
 const DELIBERATE = new Set([1, 4, 7, 10, 13, 16, 19, 22, 25, 28]);
 const CAPTIONS = new Map([[0, 'Clean'], [6, 'Bold'], [12, 'Karaoke'], [18, 'Clean'], [24, 'Bold']]);
+/** The batch's own hooks (its default); videos may have their own. */
+const BATCH_HOOKS = 3;
+const MODES = ['general', 'ugc_ad', 'tiktok_shop'];
+const LABEL = { general: 'General', ugc_ad: 'UGC ad', tiktok_shop: 'TikTok Shop' };
+const PACING = { general: 'natural', ugc_ad: 'tight', tiktok_shop: 'tight' };
+/** Video i: the three modes in turn, and one, two or three openings, so every mode meets every hook count. */
+const VIDEO_PLAN = (i) => ({ mode: MODES[i % 3], hooks: [3, 2, 1][Math.floor(i / 3) % 3] });
+/** What the app should send as NewVideo.settings for a plan, given the batch's mode and hooks. */
+function expectedOwn(plan) {
+  const own = {};
+  if (plan.mode !== MODE) {
+    own.mode = plan.mode;
+    if (PACING[plan.mode] !== PACING[MODE]) own.pacing = PACING[plan.mode];
+  }
+  if (plan.hooks !== BATCH_HOOKS) own.hookVariations = plan.hooks;
+  return Object.keys(own).length ? own : undefined;
+}
 
 const sec = (ms) => Math.round(ms / 100) / 10;
 const median = (xs) => {
@@ -261,6 +283,18 @@ export default async function batch30(ctx) {
   const putDone = (r) => {
     if (r.method() === 'PUT' && r.url().includes('/v1/local/upload/')) inflight.puts--;
   };
+  // Every PUT in the order it started, and the links whose bytes the server took (204).
+  const putStarts = [];
+  const putOk = new Map();
+  const putAgainAfterOk = [];
+  page.on('request', (r) => {
+    if (r.method() !== 'PUT' || !r.url().includes('/v1/local/upload/')) return;
+    putStarts.push(r.url());
+    if (putOk.has(r.url())) putAgainAfterOk.push(r.url());
+  });
+  page.on('response', (r) => {
+    if (r.request().method() === 'PUT' && r.url().includes('/v1/local/upload/') && r.status() === 204) putOk.set(r.url(), Date.now());
+  });
   page.on('requestfinished', putDone);
   page.on('requestfailed', putDone);
   const failedResponses = [];
@@ -325,6 +359,7 @@ export default async function batch30(ctx) {
       await seeText(page, r.manifest.broll.at(-1).file.replace(/^broll\//, ''));
     }
     await shot(page, 'b30-02-editor-merged');
+
     await page.getByRole('button', { name: 'Done' }).click();
 
     // The batch: mode, three hooks, captions off (they go on per video in Review).
@@ -335,6 +370,32 @@ export default async function batch30(ctx) {
       await page.getByRole('button', { name: now > 3 ? 'Fewer variations' : 'More variations' }).click();
     }
     await seeText(page, 'Each video ships with 3 openings');
+    // Each video's own kind of video and hooks, from the line under its name in the editor (it follows the
+    // batch otherwise). Set after the batch's own, which they are relative to.
+    await page.getByRole('button', { name: /\. Edit videos$/ }).first().click();
+    await seeText(page, 'Videos in this batch');
+    const tOwn = Date.now();
+    let ownSet = 0;
+    for (const [i, r] of recs.entries()) {
+      const plan = VIDEO_PLAN(i);
+      if (!expectedOwn(plan)) continue;
+      ownSet++;
+      // Until the batch settings are chosen the line shows the app's starting defaults; set both fields.
+      const line = page.getByRole('button', { name: new RegExp(`^Settings for ${r.title}: `) });
+      await line.scrollIntoViewIfNeeded();
+      await line.click();
+      await page.getByRole('radiogroup', { name: `Kind of video for ${r.title}` }).getByRole('radio', { name: LABEL[plan.mode] }).click();
+      for (let k = 0; k < 6; k++) {
+        const now = Number(/\d+/.exec(await page.locator('[aria-label="openings"]').first().innerText({ timeout: 5000 }))?.[0]);
+        if (now === plan.hooks) break;
+        await page.getByRole('button', { name: now > plan.hooks ? 'Fewer openings' : 'More openings' }).click();
+      }
+      await line.click();
+    }
+    report.timings.ownSettingsSec = sec(Date.now() - tOwn);
+    if (ownSet) await shot(page, 'b30-02b-editor-own-settings');
+    await page.getByRole('button', { name: 'Done' }).click();
+    if (ownSet) await seeText(page, `${ownSet} videos have their own kind of video or hooks`);
     const capOn = await page.getByRole('switch', { name: 'Burn in captions' }).getAttribute('aria-checked').catch(() => null);
     if (capOn === 'true') await page.getByRole('switch', { name: 'Burn in captions' }).click();
     await seeText(page, `${recs.length} videos · ${report.clips} clips`);
@@ -357,7 +418,15 @@ export default async function batch30(ctx) {
       assert(v.clips.length === r.clips.length && v.broll.length === r.broll.length, `${r.title}: ${v.clips.length} clips and ${v.broll.length} B-roll sent`);
       v.clips.forEach((c, k) => assert(c.sizeBytes === statSync(r.clips[k]).size, `${c.filename}: sizeBytes ${c.sizeBytes}`));
     });
-    assert(req.settings.mode === MODE && req.settings.hookVariations === 3 && !req.settings.captions, `settings sent: ${JSON.stringify(req.settings)}`);
+    assert(req.settings.mode === MODE && req.settings.hookVariations === BATCH_HOOKS && !req.settings.captions, `settings sent: ${JSON.stringify(req.settings)}`);
+    // Every video's own settings, exactly what differs from the batch.
+    req.videos.forEach((v, i) => {
+      const want = expectedOwn(VIDEO_PLAN(i));
+      const norm = (o) => (o ? JSON.stringify(Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)))) : 'null');
+      assert(norm(v.settings) === norm(want), `${v.title}: own settings sent ${JSON.stringify(v.settings)}, expected ${JSON.stringify(want)}`);
+    });
+    report.modes = Object.fromEntries(MODES.map((m) => [m, recs.filter((_, i) => VIDEO_PLAN(i).mode === m).length]));
+    report.hooks = Object.fromEntries([1, 2, 3].map((h) => [h, recs.filter((_, i) => VIDEO_PLAN(i).hooks === h).length]));
     const batchId = batch.batch.id;
     const ids = batch.videos.map((v) => v.videoId);
     const recOf = new Map(ids.map((id, i) => [id, { ...recs[i], index: i }]));
@@ -376,12 +445,15 @@ export default async function batch30(ctx) {
     let uploadsDone = false;
     let homeChecked = false;
     let headerOk = 0;
+    // The connection goes for a while once a third of the files are in, then comes back.
+    let offlineDone = !(report.clips + report.broll >= 12);
+    report.offline = null;
     await waitFor(
       `all ${recs.length} videos to be ready to review`,
       async () => {
         const b = await api.batch(batchId);
         const text = await bodyText(page).catch(() => '');
-        for (const m of text.matchAll(/(Uploading \d+% · \d+ of \d+ files? in|Waiting to upload from this phone|Upload stopped|Uploaded\. Waiting to edit|Editing: finding the best takes · \d+%)/g)) seenLines.add(m[0].replace(/\d+/g, 'n'));
+        for (const m of text.matchAll(/(Uploading \d+% · \d+ of \d+ files? in|On this phone, waiting its turn to upload|Paused: no connection · \d+ of \d+ files? in|Can't reach Kilo, trying again · \d+ of \d+ files? in|Upload stopped|Uploaded · queued on the server to edit|Editing: finding the best takes · \d+%)/g)) seenLines.add(m[0].replace(/\d+/g, 'n'));
         for (const v of b.videos) {
           if (v.status === 'failed') throw new Failure(`${v.title} failed: ${v.error}`);
           if (v.progress !== null) progress.get(v.id).push(v.progress);
@@ -413,6 +485,23 @@ export default async function batch30(ctx) {
           report.shotUploading = true;
           await shot(page, 'b30-04-batch-uploading');
         }
+        if (!offlineDone && putOk.size >= Math.ceil((report.clips + report.broll) / 3)) {
+          offlineDone = true;
+          const okBefore = putOk.size;
+          const tOff = Date.now();
+          await cdp.send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+          const paused = await waitFor('the Batch screen to say uploads are paused', async () => (await bodyText(page)).includes('Uploads paused: no connection'), { timeoutMs: 15_000, everyMs: 250 }).then(() => true, () => false);
+          await shot(page, 'b30-04b-batch-offline');
+          const startsOffline = putStarts.length;
+          await sleep(8000);
+          const startedWhileOffline = putStarts.length - startsOffline;
+          await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 20, downloadThroughput: -1, uploadThroughput: 1_500_000 });
+          report.offline = { afterFiles: okBefore, pausedShown: paused, offlineSec: sec(Date.now() - tOff), startedWhileOffline };
+          ctx.log(`  connection lost after ${okBefore} files for ${report.offline.offlineSec}s: paused shown ${paused}, ${startedWhileOffline} uploads started while offline`);
+          assert(paused, 'the Batch screen never said the uploads were paused while offline');
+          assert(startedWhileOffline === 0, `${startedWhileOffline} uploads started while offline`);
+          lastChange = Date.now();
+        }
         // Midway: Home shows the batch with a done count that matches.
         if (!homeChecked && readyAt.size >= Math.ceil(recs.length / 3) && readyAt.size < recs.length) {
           homeChecked = true;
@@ -443,6 +532,27 @@ export default async function batch30(ctx) {
     report.upload = { puts: Object.entries(report.requests['upload+analysis']?.counts ?? {}).filter(([k]) => k.startsWith('PUT /v1/local/upload')).reduce((n, [, c]) => n + c, 0), maxConcurrentPuts: inflight.maxPuts, lines: [...seenLines] };
     ctx.log(`  uploads: ${report.upload.puts} PUTs for ${report.clips + report.broll} files, at most ${inflight.maxPuts} at once; lines seen: ${[...seenLines].join(' | ')}`);
     assert(report.upload.puts >= report.clips + report.broll, `only ${report.upload.puts} uploads for ${report.clips + report.broll} files`);
+    // One video's files before the next video's (first start of each upload link, in order).
+    const videoOfUrl = new Map(batch.videos.flatMap((v, i) => [...v.clips, ...v.broll].map((f) => [f.upload.url, i])));
+    const putOrder = [...new Set(putStarts)].map((u) => videoOfUrl.get(u)).filter((x) => x !== undefined);
+    const backwards = putOrder.filter((x, i) => i > 0 && x < putOrder[i - 1]).length;
+    report.upload.orderBackwards = backwards;
+    assert(backwards === 0, `uploads went back to an earlier video ${backwards} times: ${putOrder.join(',')}`);
+    // Files the server already had were never sent again (after the connection came back, or ever).
+    report.upload.resentAfterOk = putAgainAfterOk.length;
+    assert(!putAgainAfterOk.length, `${putAgainAfterOk.length} files were sent again after the server had them`);
+    // The first video was ready long before the last one was uploaded.
+    const firstReady = Math.min(...[...readyAt.values()]);
+    const lastUploaded = Math.max(...[...uploadedAt.values()]);
+    report.upload.firstReadyBeforeLastUploadSec = sec(lastUploaded - firstReady);
+    ctx.log(`  first video ready ${sec(firstReady - tSubmit)}s after submitting; last video uploaded at ${sec(lastUploaded - tSubmit)}s`);
+    // Home is not polled while the Batch screen is in front (it was only for the midway look at Home).
+    const counts = report.requests['upload+analysis']?.counts ?? {};
+    const homeGets = counts['GET /v1/home'] ?? 0;
+    const batchGets = counts['GET /v1/batches/:id'] ?? 0;
+    report.upload.homeGetsWhileOnBatch = homeGets;
+    ctx.log(`  while uploading and editing: ${batchGets} GET /batches, ${homeGets} GET /home`);
+    if (homeGets > Math.max(15, batchGets * 0.15)) finding('hidden_polling', `Home was fetched ${homeGets} times while the Batch screen was in front (${batchGets} batch fetches)`);
     for (const [id, list] of progress) {
       for (let i = 1; i < list.length; i++) assert(list[i] >= list[i - 1] - 1e-9, `${recOf.get(id).title}: analysis progress went backwards (${list[i - 1]} -> ${list[i]})`);
       report.perVideo[recOf.get(id).id].readyAfterSubmitSec = sec(readyAt.get(id) - tSubmit);
@@ -463,6 +573,12 @@ export default async function batch30(ctx) {
     const readyRows = page.getByRole('button', { name: new RegExp(`^(${recs.map((r) => r.title).join('|')}), `) });
     await waitFor('Home to list every video', async () => (await readyRows.count()) === recs.length, { timeoutMs: 30_000 });
     report.timings.homeListMs = Date.now() - tHome;
+    // In batch order: video 1 on top.
+    const readyOrder = (await readyRows.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).map((l) => recs.find((r) => l.startsWith(`${r.title}, `))?.title);
+    assert(readyOrder.join('|') === recs.map((r) => r.title).join('|'), `Home lists the ready videos out of batch order: ${readyOrder.slice(0, 5).join(', ')}…`);
+    // The batch stays on Home while its videos wait for review, and opens the Batch screen.
+    const readyCard = page.getByRole('button', { name: new RegExp(`^Batch of ${recs.length} is ready to review, ${recs.length} done`) });
+    assert((await readyCard.count()) === 1, 'the batch card left Home once every video was ready');
     const imgs = await page.locator('img').evaluateAll((els) => ({ all: els.filter((i) => i.src.includes('/v1/local/file/')).length, loaded: els.filter((i) => i.src.includes('/v1/local/file/') && i.naturalWidth > 0).length }));
     report.homeImages = imgs;
     ctx.log(`  Home lists ${recs.length} ready videos in ${report.timings.homeListMs} ms; ${imgs.all} thumbnail <img> in the page (${imgs.loaded} loaded)`);
@@ -511,6 +627,13 @@ export default async function batch30(ctx) {
       });
       pv.rows = want.length;
       pv.variants = edl0.variants.length;
+      // The edit was made with this video's own settings.
+      const plan = VIDEO_PLAN(i);
+      pv.mode = edl0.settings.mode;
+      pv.hooks = edl0.settings.hookVariations;
+      assert(edl0.settings.mode === plan.mode && edl0.settings.hookVariations === plan.hooks && edl0.settings.pacing === PACING[plan.mode], `${r.title}: edited as ${edl0.settings.mode} with ${edl0.settings.hookVariations} hooks (${edl0.settings.pacing}), planned ${plan.mode} with ${plan.hooks}`);
+      const wantVariants = plan.hooks === 1 ? 0 : plan.hooks;
+      if (edl0.variants.length !== wantVariants) finding('variants', `${r.title}: ${edl0.variants.length} openings for ${plan.hooks} hooks asked`);
       pv.fps = edl0.fps;
       pv.autoKeptSec = Math.round(resolveTimeline(edl0).durationSec * 10) / 10;
 
@@ -644,14 +767,24 @@ export default async function batch30(ctx) {
     }
     report.timings.reviewAllSec = sec(Date.now() - tReview);
     mark('all reviewed');
-    // While the exports run, Home shows every reviewed video (exporting or finished).
+    // While the exports run, the batch stays on Home (it opens the Batch screen), and All videos lists every
+    // reviewed video (exporting or finished) under Finished.
     await page.goto(ctx.appUrl + '/', { waitUntil: 'networkidle' });
     await seeText(page, 'Finished');
-    const listedWhileExporting = await page.getByRole('button', { name: new RegExp(`^(${recs.map((r) => r.title).join('|')}), .*(Exporting|Ready to post|Posted)`) }).count();
-    report.homeListedWhileExporting = listedWhileExporting;
-    ctx.log(`  Home while exporting lists ${listedWhileExporting} of ${recs.length}`);
-    if (listedWhileExporting < recs.length) finding('home_list', `while exporting, Home lists ${listedWhileExporting} of ${recs.length} reviewed videos`);
-    await shot(page, 'b30-08b-home-exporting');
+    const exportingCard = page.getByRole('button', { name: new RegExp(`^Batch of ${recs.length} is (exporting|ready to review|finished), `) });
+    report.batchCardWhileExporting = await exportingCard.count();
+    if (!report.batchCardWhileExporting) finding('batch_unreachable', 'while its videos export, the batch has no card on Home');
+    else {
+      await exportingCard.first().click();
+      await page.waitForURL((u) => new URL(u).pathname === `/batch/${batchId}`);
+      await seeText(page, recs[0].title);
+      await page.goto(ctx.appUrl + '/', { waitUntil: 'networkidle' });
+    }
+    const finishedNow = await libraryTitles(page, ctx, 'finished');
+    report.homeListedWhileExporting = recs.filter((r) => finishedNow.has(r.title)).length;
+    ctx.log(`  All videos (Finished) while exporting lists ${report.homeListedWhileExporting} of ${recs.length}`);
+    if (report.homeListedWhileExporting < recs.length) finding('library', `while exporting, All videos lists ${report.homeListedWhileExporting} of ${recs.length} reviewed videos under Finished`);
+    await shot(page, 'b30-08b-library-exporting');
     await longTasks('review');
 
     // ==== 4. Every export, then every download ==============================================
@@ -687,32 +820,29 @@ export default async function batch30(ctx) {
     report.timings.exportWaitAfterReviewSec = sec(Date.now() - tExportWait);
     if (retried.size) report.exportRetriedVideos = retried.size;
 
-    // Downloads: Home's Finished list -> each video's Export screen -> Download all.
+    // Downloads: Home -> All videos (Finished, search by title) -> each video's Export screen -> Download all.
     phase = 'download';
     const tDl = Date.now();
     await page.goto(ctx.appUrl + '/', { waitUntil: 'networkidle' });
     await seeText(page, 'Finished');
-    const home2 = await api.home();
-    const finishedOnHome = await page.getByRole('button', { name: new RegExp(`^(${recs.map((r) => r.title).join('|')}), .*(Ready to post|Posted)`) }).count();
-    report.homeFinishedListed = finishedOnHome;
-    ctx.log(`  Home's Finished list shows ${finishedOnHome} of ${recs.length} (GET /home recent: ${home2.recent.length})`);
-    if (finishedOnHome < recs.length) finding('home_list', `Home's Finished list shows ${finishedOnHome} of ${recs.length} finished videos (GET /home returns ${home2.recent.length}); the rest cannot be reached from Home`);
     await shot(page, 'b30-09-home-finished');
+    const finishedAll = await libraryTitles(page, ctx, 'finished');
+    report.homeFinishedListed = recs.filter((r) => finishedAll.has(r.title)).length;
+    ctx.log(`  All videos (Finished) lists ${report.homeFinishedListed} of ${recs.length}`);
+    if (report.homeFinishedListed < recs.length) finding('library', `All videos lists ${report.homeFinishedListed} of ${recs.length} finished videos`);
     const files = [];
     for (const id of ids) {
       const r = recOf.get(id);
       const edl = finalEdl.get(id);
       const n = Math.max(1, edl.variants.length);
       await page.goto(ctx.appUrl + '/', { waitUntil: 'networkidle' });
-      const row = page.getByRole('button', { name: new RegExp(`^${r.title}, .*(Ready to post|Posted)`) }).first();
-      if (await row.count()) {
-        await row.scrollIntoViewIfNeeded();
-        await row.click();
-      } else {
-        // Not on Home: the Batch screen still lists it (reached by its address only; see findings).
-        await page.goto(`${ctx.appUrl}/batch/${batchId}`, { waitUntil: 'networkidle' });
-        await page.getByRole('button', { name: new RegExp(`^${r.title}, `) }).first().click();
-      }
+      await page.getByRole('button', { name: 'All videos', exact: true }).first().click();
+      await page.waitForURL((u) => new URL(u).pathname === '/videos');
+      await page.getByTestId('library-filter-finished').click();
+      await page.getByTestId('library-search').fill(r.title);
+      const row = page.getByRole('button', { name: new RegExp(`^${escapeRe(r.title)}, .*(Ready to post|Posted)`) }).first();
+      await row.waitFor({ timeout: 20_000 });
+      await row.click();
       await page.waitForURL((u) => new URL(u).pathname === `/export/${id}`, { timeout: 20_000 });
       const ready = page.getByRole('button', { name: /\. Tap to play$/ });
       await waitFor(`${r.title}: every version ready`, async () => (await ready.count()) === n, { timeoutMs: 60_000 });
@@ -828,10 +958,18 @@ export default async function batch30(ctx) {
     assert(home3.readyToReview.length === 0 && home3.activeBatches.length === 0, `Home still has ${home3.readyToReview.length} to review and ${home3.activeBatches.length} active batches`);
     const doneAll = (await api.videos('?status=done')).videos.filter((v) => v.batchId === batchId).length;
     assert(doneAll === recs.length, `${doneAll} of ${recs.length} videos are done`);
-    const finishedRows = await page.getByRole('button', { name: new RegExp(`^(${recs.map((r) => r.title).join('|')}), .*(Ready to post|Posted)`) }).count();
+    // Home shows the latest finished few; All videos has them all.
+    const finishedRows = await page.getByRole('button', { name: new RegExp(`^(${recs.map((r) => escapeRe(r.title)).join('|')}), .*(Ready to post|Posted)`) }).count();
     report.homeFinishedListedEnd = finishedRows;
+    assert(finishedRows === Math.min(10, recs.length), `Home lists ${finishedRows} finished videos, expected the latest ${Math.min(10, recs.length)}`);
+    const endAll = await libraryTitles(page, ctx, 'all');
+    report.libraryListedEnd = recs.filter((r) => endAll.has(r.title)).length;
+    assert(report.libraryListedEnd === recs.length, `All videos lists ${report.libraryListedEnd} of ${recs.length} at the end`);
+    await page.goto(ctx.appUrl + '/', { waitUntil: 'networkidle' });
     const first = recOf.get(ids[0]);
-    await page.getByRole('button', { name: new RegExp(`^${first.title}, `) }).first().click();
+    await page.getByRole('button', { name: 'All videos', exact: true }).first().click();
+    await page.getByTestId('library-search').fill(first.title);
+    await page.getByRole('button', { name: new RegExp(`^${escapeRe(first.title)}, `) }).first().click();
     await page.waitForURL(/\/export\//);
     await page.getByRole('button', { name: 'I posted this, mark as posted' }).click();
     await seeText(page, 'Marked as posted');
@@ -886,10 +1024,43 @@ export default async function batch30(ctx) {
   }
 }
 
+const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Opens All videos from Home with a filter and scrolls the whole (virtualised) list, collecting
+ * every title it shows. Ends back on Home.
+ */
+async function libraryTitles(page, ctx, filter) {
+  await page.goto(ctx.appUrl + '/', { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'All videos', exact: true }).first().click();
+  await page.waitForURL((u) => new URL(u).pathname === '/videos');
+  await page.getByTestId(`library-filter-${filter}`).click();
+  const list = page.getByTestId('library-list');
+  await list.waitFor({ timeout: 20_000 });
+  const titles = new Set();
+  let stable = 0;
+  for (let k = 0; k < 200 && stable < 4; k++) {
+    const before = titles.size;
+    const labels = await page.locator('[data-testid="library-list"] [role="button"]').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? ''));
+    for (const l of labels) {
+      const m = /^(.*?), /.exec(l);
+      if (m && !/^Batch started/.test(l)) titles.add(m[1]);
+    }
+    await list.evaluate((el) => {
+      const scroller = [el, ...el.querySelectorAll('*')].find((x) => x.scrollHeight > x.clientHeight + 4 && getComputedStyle(x).overflowY !== 'visible') ?? el;
+      scroller.scrollTop += 500;
+    });
+    await sleep(150);
+    stable = titles.size === before ? stable + 1 : 0;
+  }
+  await page.goto(ctx.appUrl + '/', { waitUntil: 'networkidle' });
+  return titles;
+}
+
 function summarize(ctx, r) {
   const t = r.timings;
   ctx.log('\n  ---- batch30 summary ----');
-  ctx.log(`  ${r.videos} videos, ${r.clips} clips, ${r.broll} B-roll, ${r.sourceSec}s of footage, mode ${r.mode}, 3 hooks`);
+  ctx.log(`  ${r.videos} videos, ${r.clips} clips, ${r.broll} B-roll, ${r.sourceSec}s of footage; batch default ${r.mode}, ${BATCH_HOOKS} hooks; modes ${JSON.stringify(r.modes)}, hooks ${JSON.stringify(r.hooks)}`);
   ctx.log(`  wall ${r.totalWallSec}s; all uploaded ${t.uploadSec}s, all ready ${t.toAllReadySec}s, all exported ${t.toAllExportedSec}s after submitting; review of all ${t.reviewAllSec}s; downloads ${t.downloadAllSec}s; checks ${t.verifySec}s`);
   ctx.log(`  analysis per video (s): ${JSON.stringify(r.analysisSec)}; render per version (s): ${JSON.stringify(r.renderSec)}; render s per output s: ${JSON.stringify(r.renderSecPerOutputSec)}`);
   ctx.log(`  disk peak: storage ${r.disk.peakStorageMB} MB, job dirs ${r.disk.peakJobsMB} MB, together ${r.disk.peakTotalMB} MB`);

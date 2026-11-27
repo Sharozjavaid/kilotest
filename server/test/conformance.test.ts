@@ -53,8 +53,8 @@ describe('the server passes the shared API conformance scenarios (CONTRACTS.md s
         const res = await httpApi(client).createBatch(batchBody('clip.mp4'));
         return { videoId: res.videos[0]!.videoId, clipId: res.videos[0]!.clips[0]!.clipId };
       },
-      async readyVideo() {
-        const created = await uploadFixtures(client, ['routine'], { settings: settings({ hookVariations: 2 }) });
+      async readyVideo(own) {
+        const created = await uploadFixtures(client, ['routine'], { settings: settings({ hookVariations: 2 }), videoSettings: [own] });
         return waitForStatus(client, created.videos[0]!.videoId, 'ready_for_review');
       },
     };

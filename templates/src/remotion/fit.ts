@@ -14,17 +14,23 @@ export interface FontSpec {
   uppercase?: boolean;
 }
 
+import { fallbackFamilies } from './scripts';
+
 let ctx: CanvasRenderingContext2D | null = null;
 
-/** The requested family, then the bundled Inter, so a missing theme font never falls back to a system face. */
-function familyList(font: FontSpec): string {
-  return `"${font.family}", "Kilo Inter", sans-serif`;
+/**
+ * The requested family, then the bundled Inter, then the bundled faces for emoji and
+ * other scripts (scripts.ts), so neither a missing theme font nor a character Inter lacks
+ * ever falls back to a font of the machine.
+ */
+export function familyList(font: FontSpec): string {
+  return [font.family, 'Kilo Inter', ...fallbackFamilies()].map((f) => `"${f}"`).join(', ') + ', sans-serif';
 }
 const cache = new Map<string, number>();
 
 /** Width of `text` set at 1px. Text advances scale linearly with size. */
 function unitWidth(text: string, font: FontSpec): number {
-  const key = `${font.family}|${font.weight}|${font.tracking}|${font.uppercase ? 1 : 0}|${text}`;
+  const key = `${familyList(font)}|${font.weight}|${font.tracking}|${font.uppercase ? 1 : 0}|${text}`;
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
   if (!ctx) {
@@ -55,6 +61,8 @@ export function fontCss(font: FontSpec, size: number): React.CSSProperties {
     whiteSpace: 'pre',
     fontKerning: 'normal',
     fontFeatureSettings: '"kern" 1',
+    // A line takes the direction of its own text (Arabic, Hebrew read right to left).
+    unicodeBidi: 'plaintext',
   };
 }
 
@@ -231,7 +239,9 @@ function inkHeight(text: string, font: FontSpec): number {
   const size = 200;
   ctx!.font = `${font.weight} ${size}px ${familyList(font)}`;
   const m = ctx!.measureText(font.uppercase ? text.toUpperCase() : text);
-  return (m.actualBoundingBoxAscent + m.actualBoundingBoxDescent) / size;
+  const h = (m.actualBoundingBoxAscent + m.actualBoundingBoxDescent) / size;
+  // A canvas that reports no ink box (or an empty string) must never turn a layout into NaN.
+  return Number.isFinite(h) ? h : 0;
 }
 
 /** Space kept between the ink of two lines, in em. */

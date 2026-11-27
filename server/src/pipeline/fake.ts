@@ -190,6 +190,7 @@ function buildVariants(segments: Segment[], count: number): Variant[] {
       hookText: hook.text,
       segmentOrder: [hook.id, ...kept.filter((s) => s.id !== hook.id).map((s) => s.id)],
       overlays: [],
+      hiddenOverlayIds: [],
     });
   }
   return variants;

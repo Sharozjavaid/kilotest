@@ -1,0 +1,65 @@
+{
+  "id": "h04",
+  "title": "App picks",
+  "clips": [
+    {
+      "name": "h04_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "My three favourite apps this year.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "My first pick is a budget app.",
+          "group": "g1"
+        },
+        {
+          "say": "My second pick is a habit tracker.",
+          "group": "g2",
+          "keep": false,
+          "reason": "retake"
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "My second pick is a habit tracker.",
+          "group": "g2"
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "My third pick,",
+          "group": "g3",
+          "keep": false,
+          "reason": "false_start"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "My third pick is a recipe app.",
+          "group": "g3"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "Which one should I review first?",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

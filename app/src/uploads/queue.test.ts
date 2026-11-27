@@ -70,22 +70,23 @@ describe('UploadQueue', () => {
 
   it('retries a failed upload with exponential backoff, then marks it failed', async () => {
     const { transport, calls } = manualTransport();
+    const http = (status: number) => Object.assign(new Error(`Upload failed (${status})`), { status });
     const q = new UploadQueue({ transport, store: memoryStore(), complete: async () => ({ startedVideoIds: [], results: [] }), maxAttempts: 3, backoffMs: (n) => 1000 * 2 ** (n - 1) });
     await q.enqueue([job('c1', 'v1')]);
     await flush();
-    calls[0]!.reject(new Error('network down'));
+    calls[0]!.reject(http(500));
     await flush();
-    expect(q.getJobs()[0]).toMatchObject({ status: 'pending', attempts: 1, error: 'network down' });
+    expect(q.getJobs()[0]).toMatchObject({ status: 'pending', attempts: 1, error: 'Upload failed (500)' });
 
     await jest.advanceTimersByTimeAsync(999);
     expect(calls).toHaveLength(1);
     await jest.advanceTimersByTimeAsync(1);
     expect(calls).toHaveLength(2);
-    calls[1]!.reject(new Error('still down'));
+    calls[1]!.reject(http(502));
     await flush();
     await jest.advanceTimersByTimeAsync(2000);
     expect(calls).toHaveLength(3);
-    calls[2]!.reject(new Error('gave up'));
+    calls[2]!.reject(http(500));
     await flush();
     expect(q.getJobs()[0]).toMatchObject({ status: 'failed', attempts: 3 });
     expect(progressByVideo(q.getJobs()).get('v1')).toMatchObject({ failed: 1, failedIds: ['c1'] });
@@ -237,7 +238,7 @@ describe('UploadQueue', () => {
       };
     });
     const onStarted = jest.fn();
-    const q = new UploadQueue({ transport, store: memoryStore(), complete, reissue, concurrency: 3, backoffMs: () => 100, onStarted });
+    const q = new UploadQueue({ transport, store: memoryStore(), complete, reissue, concurrency: 3, videosAtOnce: 3, backoffMs: () => 100, onStarted });
     await q.enqueue([job('good', 'v1'), job('bad', 'v3'), job('gone', 'v2')]);
     await flush();
     calls.forEach((c) => c.resolve());

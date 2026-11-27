@@ -172,7 +172,7 @@ describe('swapping, removing and durations', () => {
     const first = spokenLines(base)[0]!;
     const g = base.overlays.find((o) => o.type === 'graphic')!;
     const title = { ...g, id: 'hook-title', anchorSegmentId: first.segment.id, offsetSec: 0, durationSec: 3, props: { text: 'Hi' } };
-    const withHook: Edl = { ...base, variants: [{ id: 'hook-b', label: 'Hook B', hookText: 'Hi', segmentOrder: base.segments.filter((s) => s.keep).map((s) => s.id), overlays: [title] }] };
+    const withHook: Edl = { ...base, variants: [{ id: 'hook-b', label: 'Hook B', hookText: 'Hi', segmentOrder: base.segments.filter((s) => s.keep).map((s) => s.id), overlays: [title], hiddenOverlayIds: [] }] };
     expect(checkOverlays(withHook, assets)).toEqual([]);
     expect(checkOverlayRules(withHook)).toEqual([]);
     const bad: Edl = { ...base, overlays: [...base.overlays, { ...g, id: 'x9', offsetSec: g.offsetSec + 0.1 }] };

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View, type ScrollViewInstance } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { VideoView } from 'expo-video';
-import { edlStats, playbackRanges, type Edl, type VideoDetail } from '@kilo/edl';
+import { edlStats, getTemplate, playbackRanges, type Edl, type Overlay, type VideoDetail } from '@kilo/edl';
 import { useBatch, useRender, useRetryVideo, useVideo } from '@/api/queries';
 import { getApi } from '@/api/client';
 import { errorMessage } from '@/api/errors';
@@ -11,7 +11,10 @@ import { useEdlSaver } from '@/review/useEdlSaver';
 import { useSkipPlayer } from '@/review/useSkipPlayer';
 import { useStableUrl } from '@/lib/stableUrl';
 import { ScrubStrip } from '@/review/ScrubStrip';
-import { TranscriptRowView } from '@/review/TranscriptRowView';
+import { TranscriptRowView, type RowOverlayInfo } from '@/review/TranscriptRowView';
+import { CutStepper } from '@/review/CutStepper';
+import { cutContextSpan, cutLines, cutReasonText, cutSummary, proxyDuration, stepCut } from '@/review/cuts';
+import { markedSegments, rowOverlays } from '@/review/variantOverlays';
 import { activeRowId, transcriptRows, type TranscriptRow } from '@/review/rows';
 import type { ScrubTarget } from '@/review/scrub';
 import { VideoModal } from '@/components/VideoModal';
@@ -35,7 +38,8 @@ import {
 export default function ReviewScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const video = useVideo(id);
-  const batch = useBatch(video.data?.batchId);
+  // Only for "3 of 30": the batch is not polled from here.
+  const batch = useBatch(video.data?.batchId, { poll: false });
   const position = useMemo(() => {
     const list = batch.data?.videos ?? [];
     const i = list.findIndex((v) => v.id === id);
@@ -109,11 +113,24 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
   const ranges = useMemo(() => playbackRanges(edl, offsets, activeVariant), [edl, offsets, activeVariant]);
   const stats = useMemo(() => edlStats(edl, activeVariant), [edl, activeVariant]);
   const rows = useMemo(() => transcriptRows(edl, offsets), [edl, offsets]);
-  // Lines with B-roll or a graphic in the cut being watched get a marker.
-  const marked = useMemo(() => {
-    const variant = edl.variants.find((x) => x.id === activeVariant);
-    return new Set([...edl.overlays, ...(variant?.overlays ?? [])].map((o) => o.anchorSegmentId));
-  }, [edl, activeVariant]);
+  // Lines with B-roll or a graphic in the cut being watched get a marker: what that version shows,
+  // so a base overlay a variant leaves out is not marked there.
+  const marked = useMemo(() => markedSegments(edl, activeVariant), [edl, activeVariant]);
+  // With a variant selected, each line's base overlays split into shown and left out, with a way to change it.
+  const variantLabel = edl.variants.find((x) => x.id === activeVariant)?.label ?? null;
+  const overlayInfo = useMemo(() => {
+    const out = new Map<string, RowOverlayInfo>();
+    if (!activeVariant || !variantLabel) return out;
+    const item = (o: Overlay) => ({ id: o.id, label: o.type === 'broll' ? 'B-roll' : getTemplate(o.template).name });
+    for (const [segmentId, r] of rowOverlays(edl, activeVariant)) out.set(segmentId, { variantLabel, shown: r.shown.map(item), hidden: r.hidden.map(item) });
+    return out;
+  }, [edl, activeVariant, variantLabel]);
+  // The cut lines, why each was cut, and stepping through them.
+  const hasScript = !!video.script?.length;
+  const cuts = useMemo(() => cutLines(edl, hasScript), [edl, hasScript]);
+  const why = useMemo(() => new Map(rows.filter((r) => !r.keep).map((r) => [r.segmentId, cutReasonText(edl, r.segmentId, hasScript)])), [rows, edl, hasScript]);
+  const keepBothIds = useMemo(() => new Set(cuts.filter((c) => c.canKeepBoth).map((c) => c.segmentId)), [cuts]);
+  const proxySec = useMemo(() => proxyDuration(edl, offsets), [edl, offsets]);
   // The proxy link is re-signed on every refetch; keep one until it stops working.
   const proxyUrl = useStableUrl(video.proxy.url);
   const refetchVideo = useVideo(video.id).refetch;
@@ -144,6 +161,28 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
   }, [activeId, sp.playing]);
 
   const onToggle = useCallback((segmentId: string) => saver?.toggle(segmentId), [saver]);
+  // Keep both: the cut retake comes back; the take that replaced it stays (a plain restore of this line).
+  const onKeepBoth = useCallback((segmentId: string) => saver?.toggle(segmentId), [saver]);
+  const onOverlayHidden = useCallback(
+    (overlayId: string, hidden: boolean) => {
+      if (activeVariant) saver?.edit({ type: 'overlayHidden', variantId: activeVariant, overlayId, hidden });
+    },
+    [saver, activeVariant],
+  );
+
+  // ---- stepping through cuts ----
+  const [stepped, setStepped] = useState<string | null>(null);
+  // The cut being played, while it plays (or the last one stepped to, while paused on it).
+  const currentCut = sp.snapshot.audition?.segmentId ?? (stepped && cuts.some((c) => c.segmentId === stepped) ? stepped : null);
+  const onStepCut = (dir: 1 | -1) => {
+    const target = stepCut(edl, cuts, currentCut, dir, sp.snapshot.segmentId);
+    const row = target ? rows.find((r) => r.segmentId === target.segmentId) : undefined;
+    if (!target || !row) return;
+    setStepped(target.segmentId);
+    const y = rowY.current.get(target.segmentId);
+    if (y !== undefined) scrollRef.current?.scrollTo({ y: Math.max(0, y - 54), animated: true });
+    sp.playSpan(target.segmentId, cutContextSpan(row, proxySec));
+  };
   const onSeek = useCallback(
     (row: TranscriptRow) => {
       sp.seekToSegment(row.segmentId, row);
@@ -337,7 +376,10 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
         marked={marked}
       />
 
-      <CaptionsControl captions={edl.captions} onChange={(captions) => saver?.edit({ type: 'captions', captions })} />
+      <View style={styles.tools}>
+        <CaptionsControl captions={edl.captions} onChange={(captions) => saver?.edit({ type: 'captions', captions })} />
+        <CutStepper lines={cuts} current={currentCut} summary={cutSummary(cuts)} onStep={onStepCut} />
+      </View>
 
       <ScrollView
         ref={scrollRef}
@@ -350,7 +392,17 @@ function ReviewBody({ video, position }: { video: VideoDetail & { edl: Edl; prox
       >
         {rows.map((row) => (
           <View key={row.segmentId} onLayout={(e) => rowY.current.set(row.segmentId, e.nativeEvent.layout.y)}>
-            <TranscriptRowView row={row} active={row.segmentId === activeId} onToggle={onToggle} onSeek={onSeek} hasOverlay={marked.has(row.segmentId)} />
+            <TranscriptRowView
+              row={row}
+              active={row.segmentId === activeId}
+              onToggle={onToggle}
+              onSeek={onSeek}
+              hasOverlay={marked.has(row.segmentId)}
+              why={why.get(row.segmentId)}
+              onKeepBoth={!row.keep && keepBothIds.has(row.segmentId) ? onKeepBoth : undefined}
+              overlays={overlayInfo.get(row.segmentId)}
+              onOverlayHidden={activeVariant ? onOverlayHidden : undefined}
+            />
           </View>
         ))}
       </ScrollView>
@@ -412,6 +464,7 @@ const styles = StyleSheet.create({
   legend: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   swatch: { width: 12, height: 12, borderRadius: 3 },
   list: { flex: 1, minHeight: 0 },
+  tools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   actions: { flexDirection: 'row', gap: 10 },
   notice: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', padding: 12, borderRadius: 14, backgroundColor: color.white, borderWidth: 1, borderColor: color.hairline },
   previewLink: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, marginTop: 2 },

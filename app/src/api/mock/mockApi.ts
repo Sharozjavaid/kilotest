@@ -1,5 +1,6 @@
 import {
   DEFAULT_SETTINGS,
+  EditSettings as EditSettingsSchema,
   Edl as EdlSchema,
   MODE_PRESETS,
   TemplatePropsSchemas,
@@ -24,10 +25,10 @@ import {
   type VideoSummary,
 } from '@kilo/edl';
 import { KiloApiError } from '../errors';
-import type { KiloApi } from '../types';
+import type { KiloApi, ListVideosQuery } from '../types';
 import { buildMockAnalysis } from './build';
 import { placeOverlay, spokenLines } from '@/broll/overlays';
-import { mediaExtension, mergeClientEdl } from './rules';
+import { mediaExtension, mergeClientEdl, pruneHiddenOverlays } from './rules';
 
 /** URLs of the media the mock serves. Resolved from bundled assets in src/api/mock/media.ts. */
 export interface MockMedia {
@@ -61,6 +62,8 @@ export const MOCK_TIMINGS = {
 
 interface MockVideo {
   summary: VideoSummary;
+  /** The settings this video is edited with: its own laid over its batch's (server: videos.settings). */
+  settings: EditSettings;
   script: string[] | null;
   clipIds: string[];
   pendingClipIds: Set<string>;
@@ -156,14 +159,15 @@ export class MockKiloApi implements KiloApi {
   async home() {
     await this.delay();
     const summaries = [...this.videos.values()].map((v) => v.summary);
-    const activeBatches = [...this.batches.values()]
-      .filter((b) => b.videoIds.some((id) => isWaiting(this.mustVideo(id).summary.status)))
-      .sort(byNewest)
+    // As the server: a batch stays on Home until every video of it is done (or deleted).
+    const activeBatches = this.batchesNewestFirst()
+      .filter((b) => b.videoIds.some((id) => this.mustVideo(id).summary.status !== 'done'))
       .map((b) => this.batchSummary(b));
     return clone({
       goal: this.goal,
       activeBatches,
-      readyToReview: summaries.filter((s) => s.status === 'ready_for_review').sort(byNewest),
+      // Newest batch first, each batch in the order its videos were put in.
+      readyToReview: this.inBatchOrder(summaries.filter((s) => s.status === 'ready_for_review')),
       recent: summaries.filter((s) => s.status === 'rendering' || s.status === 'done').sort(byUpdatedNewest).slice(0, 50),
     });
   }
@@ -171,18 +175,24 @@ export class MockKiloApi implements KiloApi {
   async createBatch(body: Parameters<KiloApi['createBatch']>[0]) {
     await this.delay();
     if (!body.videos.length) throw new KiloApiError(400, 'invalid_request', 'videos: give at least one');
+    const own: EditSettings[] = [];
     for (const [i, nv] of body.videos.entries()) {
+      // A video's own settings are laid over the batch's (server: videoSettings in batches.ts).
+      const merged = EditSettingsSchema.safeParse({ ...body.settings, ...(nv.settings ?? {}) });
+      if (!merged.success) throw new KiloApiError(400, 'invalid_request', `videos.${i}.settings: ${merged.error.issues[0]?.message ?? 'invalid'}`);
+      own.push(merged.data);
       for (const c of nv.clips) if (!mediaExtension(c.filename, c.contentType, 'clip')) throw unsupported(`videos.${i}: `, c.filename);
       for (const b of nv.broll ?? []) if (!mediaExtension(b.filename, b.contentType, 'broll')) throw unsupported(`videos.${i}: `, b.filename);
     }
     const batch: MockBatch = { id: this.id('batch'), createdAt: this.iso(), settings: body.settings, videoIds: [] };
     this.batches.set(batch.id, batch);
-    const out = body.videos.map((nv) => {
+    const out = body.videos.map((nv, index) => {
       const videoId = this.id('video');
       const clips = nv.clips.map(() => ({ clipId: this.id('clip') }));
       const broll = (nv.broll ?? []).map((b) => ({ assetId: this.id('asset'), b }));
       const video: MockVideo = {
         summary: this.newSummary(videoId, batch.id, nv.title, 'uploading', nv.clips.length),
+        settings: own[index]!,
         script: nv.script ?? null,
         clipIds: clips.map((c) => c.clipId),
         pendingClipIds: new Set(clips.map((c) => c.clipId)),
@@ -280,13 +290,28 @@ export class MockKiloApi implements KiloApi {
     return clone({ clips, broll });
   }
 
-  async listVideos(query?: { status?: VideoStatus; batchId?: string }) {
+  /** As the server's GET /videos: status (one or several), batch, title search, order, and keyset pages after a video id. */
+  async listVideos(query: ListVideosQuery = {}) {
     await this.delay();
-    const videos = [...this.videos.values()]
+    const statuses = query.status === undefined ? [] : Array.isArray(query.status) ? query.status : [query.status];
+    if (query.limit !== undefined && (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 200)) {
+      throw new KiloApiError(400, 'invalid_request', 'limit: a whole number from 1 to 200');
+    }
+    const q = query.q?.trim().toLowerCase();
+    const matching = [...this.videos.values()]
       .map((v) => v.summary)
-      .filter((s) => (!query?.status || s.status === query.status) && (!query?.batchId || s.batchId === query.batchId))
-      .sort(byNewest);
-    return clone({ videos });
+      .filter((s) => (!statuses.length || statuses.includes(s.status)) && (!query.batchId || s.batchId === query.batchId) && (!q || s.title.toLowerCase().includes(q)));
+    let videos = query.order === 'batch' ? this.inBatchOrder(matching) : matching.sort(byNewest);
+    if (query.after !== undefined) {
+      if (!this.videos.has(query.after)) throw new KiloApiError(400, 'invalid_request', 'after: unknown video; start again from the first page');
+      // The cursor's place in the full order, whatever the filter.
+      const all = [...this.videos.values()].map((v) => v.summary);
+      const order = (query.order === 'batch' ? this.inBatchOrder(all) : all.sort(byNewest)).map((s) => s.id);
+      const rank = new Map(order.map((id, i) => [id, i]));
+      const at = rank.get(query.after)!;
+      videos = videos.filter((s) => rank.get(s.id)! > at);
+    }
+    return clone({ videos: videos.slice(0, query.limit ?? 500) });
   }
 
   async getVideo(videoId: string): Promise<VideoDetail> {
@@ -385,11 +410,17 @@ export class MockKiloApi implements KiloApi {
     v.pendingAssetIds.delete(assetId);
     if (v.edl) {
       const keep = (o: { type: string; assetId?: string }) => !(o.type === 'broll' && o.assetId === assetId);
-      v.edl = {
+      const next = pruneHiddenOverlays({
         ...v.edl,
         overlays: v.edl.overlays.filter(keep),
         variants: v.edl.variants.map((x) => ({ ...x, overlays: x.overlays.filter(keep) })),
-      };
+      });
+      // As the server: a removal that changed the edit is stored as the next revision.
+      const changed = next.overlays.length !== v.edl.overlays.length || next.variants.some((x, i) => x.overlays.length !== v.edl!.variants[i]!.overlays.length);
+      if (changed) {
+        v.edl = { ...next, revision: v.edl.revision + 1 };
+        this.applyStats(v);
+      }
     }
   }
 
@@ -404,7 +435,7 @@ export class MockKiloApi implements KiloApi {
     this.setStatus(v, 'analyzing', MOCK_TIMINGS.replan);
     this.later(MOCK_TIMINGS.replan, () => {
       const current = v.edl!;
-      const fresh = buildMockAnalysis({ videoId, clipIds: v.clipIds, settings: { ...current.settings, broll: false }, broll: [] });
+      const fresh = buildMockAnalysis({ videoId, clipIds: v.clipIds, settings: { ...v.settings, broll: false }, broll: [] });
       let edl: Edl = { ...current, revision: current.revision + 1 };
       // Placement passes never change cuts: only overlays and variants are redone.
       if (passes.has('graphics')) {
@@ -432,7 +463,7 @@ export class MockKiloApi implements KiloApi {
         }
       }
       if (passes.has('variants')) edl = { ...edl, variants: fresh.edl.variants };
-      v.edl = edl;
+      v.edl = pruneHiddenOverlays(edl);
       this.applyStats(v);
       this.setStatus(v, 'ready_for_review');
     });
@@ -579,8 +610,8 @@ export class MockKiloApi implements KiloApi {
   }
 
   private analyse(v: MockVideo): void {
-    const batch = this.batches.get(v.summary.batchId);
-    const settings = batch?.settings ?? DEFAULT_SETTINGS;
+    // The video's own settings, never the batch's: they may differ per video.
+    const settings = v.settings;
     for (const b of v.broll) {
       if (b.status !== 'failed' && b.status !== 'ready') markReady(b);
     }
@@ -727,6 +758,20 @@ export class MockKiloApi implements KiloApi {
     };
   }
 
+  /** Batches, newest first. Map order is creation order: a later batch wins a tie on the millisecond. */
+  private batchesNewestFirst(): MockBatch[] {
+    return [...this.batches.values()].map((b, i) => ({ b, i })).sort((x, y) => y.b.createdAt.localeCompare(x.b.createdAt) || y.i - x.i).map((x) => x.b);
+  }
+
+  /** Newest batch first; inside a batch, the order the creator put its videos in. */
+  private inBatchOrder(list: VideoSummary[]): VideoSummary[] {
+    const batches = this.batchesNewestFirst();
+    const rank = new Map<string, number>();
+    let n = 0;
+    for (const b of batches) for (const id of b.videoIds) rank.set(id, n++);
+    return [...list].sort((a, b) => (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9));
+  }
+
   private batchSummary(b: MockBatch): BatchSummary {
     const counts: Partial<Record<VideoStatus, number>> = {};
     for (const id of b.videoIds) {
@@ -744,6 +789,7 @@ export class MockKiloApi implements KiloApi {
       const clipIds = Array.from({ length: opts.clips ?? 1 }, () => this.id('clip'));
       const v: MockVideo = {
         summary: this.newSummary(id, batch.id, title, status, clipIds.length, this.iso(-opts.ageMs)),
+        settings: batch.settings,
         script: null,
         clipIds,
         pendingClipIds: new Set(),
@@ -812,10 +858,6 @@ export class MockKiloApi implements KiloApi {
       error: "We couldn't hear any speech in this clip. Check the microphone wasn't covered, then try again.",
     });
   }
-}
-
-function isWaiting(s: VideoStatus): boolean {
-  return s === 'uploading' || s === 'queued' || s === 'analyzing';
 }
 
 function byNewest(a: { createdAt: string }, b: { createdAt: string }): number {

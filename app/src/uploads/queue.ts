@@ -20,6 +20,13 @@ import type { CompleteUploadsRequest, CompleteUploadsResponse, ReissueUploadsReq
  *   others.
  * - Asks for a fresh target (`uploads/targets`) when an upload is refused as expired
  *   or unauthorised.
+ * - Sends one video's files before the next video's (`videosAtOnce`, default 1), so the
+ *   first videos start editing on the server while later ones are still uploading. A file
+ *   waiting out a retry delay does not hold up the videos behind it.
+ * - Pauses when the connection goes (`setOnline(false)`): running uploads are stopped
+ *   without spending an attempt (a `tus` upload keeps its place; a plain PUT starts that
+ *   file again), and files already in are never sent again. A failure with no answer from
+ *   the server (no connection) is retried with growing waits and never marks a file failed.
  */
 
 export type JobStatus = 'pending' | 'uploading' | 'uploaded' | 'done' | 'failed';
@@ -46,6 +53,8 @@ export interface UploadJob {
   deleteAfterUpload?: boolean;
   /** The target is spent (expired, refused, or the server dropped the bytes): ask for a fresh one before uploading. */
   needsTarget?: boolean;
+  /** Times in a row the upload found no connection (does not count toward `maxAttempts`). */
+  connectionWaits?: number;
   error?: string;
 }
 
@@ -75,6 +84,8 @@ export interface QueueDeps {
   /** POST /uploads/targets. Without it a spent target is simply tried again. */
   reissue?: (body: ReissueUploadsRequest) => Promise<ReissueUploadsResponse>;
   concurrency?: number;
+  /** How many videos may upload at the same time (default 1: one video's files, then the next). */
+  videosAtOnce?: number;
   maxAttempts?: number;
   /** Delay before attempt n+1 after n failures. */
   backoffMs?: (attempts: number) => number;
@@ -92,6 +103,14 @@ export function isSpentTargetError(e: unknown): boolean {
   const status = (e as { status?: unknown } | null)?.status;
   if (typeof status === 'number') return status === 401 || status === 403 || status === 404 || status === 410;
   return /\b(401|403|404|410)\b|expired/i.test(e instanceof Error ? e.message : String(e));
+}
+
+/** A failure with no HTTP answer: the connection (or the server) is not there. Worth waiting for, never a reason to give up. */
+export function isConnectionError(e: unknown): boolean {
+  const status = (e as { status?: unknown } | null)?.status;
+  if (typeof status === 'number' && status > 0) return false;
+  const msg = e instanceof Error ? e.message : String(e);
+  return /network|failed to fetch|load failed|connection|offline|timed? ?out|ECONN|socket/i.test(msg);
 }
 
 /** Words for the user about a file the server refused. */
@@ -117,6 +136,7 @@ export class UploadQueue {
   private reissueAttempts = 0;
   private loaded = false;
   private paused = false;
+  private offline = false;
   /** Bumped by `reset()`, so answers to calls made before it are ignored. */
   private generation = 0;
   private readonly d: Required<Omit<QueueDeps, 'onStarted' | 'discard' | 'reissue'>> & Pick<QueueDeps, 'onStarted' | 'discard' | 'reissue'>;
@@ -124,6 +144,7 @@ export class UploadQueue {
   constructor(deps: QueueDeps) {
     this.d = {
       concurrency: 3,
+      videosAtOnce: 1,
       maxAttempts: 5,
       backoffMs: defaultBackoff,
       now: () => Date.now(),
@@ -140,13 +161,17 @@ export class UploadQueue {
     if (!this.loaded) {
       const stored = await this.d.store.load().catch(() => [] as UploadJob[]);
       const known = new Set(this.jobs.map((j) => j.id));
-      // Finished jobs are dropped; anything that was mid-upload when the app stopped starts again.
+      // Videos with every file in are dropped. A video still sending keeps its finished files, so
+      // "2 of 3 files in" stays true after a relaunch. Anything mid-upload when the app stopped
+      // starts again (a `tus` upload from where it was).
+      const unfinished = new Set(stored.filter((j) => j.status !== 'done').map((j) => j.videoId));
       const restored = stored
-        .filter((j) => !known.has(j.id) && j.status !== 'done')
+        .filter((j) => !known.has(j.id) && (j.status !== 'done' || unfinished.has(j.videoId)))
         .map((j) => (j.status === 'uploading' ? { ...j, status: 'pending' as const } : j));
       this.jobs = [...restored, ...this.jobs];
       this.loaded = true;
     }
+    if (this.offline) return;
     this.paused = false;
     this.pump();
   }
@@ -180,9 +205,42 @@ export class UploadQueue {
     this.pump();
   }
 
-  /** Stops starting new uploads (e.g. offline). Running ones continue. */
+  /** Stops starting new uploads. Running ones continue. */
   pause(): void {
     this.paused = true;
+  }
+
+  /**
+   * The connection came or went. Offline: running uploads stop now, go back to pending
+   * without spending an attempt, and nothing starts until the connection is back; files
+   * already in stay in. Online: carries on.
+   */
+  setOnline(online: boolean): void {
+    if (online === !this.offline) {
+      if (online && this.paused) void this.resume();
+      return;
+    }
+    this.offline = !online;
+    if (!online) {
+      this.paused = true;
+      for (const [id, c] of this.active) {
+        c.abort();
+        const j = this.jobs.find((x) => x.id === id);
+        // A plain PUT starts again from the first byte; a tus upload continues from its offset.
+        if (j) this.patch(id, { status: 'pending', attempts: Math.max(0, j.attempts - 1), bytesSent: j.target.kind === 'tus' ? j.bytesSent : 0, nextAttemptAt: 0 });
+      }
+      this.active.clear();
+      void this.persist();
+      this.emit();
+    } else {
+      void this.resume();
+      this.emit();
+    }
+  }
+
+  /** True while uploads wait for the connection to come back. */
+  isOffline(): boolean {
+    return this.offline;
   }
 
   /** Cancels running uploads; they go back to pending and restart on `resume()`. */
@@ -226,9 +284,10 @@ export class UploadQueue {
     return this.jobs.some((j) => j.batchId === batchId && j.status !== 'done' && j.status !== 'failed');
   }
 
-  /** Drops finished jobs from storage. */
+  /** Drops the jobs of videos whose files are all in. */
   async prune(): Promise<void> {
-    this.jobs = this.jobs.filter((j) => j.status !== 'done');
+    const unfinished = new Set(this.jobs.filter((j) => j.status !== 'done').map((j) => j.videoId));
+    this.jobs = this.jobs.filter((j) => j.status !== 'done' || unfinished.has(j.videoId));
     await this.persist();
     this.emit();
   }
@@ -253,6 +312,7 @@ export class UploadQueue {
     if (this.paused) return;
     const now = this.d.now();
     let soonest = Infinity;
+    const lanes = this.openVideos(now);
     for (const job of this.jobs) {
       if (this.active.size >= this.d.concurrency) break;
       if (job.status !== 'pending') continue;
@@ -261,6 +321,7 @@ export class UploadQueue {
         continue;
       }
       if (job.needsTarget && this.d.reissue) continue;
+      if (!lanes.has(job.videoId)) continue;
       this.start(job);
     }
     this.maybeReissue();
@@ -269,6 +330,22 @@ export class UploadQueue {
       soonest = Math.min(soonest, this.completeNotBefore);
     }
     if (soonest < Infinity) this.wakeAt(soonest);
+  }
+
+  /**
+   * The videos whose files may upload now: the first `videosAtOnce` videos, in queue order,
+   * that still have a file to send now or one on its way. A video whose only remaining files
+   * wait out a retry delay (or a fresh target) does not take a place.
+   */
+  private openVideos(now: number): Set<string> {
+    const open = new Set<string>();
+    for (const j of this.jobs) {
+      if (open.size >= this.d.videosAtOnce) break;
+      if (open.has(j.videoId)) continue;
+      const sending = j.status === 'uploading' || (j.status === 'pending' && j.nextAttemptAt <= now && !(j.needsTarget && this.d.reissue));
+      if (sending) open.add(j.videoId);
+    }
+    return open;
   }
 
   private wakeAt(at: number): void {
@@ -307,7 +384,7 @@ export class UploadQueue {
       .then(
         () => {
           if (controller.signal.aborted) return;
-          this.patch(job.id, { status: 'uploaded', bytesSent: job.sizeBytes });
+          this.patch(job.id, { status: 'uploaded', bytesSent: job.sizeBytes, connectionWaits: 0, error: undefined });
         },
         (e: unknown) => {
           if (controller.signal.aborted) return;
@@ -315,7 +392,18 @@ export class UploadQueue {
           const message = e instanceof Error ? e.message : String(e);
           // An expired or refused link will not work again: the next attempt asks for a fresh one.
           const spent = isSpentTargetError(e);
-          if (j.attempts >= this.d.maxAttempts) {
+          if (!spent && isConnectionError(e)) {
+            // No connection (or no server): wait and try again, without spending an attempt.
+            const waits = (j.connectionWaits ?? 0) + 1;
+            this.patch(job.id, {
+              status: 'pending',
+              attempts: Math.max(0, j.attempts - 1),
+              connectionWaits: waits,
+              error: 'Waiting for a connection',
+              bytesSent: j.target.kind === 'tus' ? j.bytesSent : 0,
+              nextAttemptAt: this.d.now() + this.d.backoffMs(Math.min(waits, 7)),
+            });
+          } else if (j.attempts >= this.d.maxAttempts) {
             this.patch(job.id, { status: 'failed', error: message, needsTarget: spent || j.needsTarget });
           } else {
             this.patch(job.id, {
@@ -526,4 +614,71 @@ export function progressByVideo(jobs: readonly UploadJob[]): Map<string, VideoUp
     p.fraction = total > 0 ? sent / total : 0;
   }
   return out;
+}
+
+/** Every file of a batch that this phone is sending, together: the Batch screen's overall line. */
+export interface BatchUploadProgress {
+  files: number;
+  /** Files the server has confirmed. */
+  filesDone: number;
+  failed: number;
+  totalBytes: number;
+  sentBytes: number;
+  /** 0..1 by bytes. Bytes of a file count once its upload finished; a file that starts again counts from zero again. */
+  fraction: number;
+  /** Videos with a file on its way right now. */
+  videosSending: number;
+  /** Videos with files still to send that have not started yet. */
+  videosWaiting: number;
+}
+
+export function batchUploadProgress(jobs: readonly UploadJob[], batchId: string): BatchUploadProgress | null {
+  const mine = jobs.filter((j) => j.batchId === batchId);
+  if (!mine.length) return null;
+  const totalBytes = mine.reduce((s, j) => s + Math.max(1, j.sizeBytes), 0);
+  const sentBytes = mine.reduce((s, j) => s + (j.status === 'uploaded' || j.status === 'done' ? Math.max(1, j.sizeBytes) : Math.min(j.bytesSent, j.sizeBytes)), 0);
+  const byVideo = new Map<string, UploadJob[]>();
+  for (const j of mine) byVideo.set(j.videoId, [...(byVideo.get(j.videoId) ?? []), j]);
+  let videosSending = 0;
+  let videosWaiting = 0;
+  for (const list of byVideo.values()) {
+    if (list.some((j) => j.status === 'uploading')) videosSending++;
+    else if (list.some((j) => j.status === 'pending')) videosWaiting++;
+  }
+  return {
+    files: mine.length,
+    filesDone: mine.filter((j) => j.status === 'done').length,
+    failed: mine.filter((j) => j.status === 'failed').length,
+    totalBytes,
+    sentBytes,
+    fraction: totalBytes > 0 ? sentBytes / totalBytes : 0,
+    videosSending,
+    videosWaiting,
+  };
+}
+
+/**
+ * Where a video stands with its files, from this phone's side:
+ * - `not_here`: the server waits for files this phone has no record of (picked on another
+ *   device, or the app's data was cleared);
+ * - `waiting_turn`: this phone will send them after the videos before it;
+ * - `uploading`: on their way now;
+ * - `offline`: paused until the connection is back;
+ * - `retrying`: no answer from the server, trying again by itself;
+ * - `failed`: a file gave up and needs a tap;
+ * - `sent`: every file is in (the server queues the edit).
+ */
+export type VideoUploadState = 'not_here' | 'waiting_turn' | 'uploading' | 'offline' | 'retrying' | 'failed' | 'sent';
+
+export function videoUploadState(jobs: readonly UploadJob[], videoId: string, offline: boolean): VideoUploadState {
+  const mine = jobs.filter((j) => j.videoId === videoId);
+  if (!mine.length) return 'not_here';
+  if (mine.some((j) => j.status === 'failed')) return 'failed';
+  if (mine.every((j) => j.status === 'done' || j.status === 'uploaded')) return 'sent';
+  if (offline) return 'offline';
+  if (mine.some((j) => j.status === 'uploading')) return 'uploading';
+  if (mine.some((j) => (j.connectionWaits ?? 0) > 0)) return 'retrying';
+  // Some files in, the rest pending between attempts: still this video's turn.
+  if (mine.some((j) => j.status === 'done' || j.status === 'uploaded' || j.bytesSent > 0)) return 'uploading';
+  return 'waiting_turn';
 }

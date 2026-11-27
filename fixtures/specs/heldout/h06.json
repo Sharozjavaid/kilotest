@@ -1,0 +1,46 @@
+{
+  "id": "h06",
+  "title": "Hair brushes",
+  "clips": [
+    {
+      "name": "h06_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "This brush is for short hair.",
+          "group": "g0"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "This brush is for",
+          "group": "g1",
+          "keep": false,
+          "reason": "false_start"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "This brush is for long hair.",
+          "group": "g1"
+        },
+        {
+          "say": "And this one works for both.",
+          "group": "g2"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "Pick the one that matches your hair.",
+          "group": "g3"
+        }
+      ]
+    }
+  ]
+}

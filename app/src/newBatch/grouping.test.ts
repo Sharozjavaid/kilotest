@@ -1,8 +1,11 @@
-import { CreateBatchRequest, DEFAULT_SETTINGS, type CreateBatchResponse } from '@kilo/edl';
+import { CreateBatchRequest, DEFAULT_SETTINGS, MODE_PRESETS, type CreateBatchResponse } from '@kilo/edl';
 import {
   addBroll,
   countClips,
+  effectiveVideoSettings,
   groupPicked,
+  ownSettings,
+  setVideoSettings,
   mergeVideos,
   moveClip,
   removeClip,
@@ -97,5 +100,46 @@ describe('grouping picked files into videos', () => {
       ['a1', 'v2', 'broll', 'p.jpg'],
     ]);
     expect(() => uploadJobsFor({ ...res, videos: res.videos.slice(1) }, v)).toThrow();
+  });
+});
+
+describe('settings for one video', () => {
+  const batch = { ...MODE_PRESETS.general.settings, hookVariations: 3 };
+  let n = 0;
+  const key = () => `k${++n}`;
+
+  it('follow the batch until changed, and send only what differs', () => {
+    let videos = groupPicked([file('a.mp4'), file('b.mp4'), file('c.mp4')], [], key);
+    expect(effectiveVideoSettings(batch, videos[0]!)).toEqual({ mode: 'general', hooks: 3, own: false });
+    videos = setVideoSettings(videos, videos[1]!.key, batch, { mode: 'tiktok_shop' });
+    videos = setVideoSettings(videos, videos[1]!.key, batch, { hooks: 2 });
+    videos = setVideoSettings(videos, videos[2]!.key, batch, { hooks: 1 });
+    expect(effectiveVideoSettings(batch, videos[1]!)).toEqual({ mode: 'tiktok_shop', hooks: 2, own: true });
+    const req = toCreateBatchRequest(batch, videos);
+    expect(req.settings).toEqual(batch);
+    expect(req.videos.map((v) => v.settings)).toEqual([undefined, { mode: 'tiktok_shop', pacing: 'tight', hookVariations: 2 }, { hookVariations: 1 }]);
+    expect('settings' in req.videos[0]!).toBe(false);
+  });
+
+  it('a value equal to the batch is "follow the batch"; reset clears both', () => {
+    let videos = groupPicked([file('a.mp4')], [], key);
+    videos = setVideoSettings(videos, videos[0]!.key, batch, { mode: 'ugc_ad', hooks: 3 });
+    expect(videos[0]).toMatchObject({ mode: 'ugc_ad' });
+    expect(videos[0]!.hooks).toBeUndefined();
+    // The batch moves to the video's mode: nothing of its own is left to send.
+    const ugcBatch = { ...MODE_PRESETS.ugc_ad.settings };
+    expect(ownSettings(ugcBatch, videos[0]!)).toBeUndefined();
+    expect(ownSettings(batch, videos[0]!)).toEqual({ mode: 'ugc_ad', pacing: 'tight' });
+    videos = setVideoSettings(videos, videos[0]!.key, batch, null);
+    expect(videos[0]!.mode).toBeUndefined();
+    expect(ownSettings(batch, videos[0]!)).toBeUndefined();
+  });
+
+  it('a merged video keeps the first video settings', () => {
+    let videos = groupPicked([file('a.mp4'), file('b.mp4')], [], key);
+    videos = setVideoSettings(videos, videos[0]!.key, batch, { mode: 'ugc_ad' });
+    const merged = mergeVideos(videos, videos.map((v) => v.key));
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.mode).toBe('ugc_ad');
   });
 });

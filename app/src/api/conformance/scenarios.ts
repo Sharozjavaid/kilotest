@@ -5,6 +5,7 @@ import type {
   CreateBatchResponse,
   CreateRenderResponse,
   Edl,
+  EditSettings,
   GoalView,
   ReissueUploadsResponse,
   RenderView,
@@ -41,8 +42,11 @@ export interface ConformanceApi {
 
 export interface ConformanceHarness {
   api: ConformanceApi;
-  /** A new video in `ready_for_review` whose edit has at least two variants. */
-  readyVideo(): Promise<VideoDetail>;
+  /**
+   * A new video in `ready_for_review` whose edit has at least two variants (the batch asks
+   * for two hooks). `own` is the video's own settings (`NewVideo.settings`), laid over the batch's.
+   */
+  readyVideo(own?: Partial<EditSettings>): Promise<VideoDetail>;
   /** A new one-clip video still `uploading` (nothing sent). */
   uploadingVideo(): Promise<{ videoId: string; clipId: string }>;
   /** A request body for one video whose clip and B-roll file names are given. */
@@ -249,6 +253,50 @@ export const scenarios: Scenario[] = [
       check(a.status === 'uploading', `status uploading (got ${a.status})`);
       check(a.width === null && a.height === null && a.durationSec === null && a.description === '', 'no measurements before ingest');
       await refused(h.api.addBroll(v.id, { assets: [{ filename: 'page.html', contentType: 'text/html', sizeBytes: 10, kind: 'image' }] }), 400, 'unsupported_file_type', 'HTML B-roll');
+    },
+  },
+  {
+    name: 'a variant may hide base overlays; unknown ids are 400 and an overlay a save removes is dropped from every variant',
+    async run(h) {
+      const v = await h.readyVideo();
+      let edl = v.edl!;
+      check(edl.variants.length >= 2, 'the ready video has two variants');
+      // A base overlay to hide: the decider's own, or a graphic placed by this save.
+      if (!edl.overlays.length) {
+        const kept = edl.segments.filter((s) => s.keep);
+        const anchor = kept[Math.min(1, kept.length - 1)]!;
+        const graphic = { id: 'cf-hide-g', type: 'graphic' as const, template: 'keyword-pop' as const, props: { word: 'Hi' }, anchorSegmentId: anchor.id, offsetSec: 0, durationSec: 0.8 };
+        edl = (await h.api.saveEdl(v.id, { edl: { ...edl, overlays: [graphic] }, baseRevision: edl.revision })).edl;
+      }
+      const target = edl.overlays[0]!;
+      const [a, b] = edl.variants;
+      const withHidden = (e: Edl, ids: string[]): Edl => ({ ...e, variants: e.variants.map((x) => (x.id === b!.id ? { ...x, hiddenOverlayIds: ids } : x)) });
+      const saved = (await h.api.saveEdl(v.id, { edl: withHidden(edl, [target.id]), baseRevision: edl.revision })).edl;
+      check(same(saved.variants.find((x) => x.id === b!.id)!.hiddenOverlayIds, [target.id]), 'the hidden id is stored on that variant');
+      check(saved.variants.find((x) => x.id === a!.id)!.hiddenOverlayIds.length === 0, 'other variants still show it');
+      check(same(saved.overlays.map((o) => o.id), edl.overlays.map((o) => o.id)), 'the base cut keeps the overlay');
+      await refused(h.api.saveEdl(v.id, { edl: withHidden(saved, ['cf-no-such-overlay']), baseRevision: saved.revision }), 400, 'invalid_request', 'hiding an overlay that does not exist');
+      await refused(h.api.saveEdl(v.id, { edl: withHidden(saved, [target.id, target.id]), baseRevision: saved.revision }), 400, 'invalid_request', 'hiding an overlay twice');
+      await refused(
+        h.api.saveEdl(v.id, { edl: withHidden(saved, Array.from({ length: 41 }, (_, i) => `cf-x${i}`)), baseRevision: saved.revision }),
+        400,
+        'invalid_request',
+        'hiding 41 overlays',
+      );
+      // The overlay is removed while a variant still lists it: the save goes through and the id goes.
+      const removed = (await h.api.saveEdl(v.id, { edl: { ...saved, overlays: saved.overlays.filter((o) => o.id !== target.id) }, baseRevision: saved.revision })).edl;
+      check(removed.variants.every((x) => !x.hiddenOverlayIds.includes(target.id)), 'a removed overlay is dropped from every variant');
+    },
+  },
+  {
+    name: "a video's own settings are laid over the batch's and its edit is made with them",
+    async run(h) {
+      const v = await h.readyVideo({ mode: 'tiktok_shop', hookVariations: 3 });
+      const s = v.edl!.settings;
+      check(s.mode === 'tiktok_shop' && s.hookVariations === 3, `the edit's settings are the video's (got ${s.mode}, ${s.hookVariations} hooks)`);
+      check(v.edl!.variants.length === 3, `three openings for this video (got ${v.edl!.variants.length})`);
+      const plain = await h.readyVideo();
+      check(plain.edl!.settings.mode === 'general' && plain.edl!.settings.hookVariations === 2, 'a video without its own settings uses the batch settings');
     },
   },
 ];

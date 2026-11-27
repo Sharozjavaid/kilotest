@@ -5,7 +5,9 @@ import path from 'node:path';
 import { openBrowser, renderStill, selectComposition } from '@remotion/renderer';
 import { GRAPHIC_THEMES, TEMPLATES, type GraphicTheme, type TemplateId } from '@kilo/edl';
 import { findBrowserExecutable, getBundle, PACKAGE_ROOT } from '../src/renderer.js';
-import type { ProbeResult, ProbeRect } from '../src/remotion/probe.js';
+import type { ProbeResult, ProbeRect, ProbeText } from '../src/remotion/probe.js';
+import { FALLBACK_FONTS } from '../src/remotion/scripts.js';
+import { BUNDLED_DISPLAY, BUNDLED_TEXT } from '../src/remotion/style.js';
 import { assertCasesValid, SWEEP_CASES, type SweepCase } from './sweep-cases.js';
 
 /**
@@ -28,9 +30,15 @@ import { assertCasesValid, SWEEP_CASES, type SweepCase } from './sweep-cases.js'
  *   broken with a hyphen as if it were one long word;
  * - readable: every text is drawn at least MIN_READABLE_PX on a 1080-wide frame;
  * - glyphs: no character draws as the missing-glyph box, and for cases the bundled
- *   Inter should cover, every character is in Inter's character map. Characters Inter
- *   lacks are reported with the system fonts that have them: those come from the
- *   machine, not from Kilo.
+ *   Inter should cover, every character is in Inter's character map;
+ * - bundled faces: every grapheme is drawn by a face Kilo bundles (Inter, or a fallback
+ *   face of src/remotion/scripts.ts), as the page observes it (probe `faces`: the family
+ *   whose drawing matches the whole stack's). The browser runs with the machine's fonts
+ *   hidden (an empty fontconfig), so nothing the machine has can stand in; `--system-fonts`
+ *   runs it with them, where the check proves the bundled faces still win;
+ * - right to left: in Arabic and Hebrew text, the first letter of a text is drawn to the
+ *   right of its last, and words or chips drawn as separate boxes on one line run right
+ *   to left in reading order.
  */
 
 /** About 13 pt on a 390 pt wide phone screen; 3.3% of the frame width. */
@@ -106,6 +114,25 @@ function systemFontsWith(ch: string): string {
   }
   fallbackMemo.set(ch, fams);
   return fams;
+}
+
+/** Faces Kilo ships: Inter and the fallback faces. */
+const BUNDLED = new Set<string>([BUNDLED_TEXT, BUNDLED_DISPLAY, ...FALLBACK_FONTS.map((f) => f.family)]);
+
+/**
+ * A fontconfig file whose only font directory is Kilo's own assets/fonts (Inter): a
+ * browser started with it as FONTCONFIG_FILE sees none of the machine's fonts. (With no
+ * font at all, Chromium's text stack crashes, so it gets the bundled Inter files.)
+ */
+export async function noSystemFontsConfig(dir: string): Promise<string> {
+  await fs.mkdir(path.join(dir, 'fc-cache'), { recursive: true });
+  const file = path.join(dir, 'no-system-fonts.conf');
+  await fs.writeFile(
+    file,
+    `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n  <dir>${path.join(PACKAGE_ROOT, 'assets', 'fonts')}</dir>\n` +
+      `  <cachedir>${path.join(dir, 'fc-cache')}</cachedir>\n</fontconfig>\n`,
+  );
+  return file;
 }
 
 // ---- checks ---------------------------------------------------------------------------
@@ -190,7 +217,31 @@ export function checkProbe(p: ProbeResult, c: SweepCase): { problems: string[]; 
   const chars = new Set(p.texts.flatMap((t) => [...t.text.replace(/\s+/g, '')]));
   const missing = [...chars].filter((ch) => !inInter(ch));
   if (c.covered && missing.length) problems.push(`Inter should cover this text but lacks ${missing.join(' ')}`);
-  const fallback = missing.map((ch) => `${ch} U+${ch.codePointAt(0)!.toString(16).toUpperCase()}: ${systemFontsWith(ch) || 'no installed font'}`);
+  // Every grapheme is drawn by a face Kilo ships, as the page saw it.
+  const drawnBy = new Map<string, string | null>();
+  for (const t of p.texts) for (const [g, face] of Object.entries(t.faces)) if (!drawnBy.has(g) || face === null) drawnBy.set(g, face);
+  for (const [g, face] of drawnBy) {
+    if (face === null || !BUNDLED.has(face)) {
+      problems.push(`"${g}" U+${[...g].map((x) => x.codePointAt(0)!.toString(16).toUpperCase()).join('+')} is drawn by ${face ?? 'a face outside the font stack'}, not a bundled one`);
+    }
+  }
+  // Right to left: letters and separate word boxes run from the right.
+  const rtlLetter = (g: string) => /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u.test(g) && /\p{L}/u.test(g);
+  const mid = (r: ProbeRect) => (r.left + r.right) / 2;
+  for (const t of p.texts) {
+    const idx = t.glyphText.map((g, i) => (rtlLetter(g) ? i : -1)).filter((i) => i >= 0);
+    if (idx.length >= 2 && mid(t.glyphs[idx[0]!]!) <= mid(t.glyphs[idx[idx.length - 1]!]!) + TOL) {
+      problems.push(`"${short(t.text)}" is right-to-left text drawn left to right`);
+    }
+  }
+  const byLine = new Map<string, ProbeText[]>();
+  for (const t of p.texts) if (t.line !== null && t.glyphText.some(rtlLetter)) byLine.set(t.line, [...(byLine.get(t.line) ?? []), t]);
+  for (const [line, ts] of byLine) {
+    for (let i = 1; i < ts.length; i++) {
+      if (mid(ts[i]!.ink) >= mid(ts[i - 1]!.ink) - TOL) problems.push(`on ${line}, "${short(ts[i]!.text)}" comes after "${short(ts[i - 1]!.text)}" but is drawn to its right`);
+    }
+  }
+  const fallback = missing.map((ch) => `${ch} U+${ch.codePointAt(0)!.toString(16).toUpperCase()}: ${drawnBy.get(ch) ?? [...drawnBy].find(([g]) => g.includes(ch))?.[1] ?? (systemFontsWith(ch) || 'no face')}`);
   return { problems: [...new Set(problems)], fallback, minSizePx: Number.isFinite(minSizePx) ? minSizePx : 0 };
 }
 
@@ -202,6 +253,8 @@ export interface SweepOptions {
   kinds?: string[];
   width?: number;
   height?: number;
+  /** Let the browser see the machine's fonts (default: hidden, so only bundled faces can draw). */
+  systemFonts?: boolean;
   log?: (line: string) => void;
 }
 
@@ -213,7 +266,17 @@ export async function runSweep(opts: SweepOptions = {}): Promise<CaseResult[]> {
   const serveUrl = await getBundle();
   const browserExecutable = findBrowserExecutable();
   const chromiumOptions = { gl: (process.env.KILO_TEMPLATES_GL || 'swangle') as 'swangle' };
-  const browser = await openBrowser('chrome', { browserExecutable, chromiumOptions, logLevel: 'error', chromeMode: 'headless-shell' });
+  // The browser inherits the environment it is started with: hide the machine's fonts from it only.
+  const savedFc = process.env.FONTCONFIG_FILE;
+  if (!opts.systemFonts) process.env.FONTCONFIG_FILE = await noSystemFontsConfig(OUT);
+  let browser: Awaited<ReturnType<typeof openBrowser>>;
+  try {
+    browser = await openBrowser('chrome', { browserExecutable, chromiumOptions, logLevel: 'error', chromeMode: 'headless-shell' });
+  } finally {
+    if (savedFc === undefined) delete process.env.FONTCONFIG_FILE;
+    else process.env.FONTCONFIG_FILE = savedFc;
+  }
+  log(opts.systemFonts ? 'Browser sees the system fonts.' : 'Browser started with the system fonts hidden: only bundled faces can draw.');
   const results: CaseResult[] = [];
   try {
     const base = await selectComposition({ serveUrl, id: 'graphic', puppeteerInstance: browser, browserExecutable, chromiumOptions, logLevel: 'error' });
@@ -301,7 +364,7 @@ export function formatSweep(results: CaseResult[]): string {
   const fb = new Map<string, Set<string>>();
   for (const r of results) for (const f of r.fallback) fb.set(r.kind, (fb.get(r.kind) ?? new Set()).add(f));
   if (fb.size) {
-    lines.push('', 'Characters the bundled Inter does not have (drawn by whatever font the machine has):');
+    lines.push('', 'Characters the bundled Inter does not have, and the bundled face the page drew them with:');
     for (const [kind, set] of fb) lines.push(`  ${kind}: ${[...set].slice(0, 6).join('; ')}${set.size > 6 ? `; and ${set.size - 6} more` : ''}`);
   }
   lines.push('', `Cases: ${results.length}; passing: ${results.length - failed.length}; failing: ${failed.length}.`);

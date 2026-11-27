@@ -1,0 +1,67 @@
+{
+  "id": "h03",
+  "title": "Training week",
+  "clips": [
+    {
+      "name": "h03_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Here is my training week.",
+          "group": "g0"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "Monday is legs.",
+          "group": "g1"
+        },
+        {
+          "say": "Tuesday is arms and back.",
+          "group": "g2"
+        },
+        {
+          "say": "Wednesday is a long run.",
+          "group": "g3",
+          "keep": false,
+          "reason": "retake"
+        },
+        {
+          "pause": 1.3
+        },
+        {
+          "say": "Wednesday is an easy long run.",
+          "group": "g3"
+        },
+        {
+          "say": "Thursday is legs again.",
+          "group": "g4"
+        }
+      ]
+    },
+    {
+      "name": "h03_take2",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Friday is arms and back again.",
+          "group": "g5"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "And the weekend is for resting.",
+          "group": "g6"
+        }
+      ]
+    }
+  ]
+}

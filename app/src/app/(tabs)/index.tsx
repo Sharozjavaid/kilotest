@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { BatchSummary, GoalView } from '@kilo/edl';
 import { useHome } from '@/api/queries';
-import { batchDoneCount, batchProgress, finishedSubtitle, goalLine, plural, reviewSubtitle } from '@/lib/format';
+import { batchCardState, finishedSubtitle, goalLine, plural, reviewSubtitle } from '@/lib/format';
 import { VideoRow } from '@/components/VideoRow';
 import {
   Card,
@@ -41,7 +41,10 @@ export default function HomeScreen() {
             AI video editor
           </Text>
         </View>
-        <IconButton icon="settings" label="Settings" onPress={() => router.push('/you')} />
+        <View style={styles.topActions}>
+          <IconButton icon="list" label="All videos" onPress={() => router.push('/videos')} />
+          <IconButton icon="settings" label="Settings" onPress={() => router.push('/you')} />
+        </View>
       </View>
 
       {home.isPending ? (
@@ -81,16 +84,20 @@ export default function HomeScreen() {
           {data.readyToReview.length > 0 ? (
             <View style={styles.list}>
               <SectionLabel>Ready to review</SectionLabel>
-              {data.readyToReview.map((v, i) => (
+              {/* Newest batch first, each batch in the order its videos were put in (the server's order). */}
+              {data.readyToReview.slice(0, HOME_READY_ROWS).map((v, i) => (
                 <VideoRow key={v.id} video={v} subtitle={reviewSubtitle(v)} divider={i > 0} onPress={() => router.push(`/review/${v.id}`)} />
               ))}
+              {data.readyToReview.length > HOME_READY_ROWS ? (
+                <SeeAll label={`See all ${data.readyToReview.length} to review`} onPress={() => router.push('/videos?filter=review')} />
+              ) : null}
             </View>
           ) : null}
 
           {data.recent.length > 0 ? (
             <View style={styles.list}>
               <SectionLabel>Finished</SectionLabel>
-              {data.recent.map((v, i) => (
+              {data.recent.slice(0, HOME_FINISHED_ROWS).map((v, i) => (
                 <VideoRow
                   key={v.id}
                   video={v}
@@ -99,7 +106,10 @@ export default function HomeScreen() {
                   onPress={() => router.push(`/export/${v.id}`)}
                 />
               ))}
+              <SeeAll label="All videos" onPress={() => router.push('/videos?filter=finished')} />
             </View>
+          ) : !firstTime ? (
+            <SeeAll label="All videos" onPress={() => router.push('/videos')} />
           ) : null}
         </>
       ) : null}
@@ -160,24 +170,39 @@ function Tile({ icon, label, onPress, primary }: { icon: IconName; label: string
   );
 }
 
-function BatchCard({ batch }: { batch: BatchSummary }) {
-  const done = batchDoneCount(batch);
-  const failed = batch.counts.failed ?? 0;
-  const uploading = batch.counts.uploading ?? 0;
-  const title = uploading > 0 ? `Batch of ${batch.total} is uploading` : `Batch of ${batch.total} is editing`;
+/** Home shows this many ready videos, then a link to the rest in All videos. */
+const HOME_READY_ROWS = 30;
+/** And this many finished ones (the server sends the latest 50). */
+const HOME_FINISHED_ROWS = 10;
+
+function SeeAll({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <Card gap={10} onPress={() => router.push(`/batch/${batch.id}`)} accessibilityLabel={`${title}, ${done} done`} accessibilityHint="Shows each video's progress">
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={({ pressed }) => [styles.seeAll, pressed && { opacity: 0.6 }]}>
+      <Text variant="secondary" weight={600} tone="accent">
+        {label}
+      </Text>
+      <Icon name="chevronRight" size={16} color={color.accent} />
+    </Pressable>
+  );
+}
+
+/** A batch stays on Home until every video in it is finished: uploading, editing, to review, exporting. */
+function BatchCard({ batch }: { batch: BatchSummary }) {
+  const st = batchCardState(batch);
+  const title = `Batch of ${batch.total} ${st.phrase}`;
+  return (
+    <Card gap={10} onPress={() => router.push(`/batch/${batch.id}`)} accessibilityLabel={`${title}, ${st.done} done`} accessibilityHint="Shows each video's progress">
       <View style={styles.spread}>
         <Text variant="body" weight={600}>
           {title}
         </Text>
         <Text variant="secondary" tone="muted">
-          {done} done
+          {st.done} done
         </Text>
       </View>
-      <ProgressBar value={batchProgress(batch)} accessibilityLabel={`${done} of ${batch.total} done`} />
-      <Text variant="secondary" tone={failed ? 'cut' : 'muted'}>
-        {failed ? `${plural(failed, 'video')} couldn't be edited. Tap to retry.` : "You'll get a notification when the rest are ready."}
+      <ProgressBar value={st.progress} accessibilityLabel={st.progressLabel} />
+      <Text variant="secondary" tone={st.failed ? 'cut' : 'muted'}>
+        {st.line}
       </Text>
     </Card>
   );
@@ -186,6 +211,8 @@ function BatchCard({ batch }: { batch: BatchSummary }) {
 const styles = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 44 },
   brand: { flexDirection: 'row', alignItems: 'baseline', gap: 10 },
+  topActions: { flexDirection: 'row', gap: 8 },
+  seeAll: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44 },
   spread: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   tiles: { flexDirection: 'row', gap: 12 },
   tile: { flex: 1, height: 96, borderRadius: radius.card, padding: 14, justifyContent: 'space-between' },

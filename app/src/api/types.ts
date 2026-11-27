@@ -46,7 +46,7 @@ export interface KiloApi {
   /** Fresh upload targets for files not in yet (an expired target, or a file the server refused). */
   reissueUploads(body: Partial<ReissueUploadsRequest>): Promise<ReissueUploadsResponse>;
 
-  listVideos(query?: { status?: VideoStatus; batchId?: string }): Promise<ListVideosResponse>;
+  listVideos(query?: ListVideosQuery): Promise<ListVideosResponse>;
   getVideo(videoId: string): Promise<VideoDetail>;
   deleteVideo(videoId: string): Promise<void>;
   retryVideo(videoId: string): Promise<VideoSummary>;
@@ -69,6 +69,22 @@ export interface KiloApi {
   registerDevice(body: RegisterDeviceRequest): Promise<void>;
   /** On sign-out, before the session is cleared: this device stops getting this account's notifications. */
   unregisterDevice(body: { expoPushToken: string }): Promise<void>;
+}
+
+/**
+ * GET /videos query. `limit` and `after` page through the list: `after` is the id of the
+ * last video of the previous page (ListVideosResponse carries no cursor), and a page
+ * shorter than `limit` is the last one.
+ */
+export interface ListVideosQuery {
+  status?: VideoStatus | VideoStatus[];
+  batchId?: string;
+  /** Words in the title. */
+  q?: string;
+  /** `created`: newest first (default). `batch`: newest batch first, each batch in its own order. */
+  order?: 'created' | 'batch';
+  limit?: number;
+  after?: string;
 }
 
 /** CreateBatchRequest where each video's `broll` may be omitted (it defaults to []). */

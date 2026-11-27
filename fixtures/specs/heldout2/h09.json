@@ -1,0 +1,62 @@
+{
+  "id": "h09",
+  "title": "Plant shelf",
+  "clips": [
+    {
+      "name": "h09_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "The top shelf gets the most light.",
+          "group": "g0"
+        },
+        {
+          "say": "The top shelf,",
+          "group": "g1",
+          "keep": false,
+          "reason": "false_start"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "The middle shelf gets some light.",
+          "group": "g1"
+        },
+        {
+          "say": "The bottom shelf is for the shade plants.",
+          "group": "g2"
+        },
+        {
+          "pause": 1.0
+        }
+      ]
+    },
+    {
+      "name": "h09_take2",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "The bottom shelf is where the ferns live.",
+          "group": "g3"
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "Move them around until they look happy.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

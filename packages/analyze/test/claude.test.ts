@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Edl } from '@kilo/edl';
-import { resolveTimeline, validateEdl } from '@kilo/edl';
+import { checkOverlayRules, HOOK_PROTECT_SEC, resolveTimeline, validateEdl } from '@kilo/edl';
 import { createAnalyze } from '../src/analyze.js';
 import { buildChunks, prepareClipWords, type Chunk } from '../src/chunks.js';
 import { DEFAULT_CLAUDE_MODEL, type ClaudeEdit, type ClaudeLike } from '../src/claude.js';
 import { heuristicCuts } from '../src/heuristic.js';
+import { buildLines } from '../src/lines.js';
+import { openingProblem } from '../src/variants.js';
 import { ASSETS, decideInput, richClips } from './helpers.js';
 
 interface FakeCall {
@@ -95,8 +97,14 @@ describe('claude decider', () => {
     expect(edl.overlays.find((o) => o.type === 'graphic')).toMatchObject({ template: 'stat-callout', props: { value: '90%' } });
     expect(edl.variants.map((v) => v.label)).toEqual(['Hook A', 'Hook B', 'Hook C']);
     const kept = edl.segments.filter((s) => s.keep);
+    // Claude's cold open on "It is twelve dollars..." points back to an earlier line, so the
+    // same rule as the heuristic's replaces it with a line that works as an opening.
     const priceSeg = kept.find((s) => s.text.startsWith('It is twelve dollars'))!;
-    expect(edl.variants[1]!.segmentOrder[0]).toBe(priceSeg.id);
+    expect(edl.variants[1]!.segmentOrder[0]).not.toBe(priceSeg.id);
+    expect(edl.variants[1]!.segmentOrder[0]).not.toBe(edl.variants[0]!.segmentOrder[0]);
+    const lines = buildLines(edl, input.transcripts);
+    expect(openingProblem(lines, lines.findIndex((l) => l.segment.id === edl.variants[1]!.segmentOrder[0]))).toBeNull();
+    for (const v of edl.variants) expect(checkOverlayRules(edl, v.id), v.id).toEqual([]);
     expect(edl.variants[2]!.overlays[0]).toMatchObject({ template: 'bold-title', props: { text: 'Stop wasting sunscreen' } });
     for (const v of edl.variants) expect([...v.segmentOrder].sort()).toEqual(kept.map((s) => s.id).sort());
   });
@@ -171,6 +179,7 @@ describe('claude decider', () => {
       (it) => it.outStart >= 2 && it.outEnd - it.outStart > 1.6 && !busy.some(([a, b]) => a! < it.outEnd && it.outStart < b!),
     );
     expect(free).toBeGreaterThan(0);
+    const ninety = kept.findIndex((s) => s.text.startsWith('Ninety percent'));
     const { client, calls } = fakeClient((params) => {
       expect(params.messages[0].content).toContain('re-plan of placements only');
       return {
@@ -182,7 +191,7 @@ describe('claude decider', () => {
           hooks: [
             { kind: 'natural', utterance: null, titleText: null, hookText: 'a' },
             { kind: 'title', utterance: null, titleText: 'Ninety percent skip this', hookText: 'b' },
-            { kind: 'cold_open', utterance: 3, titleText: null, hookText: 'c' },
+            { kind: 'cold_open', utterance: ninety, titleText: null, hookText: 'c' },
           ],
         },
       };
@@ -193,7 +202,43 @@ describe('claude decider', () => {
     expect(out.overlays.filter((o) => o.type === 'graphic')).toEqual(base.overlays.filter((o) => o.type === 'graphic'));
     expect(out.overlays.filter((o) => o.type === 'broll').map((o) => (o.type === 'broll' ? o.assetId : ''))).toEqual(['b1']);
     expect(out.variants[1]!.overlays[0]).toMatchObject({ props: { text: 'Ninety percent skip this' } });
-    expect(out.variants[2]!.segmentOrder[0]).toBe(kept[3]!.id);
+    expect(out.variants[2]!.segmentOrder[0]).toBe(kept[ninety]!.id);
+    expect(validateEdl(out)).toEqual([]);
+    for (const v of out.variants) expect(checkOverlayRules(out, v.id), v.id).toEqual([]);
+  });
+});
+
+describe("claude's hooks are checked and repaired like the heuristic's", () => {
+  it('a cold open on a line with B-roll hides that B-roll in the variant only, and a duplicate or unusable hook is replaced', async () => {
+    const { clips, input, chunks, heur } = setup();
+    const answer = goodAnswer(chunks, heur);
+    const takes = find(chunks, 'Ninety percent', 1);
+    answer.broll = [{ utterance: takes.id, assetId: 'b2', why: 'a figure' }];
+    answer.graphics = [];
+    answer.hooks = [
+      { kind: 'natural', utterance: null, titleText: null, hookText: '' },
+      // The B-roll goes on this very line (goodAnswer), so moved first it would cover the hook.
+      { kind: 'cold_open', utterance: takes.id, titleText: null, hookText: '' },
+      { kind: 'cold_open', utterance: takes.id, titleText: null, hookText: '' },
+    ];
+    const { client } = fakeClient(() => ({ stop_reason: 'end_turn', parsed_output: answer }));
+    const edl = await createAnalyze({ decider: 'claude', claudeClient: client, stock: null, log: () => {} }).decideEdit(input);
+    expect(edl.decidedBy).toBe('claude');
+    expect(validateEdl(edl, clips.map((c) => c.info))).toEqual([]);
+    expect(checkOverlayRules(edl)).toEqual([]);
+    const broll = edl.overlays.find((o) => o.type === 'broll')!;
+    const takesSeg = edl.segments.find((s) => s.keep && s.text.startsWith('Ninety percent'))!;
+    const cold = edl.variants[1]!;
+    expect(cold.segmentOrder[0]).toBe(takesSeg.id);
+    expect(cold.hiddenOverlayIds).toContain(broll.id);
+    expect(resolveTimeline(edl, cold.id).overlays.some((o) => o.overlay.id === broll.id)).toBe(false);
+    expect(resolveTimeline(edl).overlays.some((o) => o.overlay.id === broll.id)).toBe(true);
+    // The duplicate is replaced by another opening.
+    expect(new Set(edl.variants.map((v) => v.segmentOrder[0])).size).toBe(3);
+    for (const v of edl.variants) {
+      expect(checkOverlayRules(edl, v.id), v.id).toEqual([]);
+      for (const o of resolveTimeline(edl, v.id).overlays) if (o.overlay.type === 'broll') expect(o.outStart).toBeGreaterThanOrEqual(HOOK_PROTECT_SEC - 1e-3);
+    }
   });
 });
 

@@ -118,13 +118,16 @@ export function userRoutes(deps: AppDeps): Hono<Env> {
 
   app.get('/home', async (c) => {
     const userId = c.get('userId');
+    // A batch stays on Home until every one of its videos is done (or deleted): while some are still
+    // uploading, editing, waiting for review, exporting or failed, its card is how the creator gets back to it.
     const active = await db<{ id: string }[]>`
       select distinct batch_id as id from videos
-      where user_id = ${userId} and status in ('uploading', 'queued', 'analyzing')`;
+      where user_id = ${userId} and status <> 'done'`;
     const [goal, activeBatches, readyToReview, recent] = await Promise.all([
       goalView(db, userId, now()),
       active.length ? batchSummaries(db, userId, active.map((r) => r.id)) : Promise.resolve([]),
-      videoSummaries(db, storage, db`v.user_id = ${userId} and v.status = 'ready_for_review'`),
+      // Newest batch first; inside a batch, the order the creator put the videos in (video 1 on top).
+      videoSummaries(db, storage, db`v.user_id = ${userId} and v.status = 'ready_for_review'`, 'batch'),
       // Exporting videos too (reviewed, finishing), and enough rows for a whole batch: a creator who
       // exports 30 videos at once sees all 30 on Home, not just the last 20 to finish.
       videoSummaries(db, storage, db`v.user_id = ${userId} and v.status in ('rendering', 'done')`, 'updated', HOME_RECENT_LIMIT),

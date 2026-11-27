@@ -1,0 +1,58 @@
+{
+  "id": "h11",
+  "title": "Lunch box",
+  "clips": [
+    {
+      "name": "h11_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "What I pack for lunch every day.",
+          "group": "g0"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "A wrap with chicken and spinach.",
+          "group": "g1"
+        },
+        {
+          "say": "A pot of yogurt with berries.",
+          "group": "g2",
+          "keep": false,
+          "reason": "retake"
+        },
+        {
+          "pause": 0.6
+        },
+        {
+          "say": "wait, let me redo that",
+          "keep": false,
+          "reason": "off_script"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "A pot of greek yogurt with frozen berries.",
+          "group": "g2"
+        },
+        {
+          "say": "A pot of hummus with carrots.",
+          "group": "g3"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "It takes five minutes the night before.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

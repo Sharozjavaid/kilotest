@@ -1,0 +1,51 @@
+{
+  "id": "h05",
+  "title": "Drink water",
+  "clips": [
+    {
+      "name": "h05_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Drink a glass of water before every meal.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "You will eat less,",
+          "group": "g1",
+          "keep": false,
+          "reason": "false_start"
+        },
+        {
+          "say": "wait, no",
+          "keep": false,
+          "reason": "off_script"
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "You will eat less without trying.",
+          "group": "g1"
+        },
+        {
+          "say": "Your skin will look better.",
+          "group": "g2"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "So drink a glass of water before every meal.",
+          "group": "g3"
+        }
+      ]
+    }
+  ]
+}

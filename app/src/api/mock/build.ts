@@ -165,6 +165,8 @@ export function buildMockAnalysis(opts: {
           i === 0 && opts.settings.graphics
             ? [{ id: 'o-hook-a', type: 'graphic', anchorSegmentId: 's4', offsetSec: 0, durationSec: 1.4, template: 'keyword-pop', props: { words: ['two', 'weeks'] } }]
             : [],
+        // Hook B opens on s6: its title graphic would cover the opening line, so this version leaves it out.
+        hiddenOverlayIds: o.order[0] === 's6' && opts.settings.graphics ? ['o-graphic-1'] : [],
       });
     });
   }

@@ -1,0 +1,55 @@
+{
+  "id": "h08",
+  "title": "Road trip budget",
+  "clips": [
+    {
+      "name": "h08_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Our road trip cost less than you think.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "Gas was ninety dollars.",
+          "group": "g1"
+        },
+        {
+          "say": "Food was sixty dollars.",
+          "group": "g2"
+        },
+        {
+          "say": "Camping was forty,",
+          "group": "g3",
+          "keep": false,
+          "reason": "false_start"
+        },
+        {
+          "say": "one more time",
+          "keep": false,
+          "reason": "off_script"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "Camping was forty dollars for three nights.",
+          "group": "g3"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "Under two hundred in total.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

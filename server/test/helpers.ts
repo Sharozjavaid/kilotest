@@ -283,14 +283,15 @@ export function settings(overrides: Partial<EditSettings> = {}): EditSettings {
 export async function uploadFixtures(
   client: Client,
   ids: string[],
-  opts: { settings?: EditSettings; broll?: boolean; complete?: boolean } = {},
+  opts: { settings?: EditSettings; broll?: boolean; complete?: boolean; titles?: string[]; videoSettings?: (Partial<EditSettings> | undefined)[] } = {},
 ): Promise<CreateBatchResponse> {
   const request: CreateBatchRequest = {
     settings: opts.settings ?? settings(),
-    videos: ids.map((id) => {
+    videos: ids.map((id, i) => {
       const m = manifest(id);
       return {
-        title: m.title,
+        ...(opts.videoSettings?.[i] ? { settings: opts.videoSettings[i] } : {}),
+        title: opts.titles?.[i] ?? m.title,
         source: m.script ? ('recorder' as const) : ('upload' as const),
         ...(m.script ? { script: m.script } : {}),
         clips: m.clips.map((c) => newClip(id, c)),

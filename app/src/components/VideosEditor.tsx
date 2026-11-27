@@ -1,25 +1,31 @@
 import { useState } from 'react';
 import { Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
+import { MODE_PRESETS, type EditSettings, type Mode } from '@kilo/edl';
 import {
+  effectiveVideoSettings,
   mergeVideos,
   moveClip,
   removeBroll,
   removeClip,
   renameVideo,
+  setVideoSettings,
   splitClip,
   type DraftVideo,
 } from '@/newBatch/grouping';
+import { MODES } from '@/components/SettingsControls';
 import { formatBytes, formatDuration, plural } from '@/lib/format';
-import { Card, Header, Icon, IconButton, PillButton, Screen, Text, color, radius, typeStyle } from '@/ui';
+import { Card, Header, Icon, IconButton, PillButton, Screen, SegmentedControl, Stepper, Text, color, radius, typeStyle } from '@/ui';
 
 /**
  * Full-screen editor for the videos of a new batch: rename, reorder clips inside a
- * video, split a clip out, remove, and select several videos to merge into one.
+ * video, split a clip out, remove, select several videos to merge into one, and give one
+ * video its own kind of video and number of openings (it follows the batch otherwise).
  */
 export function VideosEditor({
   visible,
   videos,
+  batchSettings,
   onChange,
   onClose,
   onAddClips,
@@ -27,12 +33,16 @@ export function VideosEditor({
 }: {
   visible: boolean;
   videos: DraftVideo[];
+  /** The batch's settings, which every video follows unless it has its own. */
+  batchSettings: EditSettings;
   onChange: (v: DraftVideo[]) => void;
   onClose: () => void;
   onAddClips: () => void;
   onAddBroll: (videoKey: string) => void;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
+  // One video's settings open at a time, so the list stays calm.
+  const [openSettings, setOpenSettings] = useState<string | null>(null);
   const toggleSel = (key: string) => setSelected((s) => (s.includes(key) ? s.filter((k) => k !== key) : [...s, key]));
 
   const merge = () => {
@@ -72,6 +82,10 @@ export function VideosEditor({
             onRemove={(k) => onChange(removeClip(videos, v.key, k))}
             onRemoveBroll={(id) => onChange(removeBroll(videos, v.key, id))}
             onAddBroll={() => onAddBroll(v.key)}
+            batchSettings={batchSettings}
+            settingsOpen={openSettings === v.key}
+            onToggleSettings={() => setOpenSettings((k) => (k === v.key ? null : v.key))}
+            onSettings={(next) => onChange(setVideoSettings(videos, v.key, batchSettings, next))}
           />
         ))}
       </Screen>
@@ -90,7 +104,16 @@ function VideoCard({
   onRemove,
   onRemoveBroll,
   onAddBroll,
+  batchSettings,
+  settingsOpen,
+  onToggleSettings,
+  onSettings,
 }: {
+  batchSettings: EditSettings;
+  settingsOpen: boolean;
+  onToggleSettings: () => void;
+  /** New mode or hooks for this video; null goes back to the batch's. */
+  onSettings: (next: { mode?: Mode; hooks?: number } | null) => void;
   index: number;
   video: DraftVideo;
   selected: boolean;
@@ -126,6 +149,7 @@ function VideoCard({
         />
         <Icon name="pencil" size={16} color={color.muted} />
       </View>
+      <VideoSettingsLine video={video} batch={batchSettings} open={settingsOpen} onToggle={onToggleSettings} onSettings={onSettings} />
       {video.clips.map((c, k) => (
         <View key={c.id} style={[styles.clip, k > 0 && styles.divider]}>
           <Text variant="secondary" tone="muted" style={styles.clipNo}>
@@ -166,7 +190,81 @@ function VideoCard({
   );
 }
 
+/**
+ * "TikTok Shop · 2 hooks" under a video's name: what it will be edited with. Muted while it
+ * follows the batch; tap to give it its own kind of video and number of openings.
+ */
+function VideoSettingsLine({
+  video,
+  batch,
+  open,
+  onToggle,
+  onSettings,
+}: {
+  video: DraftVideo;
+  batch: EditSettings;
+  open: boolean;
+  onToggle: () => void;
+  onSettings: (next: { mode?: Mode; hooks?: number } | null) => void;
+}) {
+  const eff = effectiveVideoSettings(batch, video);
+  const summary = `${MODE_PRESETS[eff.mode].label} · ${eff.hooks === 1 ? '1 opening' : `${eff.hooks} hooks`}`;
+  return (
+    <View style={{ gap: 10 }}>
+      <Pressable
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityLabel={`Settings for ${video.title}: ${summary}${eff.own ? '' : ', as the batch'}`}
+        accessibilityState={{ expanded: open }}
+        hitSlop={{ top: 6, bottom: 6 }}
+        style={({ pressed }) => [styles.settingsLine, eff.own && styles.settingsOwn, pressed && { opacity: 0.7 }]}
+        testID={`video-settings-${video.key}`}
+      >
+        <Text variant="label" weight={600} tone={eff.own ? 'accent' : 'muted'} numberOfLines={1}>
+          {summary}
+        </Text>
+        <Text variant="label" tone="muted">
+          {eff.own ? 'This video only' : 'As the batch'}
+        </Text>
+        <Icon name={open ? 'chevronUp' : 'chevronDown'} size={14} color={color.muted} />
+      </Pressable>
+      {open ? (
+        <View style={styles.settingsPanel}>
+          <SegmentedControl segments={MODES} value={eff.mode} onChange={(mode) => onSettings({ mode })} accessibilityLabel={`Kind of video for ${video.title}`} />
+          <View style={styles.hooksRow}>
+            <View style={{ flex: 1 }}>
+              <Text variant="secondary" weight={500}>
+                Hook variations
+              </Text>
+              <Text variant="label" tone="muted">
+                {eff.hooks === 1 ? 'One opening' : `${eff.hooks} openings for this video`}
+              </Text>
+            </View>
+            <Stepper value={eff.hooks} min={1} max={5} onChange={(hooks) => onSettings({ hooks })} noun="openings" />
+          </View>
+          {eff.own ? <PillButton variant="text" label="Use the batch's settings" onPress={() => onSettings(null)} /> : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  settingsLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    minHeight: 36,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    backgroundColor: color.white,
+    borderWidth: 1,
+    borderColor: color.hairline,
+  },
+  settingsOwn: { borderColor: color.accent },
+  settingsPanel: { gap: 10, paddingTop: 2 },
+  hooksRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   selected: { borderColor: color.accent, borderWidth: 2 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   check: { width: 44, height: 44, marginLeft: -8, alignItems: 'center', justifyContent: 'center' },

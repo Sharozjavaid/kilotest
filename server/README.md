@@ -90,6 +90,24 @@ all in, whatever happened to the others; `POST /v1/uploads/targets` hands out fr
 targets for files not in yet. The local upload route refuses bytes for a file whose
 video was deleted (or that is already in).
 
+## Settings per video
+
+`POST /v1/batches` stores each video with its own settings: `NewVideo.settings` laid over
+the batch's (`videoSettings` in `src/api/batches.ts`, validated as a whole `EditSettings`).
+The worker analyses and replans with the video's settings and stores them in the EDL it
+writes; nothing reads a batch's settings for one video. `BatchSummary.settings` stays the
+batch's defaults as created. No migration: `videos.settings` already existed and held the
+batch's settings for every video made before this change, which is still right for them.
+
+## Lists
+
+`GET /v1/home` keeps a batch in `activeBatches` until every video of it is `done` (or
+deleted), and lists `readyToReview` newest batch first, each batch in its own order.
+`GET /v1/videos` is the app's library: `status` (comma-separated), `batchId`, `q` (title
+substring, case-insensitive), `order=created|batch`, and pages with `limit` (1..200) and
+`after=<last video id>` (keyset paging done in SQL at full timestamp precision; a short page
+is the last, because `ListVideosResponse` has no cursor field).
+
 ## Limits
 
 Per user, configurable (see `.env.example`), answered with 429 and a code saying which:
@@ -106,7 +124,10 @@ user's single video.
 
 `PUT /v1/videos/:id/edl` takes from the client only `keep`, `userOverride`, `zoom` and
 `transitionIn` of each segment, the overlays, the captions, and each variant's segment
-order and overlays. Segment ids, clips and times must match the stored edit exactly;
+order, overlays and hidden base overlays (`hiddenOverlayIds`: ids of the save's own base
+overlays, at most 40, no repeats; an id of an overlay the same save removes is dropped, any
+other unknown id answers 400). Deleting B-roll, and a replan that drops overlays, also drop
+their ids from every variant (`pruneHiddenOverlays` in `src/edlRules.ts`). Segment ids, clips and times must match the stored edit exactly;
 `videoId`, `fps`, `settings`, `decidedBy`, segment reasons and text and variant labels
 are copied from it. At most 4000 segments, 40 overlays, 5 variants and 10 overlays per
 variant. `validateEdl` (including `duplicate_variant_segment`) and `checkOverlayRules`

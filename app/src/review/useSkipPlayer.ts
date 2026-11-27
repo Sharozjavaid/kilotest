@@ -17,6 +17,8 @@ export interface SkipPlayer {
   /** Seek to a segment (kept: plays from it; cut: auditions it). */
   seekToSegment: (segmentId: string, span: { proxyStart: number; proxyEnd: number }, offsetSec?: number) => void;
   seekToOutput: (outTime: number) => void;
+  /** Play a stretch of the recording (a cut and a moment either side), then pause. */
+  playSpan: (segmentId: string, span: { proxyStart: number; proxyEnd: number }) => void;
 }
 
 /**
@@ -83,6 +85,8 @@ export function useSkipPlayer(url: string | null, ranges: PlaybackRange[], opts:
       } else if (cmd.type === 'end') {
         player.pause();
         player.currentTime = cmd.seekTo;
+      } else if (cmd.type === 'pause') {
+        player.pause();
       }
       if (ts - lastUi > UI_INTERVAL_MS || cmd.type !== 'none') {
         lastUi = ts;
@@ -119,6 +123,11 @@ export function useSkipPlayer(url: string | null, ranges: PlaybackRange[], opts:
     },
     seekToOutput: (outTime) => {
       player.currentTime = controller.seekToOutput(outTime);
+      setSnapshot(controller.snapshot());
+    },
+    playSpan: (segmentId, span) => {
+      player.currentTime = controller.auditionSpan(segmentId, span);
+      player.play();
       setSnapshot(controller.snapshot());
     },
   };

@@ -71,6 +71,12 @@ export function codeHash(): string {
   h.update(`format:${FORMAT_VERSION}\n`);
   const remotionPkg = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'node_modules', 'remotion', 'package.json'), 'utf8')) as { version: string };
   h.update(`remotion:${remotionPkg.version}\n`);
+  // The fallback faces come from npm packages: their versions change the pixels too.
+  const pkg = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8')) as { dependencies: Record<string, string> };
+  for (const name of Object.keys(pkg.dependencies).filter((d) => d.startsWith('@fontsource')).sort()) {
+    const v = (JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'node_modules', name, 'package.json'), 'utf8')) as { version: string }).version;
+    h.update(`${name}:${v}\n`);
+  }
   for (const f of [...listFiles(path.join(PACKAGE_ROOT, 'src', 'remotion')), ...listFiles(PUBLIC_DIR)]) {
     h.update(path.relative(PACKAGE_ROOT, f));
     h.update(readFileSync(f));

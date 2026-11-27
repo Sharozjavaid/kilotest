@@ -18,13 +18,13 @@ export {
 export type { Transcriber, TranscribeInput, FetchLike, AudioPiece } from './transcribe.js';
 export { buildChunks, prepareClipWords } from './chunks.js';
 export type { Chunk, ClipWord, ClipWords } from './chunks.js';
-export { heuristicCuts, sameLine } from './heuristic.js';
+export { heuristicCuts, sameLine, separateLines, slotDifferences, enumeration } from './heuristic.js';
 export type { ChunkDecision, CutDecisions } from './heuristic.js';
 export { snapSegments, planClipCuts, MIN_FRAMES } from './snap.js';
 export { applyZoomAndTransitions } from './polish.js';
 export { buildLines } from './lines.js';
 export type { Line } from './lines.js';
-export { brollCandidates, graphicCandidates, schedule, findPrice, findStat, findEmphasis, matchScore } from './overlays.js';
+export { brollCandidates, graphicCandidates, schedule, findPrice, findStat, findEmphasis, matchScore, fittingLines, explainBroll, type BrollPlacement } from './overlays.js';
 export { heuristicHooks, buildVariants } from './variants.js';
 export type { HookPlan } from './variants.js';
 export {

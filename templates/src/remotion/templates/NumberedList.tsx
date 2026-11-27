@@ -4,6 +4,7 @@ import { Plate, plateMotion } from '../common';
 import type { FontSpec } from '../fit';
 import { fitFlow, fitText, fontCss, unitOf } from '../fit';
 import { ease, progress } from '../motion';
+import { textDirection } from '../scripts';
 import { fonts, inkOn } from '../style';
 
 export interface NumberedListProps {
@@ -121,6 +122,10 @@ export const NumberedList: React.FC<TemplateComponentProps<NumberedListProps>> =
   const spacing = n > 1 ? (lastItem - firstItem) / (n - 1) : 0;
   const top = area.top + 20 + (availH - L.total) / 2;
   const badgeInk = inkOn(theme, theme.accent);
+  // A right-to-left list is mirrored: badges on the right, text running to their left.
+  const rtl = textDirection([props.title ?? '', ...props.items].join(' ')) === 'rtl';
+  const badgeLeft = rtl ? left + width - L.badge : left;
+  const textLeft = rtl ? left + width - L.badge - L.gap - L.col : left + L.badge + L.gap;
 
   const titleP = progress(clock.t, start, 0.42 * k);
   let y = top;
@@ -159,7 +164,7 @@ export const NumberedList: React.FC<TemplateComponentProps<NumberedListProps>> =
         <div
           style={{
             position: 'absolute',
-            left,
+            left: badgeLeft,
             top: rowTop + (rowH - L.badge) / 2,
             width: L.badge,
             height: L.badge,
@@ -178,12 +183,12 @@ export const NumberedList: React.FC<TemplateComponentProps<NumberedListProps>> =
         <div
           style={{
             position: 'absolute',
-            left: left + L.badge + L.gap,
+            left: textLeft,
             top: rowTop + (rowH - textH) / 2,
             width: L.col,
             color: theme.foreground,
             opacity: ease.outCubic(Math.min(1, pt * 1.8)),
-            transform: `translateX(${(1 - ease.outQuart(pt)) * -36}px)`,
+            transform: `translateX(${(1 - ease.outQuart(pt)) * (rtl ? 36 : -36)}px)`,
           }}
         >
           {it.lines.map((line, li) => (

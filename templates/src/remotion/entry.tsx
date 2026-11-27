@@ -1,6 +1,8 @@
 import React from 'react';
 import { Composition, registerRoot } from 'remotion';
 import { Graphic, type GraphicInput } from './Graphic';
+// Faces for emoji and scripts Inter lacks; only the page bundle loads them (fonts.ts waits for them).
+import './fallback-fonts.css';
 
 export const COMPOSITION_ID = 'graphic';
 

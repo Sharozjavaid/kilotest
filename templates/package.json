@@ -14,9 +14,18 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "preview": "tsx scripts/preview.ts",
-    "sweep": "tsx scripts/run-sweep.ts"
+    "sweep": "tsx scripts/run-sweep.ts",
+    "fonts": "tsx scripts/gen-fallback-fonts.ts"
   },
   "dependencies": {
+    "@fontsource-variable/noto-sans-arabic": "5.3.0",
+    "@fontsource-variable/noto-sans-devanagari": "5.3.0",
+    "@fontsource-variable/noto-sans-hebrew": "5.3.0",
+    "@fontsource-variable/noto-sans-jp": "5.3.1",
+    "@fontsource-variable/noto-sans-kr": "5.3.1",
+    "@fontsource-variable/noto-sans-sc": "5.3.1",
+    "@fontsource-variable/noto-sans-thai": "5.3.0",
+    "@fontsource/noto-color-emoji": "5.3.2",
     "@kilo/edl": "file:../packages/edl",
     "@remotion/bundler": "4.0.547",
     "@remotion/renderer": "4.0.547",

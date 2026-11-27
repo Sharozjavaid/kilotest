@@ -11,6 +11,9 @@
  * paint something (cards, chips, badges, bars) are listed too. Characters are checked
  * for the missing-glyph box: each is drawn with the element's font stack on a canvas
  * and compared with an unassigned code point, which can only draw as `.notdef`.
+ * Each grapheme is also drawn with every family of the stack alone; the first whose
+ * pixels match the full stack's is the face that actually drew it (`faces`), so the
+ * sweep can tell a bundled face from one the machine supplied.
  */
 
 export interface ProbeRect {
@@ -36,7 +39,15 @@ export interface ProbeText {
   ancestors: number[];
   /** Ink box of each grapheme cluster, for overlap tests finer than the whole text. */
   glyphs: ProbeRect[];
+  /** The grapheme each of `glyphs` draws. */
+  glyphText: string[];
   fontFamily: string;
+  /** Per distinct grapheme: the family of the stack that drew it, or null when none of them did. */
+  faces: Record<string, string | null>;
+  /** Computed CSS direction of the element. */
+  direction: string;
+  /** `data-probe-line` of the nearest element that has it: texts drawn as one line of words or chips. */
+  line: string | null;
 }
 
 export interface ProbeBox {
@@ -83,8 +94,10 @@ function glyphHash(ch: string, family: string, weight: string): string {
   c.clearRect(0, 0, 96, 96);
   c.font = `${weight} 64px ${family}`;
   c.fillStyle = '#000';
-  c.textBaseline = 'middle';
-  c.fillText(ch, 8, 48);
+  // The alphabetic baseline, not 'middle': 'middle' comes from the first family of the stack,
+  // so a fallback glyph would sit at another height than when its own face draws it alone.
+  c.textBaseline = 'alphabetic';
+  c.fillText(ch, 8, 70);
   const d = c.getImageData(0, 0, 96, 96).data;
   let h = 0;
   for (let i = 3; i < d.length; i += 4) h = (h * 31 + d[i]!) >>> 0;
@@ -125,6 +138,24 @@ export function probeLayout(root: HTMLElement, width: number, height: number): P
     }
   }
 
+  const faceMemo = new Map<string, string | null>();
+  /** Which family of `stack` drew `g`: the first one whose drawing of it matches the whole stack's. */
+  const faceOf = (g: string, stack: string, weight: string): string | null => {
+    const key = `${stack}|${weight}|${g}`;
+    if (faceMemo.has(key)) return faceMemo.get(key)!;
+    const whole = glyphHash(g, stack, weight);
+    let face: string | null = null;
+    for (const fam of stack.split(',').map((x) => x.trim().replace(/^["']|["']$/g, '')).filter((x) => x && x !== 'sans-serif')) {
+      const one = glyphHash(g, `"${fam}"`, weight);
+      if (one === whole && one !== glyphHash(MISSING, `"${fam}"`, weight)) {
+        face = fam;
+        break;
+      }
+    }
+    faceMemo.set(key, face);
+    return face;
+  };
+
   const texts: ProbeText[] = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const c = ctx2d();
@@ -156,6 +187,8 @@ export function probeLayout(root: HTMLElement, width: number, height: number): P
     };
     // Per grapheme cluster: horizontal extent from the DOM, vertical ink from the font.
     const glyphs: ProbeRect[] = [];
+    const glyphText: string[] = [];
+    const faces: Record<string, string | null> = {};
     const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
     for (const g of seg.segment(raw)) {
       if (!g.segment.trim()) continue;
@@ -164,9 +197,13 @@ export function probeLayout(root: HTMLElement, width: number, height: number): P
       gr.setEnd(node, g.index + g.segment.length);
       const rr = gr.getBoundingClientRect();
       if (rr.width <= 0) continue;
-      const gm = c.measureText(cs.textTransform === 'uppercase' ? g.segment.toUpperCase() : g.segment);
+      const shownG = cs.textTransform === 'uppercase' ? g.segment.toUpperCase() : g.segment;
+      const gm = c.measureText(shownG);
       glyphs.push({ left: rr.left, right: rr.right, top: baseline - gm.actualBoundingBoxAscent * k, bottom: baseline + gm.actualBoundingBoxDescent * k });
+      glyphText.push(shownG);
+      if (!(shownG in faces)) faces[shownG] = faceOf(shownG, cs.fontFamily, cs.fontWeight);
     }
+    const lineEl = el.closest('[data-probe-line]') as HTMLElement | null;
     let container: number | null = null;
     const clips: number[] = [];
     const ancestors: number[] = [];
@@ -186,7 +223,10 @@ export function probeLayout(root: HTMLElement, width: number, height: number): P
     for (const ch of new Set(Array.from(shown.replace(/\s+/g, '')))) {
       if (glyphHash(ch, cs.fontFamily, cs.fontWeight) === missing) tofu.push(ch);
     }
-    texts.push({ id: texts.length, text: shown, sizePx: fs * k, ink, container, clips, tofu, ancestors, glyphs, fontFamily: cs.fontFamily });
+    texts.push({
+      id: texts.length, text: shown, sizePx: fs * k, ink, container, clips, tofu, ancestors, glyphs, glyphText, fontFamily: cs.fontFamily,
+      faces, direction: cs.direction, line: lineEl?.dataset.probeLine ?? null,
+    });
   }
   return { width, height, texts, boxes };
 }

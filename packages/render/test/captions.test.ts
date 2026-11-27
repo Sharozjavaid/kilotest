@@ -43,7 +43,7 @@ describe('mapWords', () => {
 
   it('follows a reordered variant', () => {
     const edl = baseEdl(segments, 30, {
-      variants: [{ id: 'v', label: 'Hook', hookText: '', segmentOrder: ['b', 'a'], overlays: [] }],
+      variants: [{ id: 'v', label: 'Hook', hookText: '', segmentOrder: ['b', 'a'], overlays: [], hiddenOverlayIds: [] }],
     });
     const plan = buildPlan({ edl, variantId: 'v', quality: 'final', clips: { c1: clip('c1', 3) }, broll: {} });
     const out = mapWords(plan.items, [transcript], 30);

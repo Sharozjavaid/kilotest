@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { TEMPLATES, type BrollAssetView, type Overlay, type TemplateId } from '@kilo/edl';
-import { Card, Header, Icon, PillButton, Row, Screen, SectionLabel, Text, Thumb, color, radius, typeStyle } from '@/ui';
+import { Card, Header, Icon, PillButton, Row, Screen, SectionLabel, Text, Thumb, Toggle, color, radius, typeStyle } from '@/ui';
 import { assetTitle, durationLimits, fmtSec, type OverlayContent, type OverlayProblem, type SpokenLine } from './overlays';
 import { TEMPLATE_FIELDS, charsLeft, formFromProps, limitText, prefillProps, propsFromForm, type FormValues, type TemplateField } from './templateForms';
 import { GraphicThumb } from './GraphicThumb';
@@ -22,10 +22,14 @@ export interface OverlaySheetProps {
   onRemove: () => void;
   onAddClips: () => void;
   onClose: () => void;
+  /** The openings of the video, and whether each leaves this (base) overlay out. Empty: none to choose. */
+  versions?: readonly { id: string; label: string; hidden: boolean }[];
+  /** Show or hide this overlay in one opening. */
+  onSetHidden?: (variantId: string, hidden: boolean) => void;
 }
 
 /** Swap or Add: the video's B-roll and the five motion graphic templates with editable text. */
-export function OverlaySheet({ visible, line, overlay, assets, themeId, uploads, onApply, onRemove, onAddClips, onClose }: OverlaySheetProps) {
+export function OverlaySheet({ visible, line, overlay, assets, themeId, uploads, onApply, onRemove, onAddClips, onClose, versions = [], onSetHidden }: OverlaySheetProps) {
   const lineText = line?.segment.text ?? '';
   const [choice, setChoice] = useState<Choice | null>(null);
   const [forms, setForms] = useState<Partial<Record<TemplateId, FormValues>>>({});
@@ -117,6 +121,24 @@ export function OverlaySheet({ visible, line, overlay, assets, themeId, uploads,
           <Text variant="body" style={{ lineHeight: 20 }}>
             “{lineText}”
           </Text>
+        ) : null}
+
+        {overlay && versions.length && onSetHidden ? (
+          <View style={{ gap: 6 }}>
+            <SectionLabel>Shown in</SectionLabel>
+            <Card padding={0} paddingHorizontal={16}>
+              {versions.map((v, i) => (
+                <Row
+                  key={v.id}
+                  divider={i > 0}
+                  minHeight={52}
+                  title={v.label}
+                  subtitle={v.hidden ? 'Left out of this opening' : undefined}
+                  right={<Toggle value={!v.hidden} onValueChange={(on) => onSetHidden(v.id, !on)} accessibilityLabel={`Show in ${v.label}`} testID={`shown-in-${v.id}`} />}
+                />
+              ))}
+            </Card>
+          </View>
         ) : null}
 
         <View style={{ gap: 6 }}>

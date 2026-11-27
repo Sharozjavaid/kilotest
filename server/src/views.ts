@@ -108,20 +108,32 @@ const iso = (d: Date | string) => new Date(d).toISOString();
 
 /**
  * Video rows with what a summary needs: current EDL, first thumbnail, last post.
- * `where` is a SQL fragment over alias `v`.
+ * `where` is a SQL fragment over alias `v` (the video) and `b` (its batch).
+ *
+ * Orders: 'created' newest first; 'updated' most recently changed first; 'oldest' creation
+ * order (a batch's own order); 'batch' newest batch first and, inside a batch, the order the
+ * creator put its videos in.
  */
-export type SummaryOrder = 'created' | 'updated' | 'oldest';
+export type SummaryOrder = 'created' | 'updated' | 'oldest' | 'batch';
 
 export async function summaryRows(db: Db, where: Fragment, order: SummaryOrder = 'created', limit = 500): Promise<SummaryRow[]> {
-  // 'oldest': creation order at the database's microsecond precision. The API's ISO timestamps keep
+  // 'oldest' and 'batch': creation order at the database's microsecond precision. The API's ISO timestamps keep
   // only milliseconds, and the videos of one batch are often created within the same millisecond.
-  const orderBy = order === 'created' ? db`v.created_at desc, v.id` : order === 'oldest' ? db`v.created_at asc, v.id` : db`v.updated_at desc, v.id`;
+  const orderBy =
+    order === 'created'
+      ? db`v.created_at desc, v.id`
+      : order === 'oldest'
+        ? db`v.created_at asc, v.id`
+        : order === 'batch'
+          ? db`b.created_at desc, b.id, v.created_at asc, v.id`
+          : db`v.updated_at desc, v.id`;
   return db<SummaryRow[]>`
     select v.*, e.edl,
       (select c.thumb_key from clips c where c.video_id = v.id and c.user_id = v.user_id and c.thumb_key is not null order by c.ord limit 1) as thumb_key,
       (select max(p.posted_at) from posts p where p.video_id = v.id) as posted_at,
       (select count(*)::int from clips c where c.video_id = v.id) as clip_count
     from videos v
+    join batches b on b.id = v.batch_id
     left join lateral (select edl from edls where video_id = v.id and user_id = v.user_id order by revision desc limit 1) e on true
     where ${where}
     order by ${orderBy}

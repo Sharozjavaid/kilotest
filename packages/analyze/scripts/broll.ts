@@ -2,7 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HOOK_PROTECT_SEC, resolveTimeline, type BrollOverlay } from '@kilo/edl';
-import { OVERLAY_SPACING_SEC } from '../src/overlays.js';
+import { buildLines } from '../src/lines.js';
+import { explainBroll } from '../src/overlays.js';
 import { findFixtures, REPO, scoreFixture } from './scoring.js';
 
 /**
@@ -37,6 +38,8 @@ export interface AssetResult {
   expectedLine: string | null;
   placedAt: Array<{ outStart: number; outEnd: number; text: string }>;
   onLine: boolean;
+  /** Why it is where it is, or why it is not placed (`explainBroll`). */
+  why: string;
   problems: string[];
 }
 
@@ -64,6 +67,8 @@ export async function runBrollProxy(): Promise<AssetResult[]> {
     const tl = resolveTimeline(edl);
     const segText = (segId: string) => edl.segments.find((s) => s.id === segId)?.text ?? '';
     const placed = tl.overlays;
+    const lines = buildLines(edl, score.input.transcripts);
+    const why = explainBroll({ assets: score.broll.map((b) => b.asset), lines, overlays: edl.overlays, brollOn: edl.settings.broll, totalSec: tl.durationSec });
     manifest.broll.forEach((b, i) => {
       const asset = score.broll[i]!.asset;
       const want = expected[b.file] ?? null;
@@ -93,6 +98,7 @@ export async function runBrollProxy(): Promise<AssetResult[]> {
         expectedLine: want,
         placedAt: mine.map((o) => ({ outStart: o.outStart, outEnd: o.outEnd, text: segText(o.overlay.anchorSegmentId) })),
         onLine,
+        why: why.find((w) => w.assetId === asset.id)?.reason ?? '',
         problems,
       });
     });
@@ -106,6 +112,7 @@ export function formatBroll(rs: AssetResult[]): string {
     const where = r.placedAt.length ? r.placedAt.map((p) => `${p.outStart.toFixed(2)}-${p.outEnd.toFixed(2)} s over "${p.text}"`).join('; ') : 'not placed';
     const verdict = r.expectedLine === null ? 'no obvious line' : r.onLine ? 'ON ITS LINE' : 'MISSED';
     lines.push(`${r.fixture} ${r.file} ("${r.description}"): expected ${r.expectedLine ? `"${r.expectedLine}"` : 'none'}; ${where} -> ${verdict}`);
+    lines.push(`    why: ${r.why}`);
     for (const p of r.problems) lines.push(`    RULE: ${p}`);
   }
   const withLine = rs.filter((r) => r.expectedLine !== null);
@@ -117,7 +124,7 @@ export function formatBroll(rs: AssetResult[]): string {
   lines.push(
     '',
     `Assets with an obvious line: ${withLine.length}; placed on that line: ${hit} (${withLine.length ? ((100 * hit) / withLine.length).toFixed(0) : 'n/a'}%).`,
-    `Placed on a different line: ${wrong}; not placed at all: ${unplaced} (the overlay budget, one overlay per ${OVERLAY_SPACING_SEC} s of video shared with graphics, or a graphic already on that line).`,
+    `Placed on a different line: ${wrong}; not placed at all: ${unplaced} (each with its reason above).`,
     `B-roll placements: ${placements}; assets whose placement breaks a rule (hook, overlap, past the end): ${broken}.`,
     'This is a proxy with the offline describer (file names) and the heuristic decider, not Claude: it says nothing about whether a creator would accept Claude\'s placements.',
   );

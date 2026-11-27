@@ -138,6 +138,33 @@ export default async function review(ctx) {
       ctx.log(`  ${b.label} (${b.hookText.slice(0, 40)}): starts at ${t.toFixed(2)}s, expected ${firstB.start.toFixed(2)}s`);
       assert(t >= firstB.start - 0.1 && t <= firstB.end, `${b.label} did not start on its first line (at ${t}, wanted ${firstB.start}..${firstB.end})`);
       await shot(page, '08-review-variant');
+
+      // Leave a base overlay out of this version, then bring it back: the row says so, the server keeps it.
+      const hideBtn = page.locator('[data-testid^="overlay-hide-"]').locator('visible=true').first();
+      assert((await hideBtn.count()) > 0, `no line in ${b.label} carries a base overlay to leave out`);
+      const overlayId = (await hideBtn.getAttribute('data-testid')).slice('overlay-hide-'.length);
+      assert(edl.overlays.some((o) => o.id === overlayId), `the marker names ${overlayId}, not a base overlay`);
+      await hideBtn.click();
+      await page.getByTestId(`hidden-overlay-${overlayId}`).waitFor({ timeout: 5000 });
+      await seeText(page, `left out of ${b.label}`);
+      const hiddenSaved = await waitFor('the hidden overlay to be saved', async () => {
+        const d = await ctx.api.video(videoId);
+        return d.edl.variants.find((v) => v.id === b.id).hiddenOverlayIds.includes(overlayId) ? d : null;
+      }, { timeoutMs: 15_000, everyMs: 300 });
+      assert(hiddenSaved.edl.overlays.some((o) => o.id === overlayId), 'hiding it in one version removed it from the base cut');
+      assert(hiddenSaved.edl.variants.filter((v) => v.id !== b.id).every((v) => !v.hiddenOverlayIds.includes(overlayId)), 'other versions hide it too');
+      // Another version shows it, with no note.
+      await page.getByRole('radio', { name: edl.variants[0].label }).click();
+      assert((await page.getByTestId(`hidden-overlay-${overlayId}`).count()) === 0, `${edl.variants[0].label} says the overlay is left out`);
+      await page.getByRole('radio', { name: b.label }).click();
+      await shot(page, '08b-review-overlay-hidden');
+      await page.getByTestId(`overlay-show-${overlayId}`).click();
+      await waitFor('the overlay to show again', async () => {
+        const d = await ctx.api.video(videoId);
+        return !d.edl.variants.find((v) => v.id === b.id).hiddenOverlayIds.includes(overlayId);
+      }, { timeoutMs: 15_000, everyMs: 300 });
+      assert((await page.getByTestId(`hidden-overlay-${overlayId}`).count()) === 0, 'the note stayed after showing it again');
+      ctx.log(`  ${b.label}: left out ${overlayId} and showed it again; saved both ways`);
     }
 
     // Preview with effects: a real preview render, then it plays.
@@ -162,6 +189,68 @@ export default async function review(ctx) {
     assert(!pv.err && pv.t1 > pv.t0, `the preview did not play (${JSON.stringify(pv)})`);
     await shot(page, '09-preview');
     await page.getByRole('button', { name: 'Close player' }).click();
+
+    // ---- Finding the decider's mistakes on a video with a retake ----
+    const mistakesId = ctx.state.videoIds?.mistakes;
+    assert(mistakesId, 'needs the upload flow (mistakes)');
+    await page.goto(`${ctx.appUrl}/review/${mistakesId}`, { waitUntil: 'networkidle' });
+    await seeText(page, 'Final length');
+    const m = await ctx.api.video(mistakesId);
+    const mOffsets = m.proxy.clipOffsets;
+    const cutRows = m.edl.segments.filter((s) => !s.keep && s.text.trim());
+    assert(cutRows.length >= 2, `the mistakes video has ${cutRows.length} cut lines`);
+    const summary = page.getByTestId('cut-summary').locator('visible=true');
+    assert((await summary.innerText()) === `${cutRows.length} cuts`, `the summary says "${await summary.innerText()}" for ${cutRows.length} cut lines`);
+    // Every cut line says why in words; a retake names the line it gave way to and offers Keep both.
+    for (const s of cutRows) {
+      const why = (await page.getByTestId(`why-${s.id}`).innerText()).trim();
+      assert(why.length > 3, `cut row ${s.id} has no reason`);
+      if (s.reason === 'retake') assert(/^Retake/.test(why), `the retake row says "${why}"`);
+      if (s.reason === 'false_start') assert(/^False start/.test(why), `the false start row says "${why}"`);
+      if (s.reason === 'filler') assert(why === 'Filler words', `the filler row says "${why}"`);
+      assert((await page.getByTestId(`keep-both-${s.id}`).count()) === (s.reason === 'retake' ? 1 : 0), `Keep both on ${s.reason} row ${s.id}`);
+    }
+    await page.waitForFunction(() => document.querySelector('video')?.readyState >= 2, null, { timeout: 30_000 });
+    // Next cut, twice: each plays the cut with a moment either side, then stops.
+    for (let k = 0; k < 2; k++) {
+      const s = cutRows[k];
+      await page.getByTestId('cut-next').locator('visible=true').click();
+      await waitFor(`"Cut ${k + 1} of ${cutRows.length}"`, async () => (await summary.innerText()) === `Cut ${k + 1} of ${cutRows.length}`, { timeoutMs: 5000, everyMs: 100 });
+      const start = Math.max(0, mOffsets[s.clipId] + s.start - 1.5);
+      const end = mOffsets[s.clipId] + s.end + 1.5;
+      const sampled = await samplePlayback(page, 'video', Math.min(8000, (end - start) * 1000 + 1500));
+      const ts = sampled.samples.map((x) => x.t);
+      assert(!sampled.error, `media error ${sampled.error}`);
+      assert(ts[0] >= start - 0.3 && ts[0] <= start + 1.0, `cut ${k + 1} did not start a moment before the cut (first sample ${ts[0]}, wanted ${start.toFixed(2)})`);
+      assert(ts.some((t) => t > mOffsets[s.clipId] + s.start && t < mOffsets[s.clipId] + s.end), `cut ${k + 1} did not play the cut itself`);
+      assert(Math.max(...ts) <= end + 0.35, `cut ${k + 1} played on past its context (${Math.max(...ts)} > ${end})`);
+      const paused = await page.evaluate(() => document.querySelector('video').paused);
+      assert(paused, `the player did not stop after cut ${k + 1}`);
+    }
+    await page.getByTestId('cut-prev').locator('visible=true').click();
+    await waitFor('back to cut 1', async () => (await summary.innerText()) === `Cut 1 of ${cutRows.length}`, { timeoutMs: 5000, everyMs: 100 });
+    await page.getByRole('button', { name: 'Pause', exact: true }).click().catch(() => {});
+    await shot(page, '09b-review-cuts');
+    // Keep both on the retake: it comes back, the take that replaced it stays.
+    const retake = cutRows.find((s) => s.reason === 'retake');
+    assert(retake, 'the mistakes video has no cut retake');
+    const idx = m.edl.segments.findIndex((s) => s.id === retake.id);
+    const replacement = m.edl.segments.slice(idx + 1).find((s) => s.keep && s.text.trim());
+    await page.getByTestId(`keep-both-${retake.id}`).click();
+    assert((await rowState(page, retake.id)) === 'kept', 'Keep both did not put the retake back');
+    const both = await waitFor('Keep both to be saved', async () => {
+      const d = await ctx.api.video(mistakesId);
+      return d.edl.segments.find((s) => s.id === retake.id).keep ? d : null;
+    }, { timeoutMs: 15_000, everyMs: 300 });
+    assert(!replacement || both.edl.segments.find((s) => s.id === replacement.id).keep, 'Keep both cut the take that replaced the retake');
+    await waitFor('the cut count to follow Keep both', async () => {
+      const t = await summary.innerText();
+      return t === `${cutRows.length - 1} cuts` || t.endsWith(` of ${cutRows.length - 1}`);
+    }, { timeoutMs: 5000, everyMs: 100 });
+    ctx.log(`  mistakes: ${cutRows.length} cut lines with reasons; stepped through two with context; kept both takes of "${retake.text.slice(0, 40)}"`);
+    // Put it back as it was, so later flows see the automatic edit.
+    await page.getByTestId(`row-${retake.id}`).click();
+    await waitFor('the retake to be cut again', async () => !(await ctx.api.video(mistakesId)).edl.segments.find((s) => s.id === retake.id).keep, { timeoutMs: 15_000, everyMs: 300 });
     assert(!errors.length, `browser errors: ${errors.slice(0, 5).join(' | ')}`);
   } finally {
     await browser.close();

@@ -19,6 +19,7 @@ import {
   type Transcript,
 } from '@kilo/edl';
 import type { Db, Sql } from '../db/index.js';
+import { pruneHiddenOverlays } from '../edlRules.js';
 import { UserFacingError, asPipelineError, errorDetail, userMessage } from '../errors.js';
 import { goalStats, isBehindPace, localTime } from '../goal.js';
 import type { Logger } from '../log.js';
@@ -580,7 +581,9 @@ export class Worker {
         const decided = this.analyze.decideEditWithNotices
           ? await this.analyze.decideEditWithNotices(input)
           : { edl: await this.analyze.decideEdit(input), notices: [] };
-        edl = Edl.parse(decided.edl);
+        // The stored edit carries the settings this video was analysed with (its own, laid over the batch's),
+        // and no variant may hide an overlay the decider did not place.
+        edl = pruneHiddenOverlays({ ...Edl.parse(decided.edl), settings: video.settings });
         notice = decided.notices.map((n) => n.message).filter(Boolean).join(' ') || null;
       } catch (err) {
         throw new UserFacingError(MSG.decide, err);
@@ -705,7 +708,8 @@ export class Worker {
     const input = await this.decideInput(video, clips);
     let edl: Edl;
     try {
-      edl = Edl.parse(await this.analyze.replan({ ...input, edl: current.edl, passes }));
+      // A placement pass can drop overlays a variant hid: forget those ids rather than fail the replan.
+      edl = pruneHiddenOverlays({ ...Edl.parse(await this.analyze.replan({ ...input, edl: current.edl, passes })), settings: current.edl.settings });
     } catch (err) {
       throw new UserFacingError(MSG.replan, err);
     }

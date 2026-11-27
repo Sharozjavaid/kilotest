@@ -1,6 +1,7 @@
 import { toggleSegment, type Captions, type Edl, type Overlay } from '@kilo/edl';
 import { isKiloApiError } from '@/api/errors';
 import { fitOverlays } from '@/broll/overlays';
+import { pruneHidden, setOverlayHidden } from './variantOverlays';
 
 /**
  * Saving review edits. The user's taps are kept as *pending toggles* on top of the
@@ -18,21 +19,29 @@ import { fitOverlays } from '@/broll/overlays';
 export type EdlEdit =
   | { type: 'upsertOverlay'; overlay: Overlay }
   | { type: 'removeOverlay'; overlayId: string }
-  | { type: 'captions'; captions: Captions };
+  | { type: 'captions'; captions: Captions }
+  /** Hide (or show again) one of the base cut's overlays in one variant. */
+  | { type: 'overlayHidden'; variantId: string; overlayId: string; hidden: boolean };
 
 export interface PendingEdit {
   edit: EdlEdit;
   seq: number;
 }
 
-/** Applies edits in order. An overlay whose anchor segment no longer exists is dropped. */
+/**
+ * Applies edits in order. An overlay whose anchor segment no longer exists is dropped; a
+ * removed overlay is no longer hidden in any variant; hiding an overlay that is gone (or in
+ * a variant that is gone) does nothing.
+ */
 export function applyEdits(edl: Edl, edits: readonly PendingEdit[]): Edl {
   let out = edl;
   for (const { edit } of edits) {
     if (edit.type === 'captions') {
       out = { ...out, captions: edit.captions };
     } else if (edit.type === 'removeOverlay') {
-      out = { ...out, overlays: out.overlays.filter((o) => o.id !== edit.overlayId) };
+      out = pruneHidden({ ...out, overlays: out.overlays.filter((o) => o.id !== edit.overlayId) });
+    } else if (edit.type === 'overlayHidden') {
+      out = setOverlayHidden(out, edit.variantId, edit.overlayId, edit.hidden);
     } else {
       if (!out.segments.some((s) => s.id === edit.overlay.anchorSegmentId)) continue;
       const i = out.overlays.findIndex((o) => o.id === edit.overlay.id);
@@ -46,7 +55,12 @@ export function applyEdits(edl: Edl, edits: readonly PendingEdit[]): Edl {
 export function editsChange(edl: Edl, edits: readonly PendingEdit[]): boolean {
   if (!edits.length) return false;
   const after = applyEdits(edl, edits);
-  return JSON.stringify(after.overlays) !== JSON.stringify(edl.overlays) || JSON.stringify(after.captions) !== JSON.stringify(edl.captions);
+  const hidden = (e: Edl) => JSON.stringify(e.variants.map((v) => v.hiddenOverlayIds));
+  return (
+    JSON.stringify(after.overlays) !== JSON.stringify(edl.overlays) ||
+    JSON.stringify(after.captions) !== JSON.stringify(edl.captions) ||
+    hidden(after) !== hidden(edl)
+  );
 }
 
 /**
@@ -56,7 +70,8 @@ export function editsChange(edl: Edl, edits: readonly PendingEdit[]): boolean {
  */
 export function compose(server: Edl, pending: Pending, edits: readonly PendingEdit[] = []): Edl {
   const raw = applyEdits(applyPending(server, pending), edits);
-  return raw === server ? raw : fitOverlays(raw);
+  // Fitting can drop an overlay that no longer fits anywhere; no variant may still hide it then.
+  return raw === server ? raw : pruneHidden(fitOverlays(raw));
 }
 
 export interface PendingToggle {

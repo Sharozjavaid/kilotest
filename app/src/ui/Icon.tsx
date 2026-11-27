@@ -36,7 +36,8 @@ export type IconName =
   | 'trash'
   | 'flip'
   | 'list'
-  | 'bell';
+  | 'bell'
+  | 'search';
 
 export interface IconProps {
   name: IconName;
@@ -164,6 +165,13 @@ function renderIcon(name: IconName, c: Common, fill: string) {
       return <Path d="M4 9a8 8 0 0 1 14-4l2 2M20 4v3h-3M20 15a8 8 0 0 1-14 4l-2-2M4 20v-3h3" {...c} />;
     case 'list':
       return <Path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" {...c} />;
+    case 'search':
+      return (
+        <>
+          <Circle cx={11} cy={11} r={6.5} {...c} />
+          <Path d="M16 16l4.5 4.5" {...c} />
+        </>
+      );
     case 'bell':
       return <Path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0" {...c} />;
     case 'mail':

@@ -415,7 +415,7 @@ describe('variants', () => {
     const edl: Edl = {
       ...unboxing.edl,
       captions: { enabled: true, style: 'clean' },
-      variants: [{ id: 'v2', label: 'Call first', hookText: '', segmentOrder: ['line5_take1-u0', 'line1_take1-u0', 'line2_take1-u2'], overlays: [] }],
+      variants: [{ id: 'v2', label: 'Call first', hookText: '', segmentOrder: ['line5_take1-u0', 'line1_take1-u0', 'line2_take1-u2'], overlays: [], hiddenOverlayIds: [] }],
     };
     const path = out('variant.mp4');
     const job = join(WORK, 'variant-job');
@@ -437,6 +437,38 @@ describe('variants', () => {
     const firstLine = ass.split('\n').find((l) => l.startsWith('Dialogue:'))!;
     expect(firstLine).toMatch(/Tap the link/);
     expect(firstLine).toMatch(/0:00:00\.\d\d,/);
+  });
+});
+
+describe('hidden overlays', () => {
+  it('a variant that hides a B-roll renders without it, and the base cut still shows it', async () => {
+    const magentaAsset: BrollAsset = { id: 'magenta', kind: 'video', durationSec: 3, width: 1080, height: 1920, description: 'magenta', source: 'user' };
+    const broll = { magenta: { path: magentaBroll(), asset: magentaAsset } };
+    const edl = baseEdl([seg('a', 'clip1', 4.157, 7.216), seg('b', 'clip1', 9.016, 11.162)], 60, {
+      overlays: [{ id: 'm', type: 'broll', anchorSegmentId: 'b', offsetSec: 0.3, durationSec: 1.2, assetId: 'magenta', sourceStartSec: 0 }],
+      variants: [
+        { id: 'base', label: 'Hook A', hookText: '', segmentOrder: ['a', 'b'], overlays: [], hiddenOverlayIds: [] },
+        // Opens on b, so the B-roll would cover its hook: this variant hides it.
+        { id: 'cold', label: 'Hook B', hookText: '', segmentOrder: ['b', 'a'], overlays: [], hiddenOverlayIds: ['m'] },
+      ],
+    });
+    const isMagenta = (fr: Frames, f: number) => [0.3, 0.5, 0.7].every((y) => near(pixel(fr, f, 0.5, y), [255, 0, 255], 40));
+    const basePath = out('hidden-base.mp4');
+    await renderVideo(input(routine, edl, { outPath: basePath, broll }));
+    const basePlan = buildPlan({ edl, quality: 'preview', clips: routine.clips, broll });
+    expect(basePlan.overlays.map((o) => o.overlay.id)).toEqual(['m']);
+    const bf = decodeFrames(basePath);
+    const m = basePlan.overlays[0]!;
+    expect(isMagenta(bf, m.frameStart + Math.floor(m.frames / 2))).toBe(true);
+
+    const coldPath = out('hidden-cold.mp4');
+    await renderVideo(input(routine, edl, { outPath: coldPath, broll, variantId: 'cold' }));
+    const coldPlan = buildPlan({ edl, variantId: 'cold', quality: 'preview', clips: routine.clips, broll });
+    expect(coldPlan.overlays).toEqual([]);
+    const cf = decodeFrames(coldPath);
+    for (let f = 0; f < cf.list.length; f++) expect(isMagenta(cf, f), `frame ${f}`).toBe(false);
+    // Where segment b plays in the variant (its first frames), the speaker's band shows instead.
+    expect(bandAt(cf, Math.round(0.3 * 30) + 5)).toBe('blue');
   });
 });
 

@@ -10,6 +10,7 @@ import { getUploadQueue } from '@/uploads/UploadManager';
 import {
   addBroll,
   countClips,
+  effectiveVideoSettings,
   groupPicked,
   toCreateBatchRequest,
   uploadJobsFor,
@@ -42,6 +43,7 @@ export default function NewBatchScreen() {
   const mock = !!getMockApi();
 
   const clipCount = countClips(videos);
+  const ownCount = videos.filter((v) => effectiveVideoSettings(settings, v).own).length;
   const brollCount = videos.reduce((n, v) => n + v.broll.length, 0);
 
   const pickClips = async () => {
@@ -131,8 +133,15 @@ export default function NewBatchScreen() {
       </View>
 
       <HookVariations settings={settings} set={set} />
+      {ownCount ? (
+        <Pressable onPress={() => setEditorOpen(true)} accessibilityRole="button" style={{ minHeight: 44, justifyContent: 'center' }} testID="own-settings-note">
+          <Text variant="secondary" tone="muted">
+            {ownCount === 1 ? '1 video has' : `${ownCount} videos have`} their own kind of video or hooks. <Text variant="secondary" weight={600} tone="accent">Edit videos</Text>
+          </Text>
+        </Pressable>
+      ) : null}
 
-      <VideosEditor visible={editorOpen} videos={videos} onChange={setVideos} onClose={() => setEditorOpen(false)} onAddClips={pickClips} onAddBroll={pickBrollFor} />
+      <VideosEditor visible={editorOpen} videos={videos} batchSettings={settings} onChange={setVideos} onClose={() => setEditorOpen(false)} onAddClips={pickClips} onAddBroll={pickBrollFor} />
       <ChooseVideoSheet visible={chooserOpen} videos={videos} onChoose={(k) => void pickBrollFor(k)} onClose={() => setChooserOpen(false)} />
     </Screen>
   );

@@ -3,6 +3,7 @@ import type { TemplateComponentProps } from '../common';
 import { Plate, plateMotion } from '../common';
 import { fitText, fontCss } from '../fit';
 import { ease, progress } from '../motion';
+import { textDirection } from '../scripts';
 import { DESIGN_WIDTH, fonts } from '../style';
 
 export interface BoldTitleProps {
@@ -54,7 +55,16 @@ export const BoldTitle: React.FC<TemplateComponentProps<BoldTitleProps>> = ({ pr
     <Plate clock={clock} theme={theme} height={area.height}>
       <div style={{ position: 'absolute', left, width: maxWidth, top, textAlign: 'center' }}>
         {fit.lines.map((line, li) => (
-          <div key={li} style={{ ...fontCss(font, size), lineHeight: `${size * fit.line}px`, height: size * fit.line, color: theme.foreground }}>
+          // Each word is its own inline block, which the browser's bidi reordering cannot see
+          // into: the line's direction is set from its text, so right-to-left words run right to left.
+          <div
+            key={li}
+            data-probe-line={`title-${li}`}
+            style={{
+              ...fontCss(font, size), lineHeight: `${size * fit.line}px`, height: size * fit.line, color: theme.foreground,
+              direction: textDirection(line.join(' ')), unicodeBidi: 'isolate',
+            }}
+          >
             {line.map((word, wi) => {
               const i = w++;
               const p = progress(clock.t, start + i * stagger, wordDur);

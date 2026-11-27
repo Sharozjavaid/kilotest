@@ -1,6 +1,7 @@
 import type { Edl, Segment, Transcript, Word } from '@kilo/edl';
 import { checkOverlayRules, HOOK_PROTECT_SEC, playOrder, resolveTimeline, TEMPLATES, validateEdl } from '@kilo/edl';
 import { ordinalAt } from '../src/overlays.js';
+import { overlaysToHide } from '../src/rules.js';
 import { endsSentence, norm } from '../src/text.js';
 import { findFixtures, scoreFixture, type FixtureScore } from './scoring.js';
 
@@ -126,9 +127,12 @@ function timelineProblems(edl: Edl, variantId: string): string[] {
 /**
  * How many different openings the recording offers by this rule: the natural one,
  * plus every later kept line that passes `openingProblems` and, moved to the front,
- * keeps the variant's timeline free of overlay problems.
+ * keeps the variant's timeline free of overlay problems once the variant hides the base
+ * overlays in its way (`Variant.hiddenOverlayIds`; the base cut keeps them). `blocked`
+ * gets the lines that pass the wording rule but even so break an overlay rule;
+ * `hidden` gets, per line offered that way, what it hides.
  */
-export function availableOpenings(edl: Edl, transcripts: readonly Transcript[], blocked: string[] = []): string[] {
+export function availableOpenings(edl: Edl, transcripts: readonly Transcript[], blocked: string[] = [], hidden: string[] = []): string[] {
   const base = playOrder(edl).map((s) => s.id);
   if (!base.length) return [];
   const out = [base[0]!];
@@ -137,12 +141,16 @@ export function availableOpenings(edl: Edl, transcripts: readonly Transcript[], 
     const unit = openingUnit(edl, transcripts, rest).map((s) => s.id);
     const order = [...unit, ...base.filter((id) => !unit.includes(id))];
     if (openingProblems(edl, transcripts, order).length) continue;
-    const probe: Edl = { ...edl, variants: [{ id: 'probe', label: '', hookText: '', segmentOrder: order, overlays: [] }] };
-    const tp = timelineProblems(probe, 'probe');
+    const bare = { id: 'probe', label: '', hookText: '', segmentOrder: order, overlays: [], hiddenOverlayIds: [] as string[] };
+    const hides = overlaysToHide(edl, bare);
+    const probe: Edl = { ...edl, variants: [{ ...bare, hiddenOverlayIds: hides }] };
+    const text = unit.map((id) => edl.segments.find((x) => x.id === id)!.text).join(' ');
+    const tp = [...timelineProblems(probe, 'probe'), ...checkOverlayRules(probe, 'probe').map((x) => x.message)];
     if (tp.length) {
-      blocked.push(`"${unit.map((id) => edl.segments.find((x) => x.id === id)!.text).join(' ')}" works as a line but, moved first, ${tp.join('; ')}`);
+      blocked.push(`"${text}" works as a line but, moved first, ${tp.join('; ')}`);
       continue;
     }
+    if (hides.length) hidden.push(`"${text}" opens a variant that hides ${hides.join(', ')}`);
     out.push(base[i]!);
   }
   return out;
@@ -155,8 +163,10 @@ export interface VariantCheck {
   keptSegments: number;
   /** Different openings the recording offers by the rule (first segment ids). */
   available: number;
-  /** Lines that pass the wording rule but would break the overlay rules if moved first. */
+  /** Lines that pass the wording rule but would break the overlay rules if moved first, even hiding overlays. */
   blocked: string[];
+  /** Lines offered by hiding base overlays in their variant, with what they hide. */
+  hidden: string[];
   variants: number;
   /** Variants that open on a segment no earlier variant opens on. */
   distinct: number;
@@ -181,10 +191,12 @@ export function checkVariants(edl: Edl, score: FixtureScore, wanted: number, not
   const base = playOrder(edl).map((s) => s.id);
   const baseDur = resolveTimeline(edl).durationSec;
   const blocked: string[] = [];
-  const available = availableOpenings(edl, transcripts, blocked).length;
+  const hidden: string[] = [];
+  const available = availableOpenings(edl, transcripts, blocked, hidden).length;
   const need = Math.min(wanted, available);
   for (const i of validateEdl(edl, clips)) problems.push(`validateEdl: ${i.message}`);
   for (const i of checkOverlayRules(edl)) problems.push(`checkOverlayRules: ${i.message}`);
+  for (const v of edl.variants) for (const i of checkOverlayRules(edl, v.id)) problems.push(`checkOverlayRules(${v.id}): ${i.message}`);
   const openings: VariantCheck['openings'] = [];
   const segText = (id: string) => openingUnit(edl, transcripts, [id, ...base]).map((x) => x.text).join(' ');
   const firsts = new Set<string>();
@@ -224,7 +236,7 @@ export function checkVariants(edl: Edl, score: FixtureScore, wanted: number, not
   if (need >= 2 && distinct < need) problems.push(`${distinct} distinct openings, but the recording offers ${available}`);
   const short = edl.variants.length < wanted || distinct < wanted;
   if (short && !notices.some((m) => /opening/i.test(m))) problems.push(`${distinct} distinct openings for ${wanted} asked, with no notice to the creator`);
-  return { keptSegments: base.length, available, blocked, variants: edl.variants.length, distinct, notices, openings, problems, edl, score };
+  return { keptSegments: base.length, available, blocked, hidden, variants: edl.variants.length, distinct, notices, openings, problems, edl, score };
 }
 
 export async function runVariantChecks(opts: { only?: RegExp; dirs?: string[] } = {}): Promise<VariantCheck[]> {
@@ -247,16 +259,22 @@ export function formatVariantReport(checks: VariantCheck[]): string {
   for (const c of checks) {
     out.push(`${c.fixture}: ${c.variants} variant(s), ${c.distinct} distinct opening(s); the recording offers ${c.available} over ${c.keptSegments} kept segments${c.problems.length ? `; ${c.problems.length} problem(s)` : '; all checks pass'}`);
     for (const n of c.notices) out.push(`  notice: ${n}`);
-    for (const o of c.openings) out.push(`  ${o.id}: opens on ${o.firstSegment} "${o.firstText}"${o.titled ? ` under the title "${o.hookText}"` : ''}; hook text "${o.hookText}"`);
+    for (const o of c.openings) {
+      const hides = c.edl.variants.find((v) => v.id === o.id)?.hiddenOverlayIds ?? [];
+      out.push(`  ${o.id}: opens on ${o.firstSegment} "${o.firstText}"${o.titled ? ` under the title "${o.hookText}"` : ''}; hook text "${o.hookText}"${hides.length ? `; hides ${hides.join(', ')}` : ''}`);
+    }
     for (const b of c.blocked) out.push(`  not offered: ${b}`);
+    for (const h of c.hidden) out.push(`  offered by hiding: ${h}`);
     for (const p of c.problems) out.push(`  PROBLEM ${p}`);
   }
   const failing = checks.filter((c) => c.problems.length);
   const three = checks.filter((c) => !c.problems.length && c.distinct >= 3);
+  const count = (n: number) => checks.filter((c) => !c.problems.length && c.distinct === n).length;
   out.push(
     '',
     `Recordings: ${checks.length}. With three distinct, usable openings: ${three.length} (${three.map((c) => c.fixture).join(', ') || 'none'}).`,
     `Too short for three by the rule (fewer distinct openings, with a notice): ${checks.filter((c) => !c.problems.length && c.distinct < 3).map((c) => `${c.fixture} offers ${c.available}`).join(', ') || 'none'}.`,
+    `Distinct openings per recording: 3 or more: ${three.length}; 2: ${count(2)}; 1: ${count(1)}.`,
     `Failing a check: ${failing.length}${failing.length ? ` (${failing.map((c) => c.fixture).join(', ')})` : ''}.`,
   );
   return out.join('\n');

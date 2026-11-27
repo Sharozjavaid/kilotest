@@ -19,7 +19,9 @@ import type { PlaybackRange } from '@kilo/edl';
 export type PlayerCommand =
   | { type: 'none' }
   | { type: 'seek'; to: number }
-  | { type: 'end'; seekTo: number };
+  | { type: 'end'; seekTo: number }
+  /** Stop where the player is (an audition that asked to pause at its end). */
+  | { type: 'pause' };
 
 /** Tolerance for "reached the end" and for float noise in times. */
 export const EPS = 0.04;
@@ -32,6 +34,8 @@ export interface Audition {
   segmentId: string;
   proxyStart: number;
   proxyEnd: number;
+  /** Pause at the end instead of carrying on with the edit (stepping through cuts). */
+  pauseAfter?: boolean;
 }
 
 export interface PlaybackSnapshot {
@@ -114,7 +118,14 @@ export class PlaybackController {
     if (this.audition) {
       if (t < this.audition.proxyEnd - EPS && t >= this.audition.proxyStart - EPS) return { type: 'none' };
       const after = this.nextRangeAfter(this.audition.proxyEnd - EPS);
+      const pauseAfter = !!this.audition.pauseAfter;
       this.audition = null;
+      if (pauseAfter) {
+        // Play resumes with the edit, from the first kept line after the cut.
+        this.index = after >= 0 ? after : 0;
+        if (after < 0) this.ended = true;
+        return { type: 'pause' };
+      }
       if (after < 0) return this.finish();
       this.index = after;
       const r = this.ranges[after]!;
@@ -155,6 +166,16 @@ export class PlaybackController {
     this.index = i;
     const r = this.ranges[i]!;
     return this.markSeek(r.proxyStart + (clamped - r.outStart));
+  }
+
+  /**
+   * Plays a stretch of the recording as it was (a cut with a moment either side), then
+   * pauses. Labelled with the cut's segment, so the screen shows it as "Playing a cut".
+   */
+  auditionSpan(segmentId: string, span: { proxyStart: number; proxyEnd: number }): number {
+    this.ended = false;
+    this.audition = { segmentId, proxyStart: span.proxyStart, proxyEnd: span.proxyEnd, pauseAfter: true };
+    return this.markSeek(span.proxyStart);
   }
 
   /**

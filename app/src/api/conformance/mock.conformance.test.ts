@@ -31,8 +31,9 @@ describe('mock API conforms to the server rules (CONTRACTS.md section 5)', () =>
       const res = await api.createBatch(batchBody('clip.mp4'));
       return { videoId: res.videos[0]!.videoId, clipId: res.videos[0]!.clips[0]!.clipId };
     },
-    async readyVideo() {
-      const res = await api.createBatch(batchBody('clip.mp4'));
+    async readyVideo(own) {
+      const body = batchBody('clip.mp4');
+      const res = await api.createBatch(own ? { ...body, videos: body.videos.map((v) => ({ ...v, settings: own })) } : body);
       await api.completeUploads({ clipIds: res.videos[0]!.clips.map((c) => c.clipId) });
       const id = res.videos[0]!.videoId;
       await waitFor(async () => (await api.getVideo(id)).status === 'ready_for_review', 'ready');

@@ -55,28 +55,39 @@ recordings first: `node ../fixtures/make-batch30.mjs --generate` (specs in
 creator, through the UI only, `e2e/flows/batch30.mjs`:
 
 - picks the 72 clips (in two picks, as the device picker takes 60 at a time), merges the
-  multi-clip recordings in the batch editor, names them, adds B-roll to nine, sets General with
-  three hooks, and starts one batch of 30;
+  multi-clip recordings in the batch editor, names them, adds B-roll to nine, sets the batch to
+  General with three hooks and gives videos their own kind of video and hooks in the editor, so
+  the one batch mixes General, UGC ad and TikTok Shop with one, two and three openings, and starts
+  one batch of 30;
 - watches the Batch and Home screens until all 30 are ready (upload and analysis progress, the
-  header count, nothing failed or stuck for ten minutes);
+  header count, nothing failed or stuck for ten minutes), with uploads one video at a time, the
+  connection cut for eight seconds mid-upload (uploads pause, no finished file is sent again),
+  Home not polled while the Batch screen is in front, and Home's ready list in batch order;
 - reviews every video: rows against the EDL, the automatic edit against the fixture's ground
   truth (`manifest.json`), fixes every wrong line by tapping its row, makes a deliberate edit on
   ten (cuts a kept line or restores a cut take), turns captions on for five, Looks good, Next video;
-- waits for all 90 final renders, downloads every version from each Export screen reached from
-  Home's Finished list, and checks each file: 1080x1920, the EDL's frame rate, duration within two
+- waits for every final render (the batch stays on Home while it exports), downloads every
+  version from each Export screen reached through All videos (Finished, search by title), and
+  checks each file: 1080x1920, the EDL's frame rate, duration within two
   frames of the saved edit, -14 LUFS within 1.5, and every frame traced through the edit to the
   fixture unit it shows (no cut line; the blue kept band and orange cut band where they belong);
 - ends on Home with all 30 finished and marks one as posted.
 
-Mode and hook count are per batch (`CreateBatchRequest.settings`), so one batch cannot mix modes;
-`E2E_BATCH30_MODE` picks the mode, `E2E_BATCH30_COUNT=n` runs the first n recordings while working
-on the flow. Timings, disk, browser memory, request counts, every automatic-edit mistake and every
+`E2E_BATCH30_MODE` picks the batch's default mode (each video's own follows the plan in the flow),
+`E2E_BATCH30_COUNT=n` runs the first n recordings while working on the flow. Timings, disk, browser memory, request counts, every automatic-edit mistake and every
 finding go to `.work/e2e/batch30/report.json`; the EDLs before and after review to
 `.work/e2e/batch30/edls/`.
 
 ## Behaviour worth knowing
 
-- **Uploads** (`src/uploads/`): the queue is stored per signed-in account and cleared on
+- **Uploads** (`src/uploads/`): one video's files at a time (`videosAtOnce`), so the first
+  videos edit while later ones upload; a file waiting out a retry does not hold up the rest.
+  A lost connection pauses the queue (running uploads stop without spending an attempt, a tus
+  upload keeps its place, finished files are never sent again) and a failure with no answer
+  from the server is retried with growing waits, never marked failed. Finished files of a video
+  still uploading are kept across relaunches so "2 of 3 files in" stays true. The Batch screen
+  says whose move it is: uploading, waiting its turn on this phone, paused offline, retrying,
+  files not on this phone, or queued on the server. The queue is stored per signed-in account and cleared on
   sign-out. `uploads/complete` is read per file: a refused file is sent again on a fresh
   target (`POST /v1/uploads/targets`), then marked failed with a retry that asks for a
   fresh target; a file whose video was deleted is dropped. An upload refused as expired
@@ -90,6 +101,21 @@ finding go to `.work/e2e/batch30/report.json`; the EDLs before and after review 
 - **Sign-out**: unregisters this device's push token (`DELETE /v1/devices`) and clears
   the account's uploads and unsaved edits before the session goes. A 503
   `auth_unavailable` is retried, never treated as a sign-out.
+- **Polling**: only the screen in front polls (`useIsFocused`); a screen under another one also
+  stops listening to the cache, so it neither polls nor refetches on invalidations until it
+  is in front again. Review and Export read the batch without polling it.
+- **Home and All videos**: a batch keeps its card until every video in it is done. Home lists
+  ready videos newest batch first, in each batch's order, and the latest ten finished; All
+  videos (`/videos`, from Home) pages through everything (`GET /v1/videos?order=batch&limit=40`)
+  in a virtualised list with a status filter, title search, batch headers that open the batch,
+  remembered thumbnails and no polling.
+- **Review**: a variant's hidden base overlays are named on their line ("Bold title left out of
+  Hook B", Show), and a shown one is hidden from its marker; the B-roll screen and the overlay
+  sheet ("Shown in") and Export's tiles follow the same rules (`src/review/variantOverlays.ts`).
+  Cut rows say why in plain words (`src/review/cuts.ts`), a cut retake offers Keep both, and
+  "N cuts" with previous and next plays each cut with 1.5 s either side, then stops.
+- **New batch**: each video in the editor can have its own kind of video and hooks; it follows
+  the batch until changed, and only what differs is sent as `NewVideo.settings`.
 - **Mock** (`src/api/mock/`): follows the server's rules; `src/api/conformance/scenarios.ts`
   runs the same scenarios against the mock (jest) and the server
   (`server/test/conformance.test.ts`).

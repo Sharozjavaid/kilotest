@@ -1,4 +1,4 @@
-import { enforceOverlayRules } from './rules.js';
+import { enforceOverlayRules, enforceVariantRules } from './rules.js';
 import type { AnalyzeApi, BrollAsset, DecideInput, EditSettings, ReplanPass, Segment } from '@kilo/edl';
 import { Edl, OUTPUT_HEIGHT, OUTPUT_WIDTH, validateEdl } from '@kilo/edl';
 import { buildChunks, prepareClipWords, type Chunk } from './chunks.js';
@@ -18,7 +18,7 @@ import { snapSegments } from './snap.js';
 import { pexelsProvider, suggestStock, type StockProvider } from './stock.js';
 import { isTranscriptUnavailable, selectTranscriber, transcriberChoice, type FetchLike, type Transcriber } from './transcribe.js';
 import { mergeSilences } from './snap.js';
-import { buildVariants, heuristicHooks, type HookPlan } from './variants.js';
+import { buildVariants, heuristicHooks, repairHooks, type HookPlan } from './variants.js';
 import { keys } from './text.js';
 
 export type DeciderName = 'claude' | 'heuristic';
@@ -291,7 +291,8 @@ function runPasses(edl: Edl, input: DecideInput, passes: readonly ReplanPass[], 
   const assets = input.broll;
   if (wants('broll') && settings.broll && assets.length) {
     if (plan) plan.broll.forEach((b, i) => {
-      const c = brollCandidate(b.asset, b.line, 200 - i, assets.indexOf(b.asset));
+      // Claude placed the creator's own clip on this line: it comes before anything automatic.
+      const c = brollCandidate(b.asset, b.line, 200 - i, assets.indexOf(b.asset), { creator: true });
       if (c) candidates.push(c);
     });
     else candidates.push(...brollCandidates(lines, assets, totalSec));
@@ -320,16 +321,18 @@ function runPasses(edl: Edl, input: DecideInput, passes: readonly ReplanPass[], 
   let next: Edl = { ...edl, settings, overlays: [...keep, ...placed] };
   if (wants('variants')) {
     const count = settings.hookVariations;
-    const hooks = count > 1 ? (plan?.hooks && plan.hooks.length === count ? plan.hooks : heuristicHooks(lines, next, count)) : [];
-    next = { ...next, variants: buildVariants(lines, hooks, usedIds) };
+    // Claude's hooks are checked and repaired by the heuristic's rules; the heuristic fills any gap.
+    const hooks = count > 1 ? (plan?.hooks && plan.hooks.length ? repairHooks(plan.hooks, lines, next, count) : heuristicHooks(lines, next, count)) : [];
+    next = { ...next, variants: buildVariants(lines, hooks, usedIds, next) };
   }
   // Keep overlays in play order for readability.
   const order = new Map(lines.map((l) => [l.segment.id, l.outStart]));
   next.overlays = [...next.overlays].sort(
     (a, b) => (order.get(a.anchorSegmentId) ?? 0) + a.offsetSec - ((order.get(b.anchorSegmentId) ?? 0) + b.offsetSec),
   );
-  // Overlays kept from an earlier plan may break the rules after the creator changed the cut.
-  return enforceOverlayRules(next);
+  // Overlays kept from an earlier plan may break the rules after the creator changed the cut;
+  // then every variant hides what would break them on its own timeline.
+  return enforceVariantRules(enforceOverlayRules(next));
 }
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);

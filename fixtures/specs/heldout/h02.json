@@ -1,0 +1,58 @@
+{
+  "id": "h02",
+  "title": "Cream sizes",
+  "clips": [
+    {
+      "name": "h02_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "I compared three sizes of the same cream.",
+          "group": "g0"
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "The small jar is nine dollars.",
+          "group": "g1"
+        },
+        {
+          "say": "The medium jar is twelve dollars.",
+          "group": "g2",
+          "keep": false,
+          "reason": "retake"
+        },
+        {
+          "pause": 0.6
+        },
+        {
+          "say": "sorry, fourteen",
+          "keep": false,
+          "reason": "off_script"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "The medium jar is fourteen dollars.",
+          "group": "g2"
+        },
+        {
+          "say": "The large jar is twenty dollars.",
+          "group": "g3"
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "say": "The medium one is the best deal.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

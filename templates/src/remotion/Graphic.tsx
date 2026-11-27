@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AbsoluteFill, continueRender, delayRender, useCurrentFrame } from 'remotion';
 import type { TemplateComponentProps } from './common';
-import { loadFonts } from './fonts';
+import { loadFallbackFonts, loadFonts } from './fonts';
 import { makeClock } from './motion';
 import { probeLayout } from './probe';
+import { setTextHint, textOf } from './scripts';
 import { DESIGN_WIDTH, safeArea, type ThemeInput } from './style';
 import { BoldTitle } from './templates/BoldTitle';
 import { KeywordPop } from './templates/KeywordPop';
@@ -44,6 +45,7 @@ export const Graphic: React.FC<GraphicInput> = (input) => {
   const [probeHandle] = useState(() => (input.probe ? delayRender('Measuring the layout') : null));
   useEffect(() => {
     loadFonts()
+      .then(() => loadFallbackFonts(textOf(input.props)))
       .then(() => {
         setReady(true);
         continueRender(handle);
@@ -61,6 +63,8 @@ export const Graphic: React.FC<GraphicInput> = (input) => {
   }, [ready, frame, probeHandle, input.width, input.height]);
 
   if (!ready) return null;
+  // Orders the Chinese, Japanese and Korean faces for this graphic's text before anything is measured.
+  setTextHint(textOf(input.props));
   const Component = COMPONENTS[input.template];
   if (!Component) throw new Error(`Unknown template: ${input.template}`);
 

@@ -1,0 +1,50 @@
+{
+  "id": "h10",
+  "title": "Challenge days",
+  "clips": [
+    {
+      "name": "h10_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "A seven day reading challenge.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "Day one, read for ten minutes.",
+          "group": "g1"
+        },
+        {
+          "say": "Day two, read for fifteen minutes.",
+          "group": "g2"
+        },
+        {
+          "say": "Day three, read for twenty minutes.",
+          "group": "g3",
+          "keep": false,
+          "reason": "retake"
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "say": "Day three, read for twenty minutes before bed.",
+          "group": "g3"
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "Keep adding five minutes a day.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

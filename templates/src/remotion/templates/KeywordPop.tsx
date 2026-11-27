@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import type { TemplateComponentProps } from '../common';
 import { fitFlow, fontCss, unitOf } from '../fit';
 import { ease, progress } from '../motion';
+import { textDirection } from '../scripts';
 import { cardShadow, fonts, inkOn } from '../style';
 
 export interface KeywordPopProps {
@@ -45,6 +46,8 @@ export const KeywordPop: React.FC<TemplateComponentProps<KeywordPopProps>> = ({ 
   const outStagger = Math.min(0.03, outDur * 0.2);
   const emphasis = n - 1;
   const accentInk = inkOn(theme, theme.accent);
+  // Right-to-left words are read from the right: the first chip of a row goes at its right end.
+  const rtl = textDirection(words.join(' ')) === 'rtl';
   const shadow = cardShadow(theme);
 
   return (
@@ -55,7 +58,7 @@ export const KeywordPop: React.FC<TemplateComponentProps<KeywordPopProps>> = ({ 
         const y = top + li * (chipH + rowGap);
         return line.map((i) => {
           const w = unit[i]! * size;
-          const left = x;
+          const left = rtl ? 2 * cx - x - w : x;
           x += w + GAP * size;
           const p = progress(clock.t, i * stagger, popDur);
           const outStart = clock.end - outDur - (n - 1 - i) * outStagger;
@@ -70,6 +73,7 @@ export const KeywordPop: React.FC<TemplateComponentProps<KeywordPopProps>> = ({ 
           return (
             <div
               key={i}
+              data-probe-line={`row-${li}`}
               style={{
                 position: 'absolute',
                 left,

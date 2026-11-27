@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import {
   CompleteUploadsRequest,
   CreateBatchRequest,
+  EditSettings,
   ReissueUploadsRequest,
   type BatchDetail,
   type CompleteUploadsResponse,
@@ -46,6 +47,15 @@ export async function analyzePriority(tx: Db, userId: string, exceptVideoId?: st
 export async function renderPriority(tx: Db, userId: string): Promise<number> {
   const [row] = await tx<{ n: number }[]>`select count(*)::int as n from renders where user_id = ${userId} and status in ('queued', 'rendering')`;
   return -Number(row?.n ?? 0);
+}
+
+/**
+ * The settings one video is edited with: its own (`NewVideo.settings`) laid over the
+ * batch's. Stored on the video; analysis, replans and the stored EDL use only these.
+ * The batch keeps the settings it was created with, as the defaults its videos started from.
+ */
+export function videoSettings(batch: EditSettings, own: Partial<EditSettings> | undefined): EditSettings {
+  return EditSettings.parse({ ...batch, ...(own ?? {}) });
 }
 
 export function batchRoutes(deps: AppDeps): Hono<Env> {
@@ -93,7 +103,7 @@ export function batchRoutes(deps: AppDeps): Hono<Env> {
         await tx`
           insert into videos (id, user_id, batch_id, title, source, script, settings, status, created_at, updated_at)
           values (${videoId}, ${userId}, ${batchId}, ${v.title}, ${v.source},
-                  ${v.script ? tx.json(v.script) : null}, ${tx.json(req.settings as never)}, 'uploading',
+                  ${v.script ? tx.json(v.script) : null}, ${tx.json(videoSettings(req.settings, v.settings) as never)}, 'uploading',
                   clock_timestamp(), clock_timestamp())`;
         for (const [ord, clip] of v.clips.entries()) {
           const id = randomUUID();

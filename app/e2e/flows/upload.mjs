@@ -114,7 +114,7 @@ export default async function upload(ctx) {
       'all three videos to be ready to review',
       async () => {
         const text = await bodyText(page);
-        for (const m of text.matchAll(/(Uploading \d+%|Uploaded\. Waiting to edit|Editing: finding the best takes · \d+%)/g)) seen.add(m[0]);
+        for (const m of text.matchAll(/(Uploading \d+%|On this phone, waiting its turn to upload|Uploaded · queued on the server to edit|Editing: finding the best takes · \d+%)/g)) seen.add(m[0]);
         const b = await ctx.api.batch(ctx.state.batchId);
         for (const v of b.videos) {
           const key = Object.entries(ctx.state.videoIds).find(([, id]) => id === v.id)?.[0];
@@ -138,6 +138,11 @@ export default async function upload(ctx) {
       throw e;
     });
     assert(puts.length === 14, `expected 14 uploads (9 clips, 5 B-roll), saw ${puts.length}`);
+    // One video's files before the next video's: the order the PUTs started in never goes back to an earlier video.
+    const videoOfUrl = new Map(batch.videos.flatMap((v, i) => [...v.clips, ...v.broll].map((f) => [f.upload.url, i])));
+    const putOrder = [...new Set(puts.map((r) => r.url()))].map((u) => videoOfUrl.get(u)).filter((x) => x !== undefined);
+    assert(putOrder.every((x, i) => i === 0 || x >= putOrder[i - 1]), `uploads interleaved videos: ${putOrder.join(',')}`);
+    assert(seen.has('On this phone, waiting its turn to upload'), 'the batch screen never said a video was waiting its turn on this phone');
     ctx.log(`  progress lines seen: ${[...seen].slice(0, 12).join(' | ')}${seen.size > 12 ? ' ...' : ''}`);
     for (const [k, list] of Object.entries(progress)) {
       const distinct = [...new Set(list.map((p) => Math.round(p * 100)))];

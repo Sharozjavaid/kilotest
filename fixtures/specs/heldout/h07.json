@@ -1,0 +1,55 @@
+{
+  "id": "h07",
+  "title": "Room tour",
+  "clips": [
+    {
+      "name": "h07_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Welcome to my tiny studio.",
+          "group": "g0"
+        },
+        {
+          "say": "The bed folds up into the wall.",
+          "group": "g1"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "The desk folds down from the shelf.",
+          "group": "g2"
+        },
+        {
+          "say": "The table folds out from the kitchen,",
+          "group": "g3",
+          "keep": false,
+          "reason": "false_start"
+        },
+        {
+          "say": "let me do that again",
+          "keep": false,
+          "reason": "off_script"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "The table folds out from the counter.",
+          "group": "g3"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "Everything folds away.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

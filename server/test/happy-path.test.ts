@@ -137,7 +137,8 @@ describe('happy path through HTTP', () => {
     expect(home.goal.postedThisWeek).toBe(1);
     expect(home.recent.map((v) => v.id)).toEqual([routine!.videoId]);
     expect(home.readyToReview.map((v) => v.id)).toEqual([mistakes!.videoId]);
-    expect(home.activeBatches).toEqual([]);
+    // One video still to review: the batch stays on Home, so the creator can get back to it.
+    expect(home.activeBatches.map((b) => b.id)).toEqual([created.batch.id]);
 
     const batch = await user.ok(BatchDetail, 'GET', `/v1/batches/${created.batch.id}`);
     expect(batch.counts).toEqual({ done: 1, ready_for_review: 1 });

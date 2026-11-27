@@ -126,8 +126,12 @@ export function createHttpApi(opts: HttpApiOptions): KiloApi {
 
     listVideos: (q) => {
       const params = new URLSearchParams();
-      if (q?.status) params.set('status', q.status);
+      if (q?.status) params.set('status', Array.isArray(q.status) ? q.status.join(',') : q.status);
       if (q?.batchId) params.set('batchId', q.batchId);
+      if (q?.q?.trim()) params.set('q', q.q.trim());
+      if (q?.order) params.set('order', q.order);
+      if (q?.limit !== undefined) params.set('limit', String(q.limit));
+      if (q?.after) params.set('after', q.after);
       const qs = params.toString();
       return request('GET', `/videos${qs ? `?${qs}` : ''}`, ListVideosResponse);
     },

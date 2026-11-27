@@ -1,0 +1,53 @@
+{
+  "id": "h12",
+  "title": "Morning light",
+  "clips": [
+    {
+      "name": "h12_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Open your curtains as soon as you wake up.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "The light tells your brain the day has started.",
+          "group": "g1",
+          "keep": false,
+          "reason": "retake"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "Bright light tells your brain that the day has started.",
+          "group": "g1"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "Ten minutes is enough.",
+          "group": "g2"
+        },
+        {
+          "say": "Twenty minutes is even better.",
+          "group": "g3"
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "Open your curtains as soon as you wake up.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

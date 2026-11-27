@@ -1,6 +1,6 @@
 import type { EditSettings, SegmentReason } from '@kilo/edl';
 import type { Chunk, ClipWords } from './chunks.js';
-import { fullSimilarity, keys, lineMatch, prefixSimilarity } from './text.js';
+import { ORDINALS, STOPWORDS, fullSimilarity, keys, lineMatch, prefixSimilarity, readNumber } from './text.js';
 
 /** What a decider says about one utterance. */
 export interface ChunkDecision {
@@ -50,9 +50,131 @@ export function sameLine(a: Chunk, b: Chunk, adjacent: boolean, gapSec: number):
   return false;
 }
 
+// ---- retakes or parallel lines ---------------------------------------------------
+
+/** Words that name a list slot when they open a line: "Step two, ...", "The second ...", "Tip 3: ...". */
+const SLOT_NOUNS = new Set(['number', 'step', 'tip', 'reason', 'rule', 'mistake', 'day', 'part', 'no', 'round', 'level', 'stage', 'option']);
+
+/**
+ * The list position a line names in its first words ("Number two", "Step 3", "The
+ * second", "First,"), or null when it names none.
+ */
+export function enumeration(ks: readonly string[]): number | null {
+  for (let i = 0; i < Math.min(3, ks.length); i++) {
+    const k = ks[i]!;
+    if (k in ORDINALS) return ORDINALS[k]!;
+    if (SLOT_NOUNS.has(k)) {
+      const n = readNumber(ks, i + 1);
+      if (n) return n.value;
+    }
+  }
+  return null;
+}
+
+/** A word that carries what a line is about: not a function word, or any number. */
+function isContent(k: string): boolean {
+  return !STOPWORDS.has(k) || readNumber([k], 0) !== null;
+}
+
+/**
+ * Where two token lists say different things in the same place: the stretches between
+ * their aligned words (longest common subsequence) that hold content words on both
+ * sides, as in "Squats / Push ups for one minute" or "The price is twenty / thirty
+ * dollars". Words only one side adds or drops ("Honestly, ...", "... and see") are not
+ * slot differences, nor are changed function words.
+ */
+export function slotDifferences(a: readonly string[], b: readonly string[]): Array<{ a: string[]; b: string[] }> {
+  return diffRegions(a, b).filter((r) => r.a.length && r.b.length && r.a.join(' ') !== r.b.join(' '));
+}
+
+/** The content words of every stretch where `a` and `b` differ, between their aligned words. */
+function diffRegions(a: readonly string[], b: readonly string[]): Array<{ a: string[]; b: string[] }> {
+  const n = a.length;
+  const m = b.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) dp[i]![j] = a[i] === b[j] ? dp[i + 1]![j + 1]! + 1 : Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!);
+  }
+  const out: Array<{ a: string[]; b: string[] }> = [];
+  let ra: string[] = [];
+  let rb: string[] = [];
+  const flush = () => {
+    const ca = ra.filter(isContent);
+    const cb = rb.filter(isContent);
+    if (ca.length || cb.length) out.push({ a: ca, b: cb });
+    ra = [];
+    rb = [];
+  };
+  let i = 0;
+  let j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) {
+      flush();
+      i++;
+      j++;
+    } else if (j >= m || (i < n && dp[i + 1]![j]! >= dp[i]![j + 1]!)) ra.push(a[i++]!);
+    else rb.push(b[j++]!);
+  }
+  flush();
+  return out;
+}
+
+/**
+ * Two complete, fluent utterances that share most of their words: are they two takes
+ * of one line, or two lines of a list said one after the other? A retake is the
+ * speaker saying the same thing again; a list says a different thing in the same frame.
+ *
+ * - Both name a list slot: the same slot is a retake ("Step two, wet your hair" /
+ *   "Step two, wet the brush"), different slots are different lines.
+ * - The speaker moved on: a complete line of other content between them means the
+ *   later one is said again on purpose (a refrain), not redone.
+ * - They differ in a slot and the change is what the line says: a different number
+ *   ("six dollars" / "eight"); the same frame word for word with only the slot changed
+ *   ("Squats / Push ups for one minute", "for dry / oily skin"); or content words so
+ *   different that the two share less than two thirds of them. Different lines, unless
+ *   the first thing after the first one is a restart marker, an aside, or a correction
+ *   that names the changed words ("no, it's water, not coffee"), and `b` is the first
+ *   line said after it. A slot change inside a reworded line that keeps most of what it
+ *   is about ("my whole morning" / "my entire morning routine") is a reworded take.
+ * - Otherwise (the same words, or words only added or dropped): a retake.
+ *
+ * `between` is every utterance between the two in natural order.
+ */
+export function separateLines(a: Chunk, b: Chunk, between: readonly Chunk[]): { separate: boolean; corrections: Chunk[] } {
+  const subs = slotDifferences(a.keys, b.keys);
+  const changed = new Set(subs.flatMap((s) => [...s.a, ...s.b]));
+  const unlike = (c: Chunk) => fullSimilarity(c.keys, a.keys) < 0.5 && fullSimilarity(c.keys, b.keys) < 0.5;
+  const corrections = between.filter((c) => !c.fillerOnly && unlike(c) && c.keys.some((k) => changed.has(k)));
+  const ea = enumeration(a.keys);
+  const eb = enumeration(b.keys);
+  if (ea !== null && eb !== null) return ea === eb ? { separate: false, corrections } : { separate: true, corrections: [] };
+  const movedOn = between.some((c) => c.complete && !c.offScript && !c.fillerOnly && c.keys.length >= 3 && unlike(c) && !corrections.includes(c));
+  if (movedOn) return { separate: true, corrections: [] };
+  if (!subs.length) return { separate: false, corrections: [] };
+  const isNum = (k: string) => readNumber([k], 0) !== null;
+  const numberChanged = subs.some((s) => s.a.some(isNum) && s.b.some(isNum));
+  const words = (ks: readonly string[]) => new Set(ks.filter((k) => !STOPWORDS.has(k) && !isNum(k)));
+  const wa = words(a.keys);
+  const wb = words(b.keys);
+  const shared = [...wa].filter((k) => wb.has(k)).length / Math.max(1, Math.min(wa.size, wb.size));
+  // Only the slot changed: every other difference is in function words.
+  const frameKept = diffRegions(a.keys, b.keys).every((r) => r.a.length && r.b.length);
+  if (!numberChanged && !frameKept && shared >= 2 / 3) return { separate: false, corrections };
+  // A marker says the next attempt redoes the line: it ties `a` to `b` only when `b` is that attempt.
+  const next = between.find((c) => !c.fillerOnly);
+  const redoneBefore = between.some((c) => c.complete && !c.offScript && !c.fillerOnly && !corrections.includes(c));
+  const marked = next !== undefined && !redoneBefore && (next.offScript || corrections.includes(next));
+  return marked ? { separate: false, corrections } : { separate: true, corrections: [] };
+}
+
+const asks = (c: Chunk) => /\?["')\]]*$/.test(c.words[c.words.length - 1]?.text.trim() ?? '');
+
 /** Keeps the last complete take in a group, cuts the rest. Returns the kept id. */
 function resolveGroup(group: Chunk[], out: CutDecisions, why: string): number {
-  const complete = group.filter((c) => c.complete);
+  let complete = group.filter((c) => c.complete);
+  // Saying a line back as a question ("It lasts all week? Yeah.") is checking it, not a take.
+  const statements = complete.filter((c) => !asks(c));
+  if (statements.length && statements.length < complete.length) complete = statements;
   let keep: Chunk;
   if (complete.length) keep = complete[complete.length - 1]!;
   else {
@@ -72,20 +194,63 @@ function resolveGroup(group: Chunk[], out: CutDecisions, why: string): number {
   return keep.id;
 }
 
-/** Retake and false-start detection by text similarity between nearby utterances. */
-function decideByRetakes(cands: Chunk[], offsets: Map<string, number>, out: CutDecisions): void {
+/**
+ * Retake and false-start detection by text similarity between nearby utterances.
+ * Two complete utterances join one group only when `separateLines` says they are takes
+ * of one line. An unfinished utterance is a take of exactly one line: the one it says
+ * the most of (the nearest on a tie), so "The cushion," never ties "The cushion is
+ * soft" to the next line that also opens with "The". `all` is every utterance in
+ * natural order, off-script ones included, for what lies between two takes.
+ */
+function decideByRetakes(cands: Chunk[], offsets: Map<string, number>, out: CutDecisions, all: readonly Chunk[] = cands): void {
   const uf = new UnionFind();
+  const byId = new Map(all.map((c, i) => [c.id, i]));
+  const between = (a: Chunk, b: Chunk) => {
+    const ia = byId.get(a.id);
+    const ib = byId.get(b.id);
+    return ia === undefined || ib === undefined ? [] : all.slice(ia + 1, ib);
+  };
+  const corrections = new Set<number>();
+  /** Candidate links of unfinished utterances: [other, strength]. */
+  const links = new Map<number, Array<{ other: Chunk; strength: number; dist: number }>>();
+  const addLink = (f: Chunk, other: Chunk, dist: number) => {
+    const strength = Math.max(prefixSimilarity(f.keys, other.keys), fullSimilarity(f.keys, other.keys));
+    links.set(f.id, [...(links.get(f.id) ?? []), { other, strength, dist }]);
+  };
   for (let i = 0; i < cands.length; i++) {
     const a = cands[i]!;
     for (let j = i + 1; j < Math.min(cands.length, i + 1 + WINDOW_CHUNKS); j++) {
       const b = cands[j]!;
       if (absStart(b, offsets) - absEnd(a, offsets) > WINDOW_SEC) break;
       const gap = b.clipId === a.clipId ? b.start - a.end : Infinity;
-      if (sameLine(a, b, j === i + 1, gap)) uf.union(a.id, b.id);
+      if (!sameLine(a, b, j === i + 1, gap)) continue;
+      if (a.complete && b.complete) {
+        const verdict = separateLines(a, b, between(a, b));
+        if (verdict.separate) continue;
+        for (const c of verdict.corrections) corrections.add(c.id);
+        uf.union(a.id, b.id);
+      } else {
+        if (!a.complete) addLink(a, b, j - i);
+        if (!b.complete) addLink(b, a, j - i);
+      }
     }
+  }
+  // Each unfinished utterance joins the one line it says the most of: a complete take
+  // before another unfinished one, a later one (the redo) before an earlier one, then the nearest.
+  const rank = (f: Chunk, l: { other: Chunk; strength: number; dist: number }) =>
+    [Math.round(l.strength * 1000), l.other.complete ? 1 : 0, l.other.id > f.id ? 1 : 0, -l.dist];
+  const better = (x: number[], y: number[]) => {
+    for (let k = 0; k < x.length; k++) if (x[k] !== y[k]) return x[k]! > y[k]!;
+    return false;
+  };
+  for (const f of cands) {
+    let pick: { other: Chunk; strength: number; dist: number } | null = null;
+    for (const l of links.get(f.id) ?? []) if (!pick || better(rank(f, l), rank(f, pick))) pick = l;
+    if (pick) uf.union(f.id, pick.other.id);
   }
   const groups = new Map<number, Chunk[]>();
   for (const c of cands) {
+    if (corrections.has(c.id)) continue;
     const r = uf.find(c.id);
     groups.set(r, [...(groups.get(r) ?? []), c]);
   }
@@ -93,6 +258,7 @@ function decideByRetakes(cands: Chunk[], offsets: Map<string, number>, out: CutD
     if (group.length > 1) resolveGroup(group, out, 'Last complete take');
     else out.set(group[0]!.id, { keep: true, reason: 'speech' });
   }
+  for (const id of corrections) out.set(id, { keep: false, reason: 'off_script', note: 'Corrects the take before it' });
 }
 
 interface Span {
@@ -198,14 +364,14 @@ function decideByScript(cands: Chunk[], scriptText: string[], out: CutDecisions)
 }
 
 /** Recorder takes without script text: the last take with a finished sentence wins each line. */
-function decideByTakes(cands: Chunk[], offsets: Map<string, number>, out: CutDecisions): void {
+function decideByTakes(cands: Chunk[], offsets: Map<string, number>, out: CutDecisions, all: readonly Chunk[]): void {
   const lines = new Map<number, Chunk[]>();
   const free: Chunk[] = [];
   for (const c of cands) {
     if (c.scriptLineIndex === undefined) free.push(c);
     else lines.set(c.scriptLineIndex, [...(lines.get(c.scriptLineIndex) ?? []), c]);
   }
-  decideByRetakes(free, offsets, out);
+  decideByRetakes(free, offsets, out, all);
   for (const list of lines.values()) {
     const takes = new Map<string, Chunk[]>();
     for (const c of list) takes.set(c.clipId, [...(takes.get(c.clipId) ?? []), c]);
@@ -215,7 +381,7 @@ function decideByTakes(cands: Chunk[], offsets: Map<string, number>, out: CutDec
     const good = ordered.filter((t) => t.some((c) => c.complete && c.keys.length >= 3 && !c.interrupted));
     const keepTake = good[good.length - 1] ?? ordered[ordered.length - 1]!;
     for (const t of ordered) {
-      if (t === keepTake) decideByRetakes(t, offsets, out);
+      if (t === keepTake) decideByRetakes(t, offsets, out, all);
       else for (const c of t) out.set(c.id, { keep: false, reason: c.complete ? 'retake' : 'false_start', note: 'Earlier or unfinished take of this line' });
     }
   }
@@ -248,7 +414,7 @@ export function heuristicCuts(input: {
   }
   const script = (input.script ?? []).filter((l) => l.trim());
   if (script.length) decideByScript(cands, script, out);
-  else if (cands.some((c) => c.scriptLineIndex !== undefined)) decideByTakes(cands, offsets, out);
-  else decideByRetakes(cands, offsets, out);
+  else if (cands.some((c) => c.scriptLineIndex !== undefined)) decideByTakes(cands, offsets, out, chunks);
+  else decideByRetakes(cands, offsets, out, chunks);
   return out;
 }

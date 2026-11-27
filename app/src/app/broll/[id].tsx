@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { BrollAssetView, Edl, Overlay, VideoDetail } from '@kilo/edl';
 import { getApi, getMockApi } from '@/api/client';
 import { errorMessage } from '@/api/errors';
-import { keys, useVideo } from '@/api/queries';
+import { keys, useScreenFocused, useVideo } from '@/api/queries';
 import { useEdlSaver } from '@/review/useEdlSaver';
 import { getUploadQueue, useUploadJobs } from '@/uploads/UploadManager';
 import { brollPoll } from '@/broll/polling';
@@ -22,6 +22,7 @@ import {
   type SpokenLine,
 } from '@/broll/overlays';
 import { OverlaySheet, assetStatus } from '@/broll/OverlaySheet';
+import { versionsHiding } from '@/review/variantOverlays';
 import { GraphicThumb } from '@/broll/GraphicThumb';
 import { plural } from '@/lib/format';
 import {
@@ -127,14 +128,16 @@ function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refe
     setSince(Date.now());
   }, [stateKey]);
   const poll = brollPoll(assets, jobs, since, now);
+  // Only while this screen is in front.
+  const focused = useScreenFocused();
   useEffect(() => {
-    if (!poll.poll) return;
+    if (!poll.poll || !focused) return;
     const t = setInterval(() => {
       setNow(Date.now());
       refetch();
     }, 1500);
     return () => clearInterval(t);
-  }, [poll.poll, refetch]);
+  }, [poll.poll, focused, refetch]);
   const stuck = new Map(poll.stuck.map((x) => [x.id, x.canRetry]));
   const retryAsset = (id: string) => {
     setSince(Date.now());
@@ -282,7 +285,17 @@ function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refe
       {lines.map((line) =>
         line.overlays.length ? (
           line.overlays.map((o) => (
-            <LineCard key={o.id} line={line} overlay={o} assets={assets} themeId={themeId} disabled={!canEdit} onSwap={() => setSheet({ line, overlay: o })} onRemove={() => remove(o)} />
+            <LineCard
+              key={o.id}
+              line={line}
+              overlay={o}
+              assets={assets}
+              themeId={themeId}
+              hiddenIn={versionsHiding(edl, o.id)}
+              disabled={!canEdit}
+              onSwap={() => setSheet({ line, overlay: o })}
+              onRemove={() => remove(o)}
+            />
           ))
         ) : (
           <EmptyLineCard key={line.segment.id} line={line} disabled={!canEdit} onAdd={() => setSheet({ line, overlay: null })} />
@@ -341,6 +354,12 @@ function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refe
         uploads={uploads}
         onApply={apply}
         onRemove={() => sheet?.overlay && remove(sheet.overlay)}
+        versions={
+          sheet?.overlay && edl.overlays.some((o) => o.id === sheet.overlay!.id)
+            ? edl.variants.map((x) => ({ id: x.id, label: x.label, hidden: x.hiddenOverlayIds.includes(sheet.overlay!.id) }))
+            : []
+        }
+        onSetHidden={(variantId, hidden) => sheet?.overlay && saver?.edit({ type: 'overlayHidden', variantId, overlayId: sheet.overlay.id, hidden })}
         onAddClips={() => {
           setSheet(null);
           void addClips();
@@ -374,6 +393,7 @@ function LineCard({
   overlay,
   assets,
   themeId,
+  hiddenIn,
   disabled,
   onSwap,
   onRemove,
@@ -382,6 +402,8 @@ function LineCard({
   overlay: Overlay;
   assets: readonly BrollAssetView[];
   themeId: string;
+  /** Labels of the openings that leave this overlay out. */
+  hiddenIn: string[];
   disabled: boolean;
   onSwap: () => void;
   onRemove: () => void;
@@ -414,6 +436,11 @@ function LineCard({
           <Text variant="label" tone="muted" numberOfLines={2}>
             {t.detail}
           </Text>
+          {hiddenIn.length ? (
+            <Text variant="label" tone="muted" numberOfLines={1} testID={`hidden-in-${overlay.id}`}>
+              Not in {hiddenIn.join(', ')}
+            </Text>
+          ) : null}
         </View>
         <PillButton variant="secondary" label="Swap" height={44} onPress={onSwap} disabled={disabled} style={styles.swap} accessibilityLabel={`Swap ${t.title}`} testID={`swap-${overlay.id}`} />
       </View>

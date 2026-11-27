@@ -17,6 +17,7 @@ import {
   type SaveEdlResponse,
 } from '@kilo/edl';
 import { isUuid } from '../auth.js';
+import { pruneHiddenOverlays } from '../edlRules.js';
 import type { Db } from '../db/index.js';
 import { HttpError, invalidRequest, invalidState, notFound, tooMany } from '../errors.js';
 import { JOBS } from '../queue.js';
@@ -36,14 +37,18 @@ import {
 import { limitsOf, pathId, parseBody, type AppDeps, type Env } from './app.js';
 import { analyzePriority, lockUser, renderPriority, unsupportedFile } from './batches.js';
 
+export { pruneHiddenOverlays };
+
 /** Most a saved EDL may hold. Deciders stay far below; these only bound what a client can make the renderer do. */
-export const EDL_LIMITS = { segments: 4000, overlays: 40, variantOverlays: 10, variants: 5 } as const;
+export const EDL_LIMITS = { segments: 4000, overlays: 40, variantOverlays: 10, variants: 5, hiddenOverlays: 40 } as const;
 
 /**
  * Builds the EDL to store from a client's save. The cut points are the server's:
  * segment ids, clips and times must match the stored EDL exactly, and a client may
  * change only `keep`, `userOverride`, `zoom` and `transitionIn` of a segment, the
- * overlays, the captions, and each variant's segment order and overlays. Everything
+ * overlays, the captions, and each variant's segment order, overlays and hidden
+ * base overlays. A hidden id must name an overlay of the base cut; one that named an
+ * overlay this save removes is dropped, any other unknown id is a problem. Everything
  * else (video, frame rate, settings, decider, segment reasons and text, variant
  * labels) is copied from the stored EDL. Returns the problems instead when the save
  * changes what it may not.
@@ -55,6 +60,17 @@ export function mergeClientEdl(stored: Edl, client: Edl): { edl: Edl; problems: 
   if (client.variants.length > EDL_LIMITS.variants) problems.push(`An edit has at most ${EDL_LIMITS.variants} variants`);
   for (const v of client.variants) {
     if (v.overlays.length > EDL_LIMITS.variantOverlays) problems.push(`Variant ${v.id} has more than ${EDL_LIMITS.variantOverlays} overlays`);
+    if (v.hiddenOverlayIds.length > EDL_LIMITS.hiddenOverlays) problems.push(`Variant ${v.id} hides more than ${EDL_LIMITS.hiddenOverlays} overlays`);
+  }
+  if (problems.length) return { edl: stored, problems };
+  // Hidden overlays: ids of the base cut's overlays. An id of an overlay this save removes is dropped (the
+  // client may not have pruned it); anything else that is not a base overlay is refused.
+  const baseIds = new Set(client.overlays.map((o) => o.id));
+  const removedIds = new Set(stored.overlays.map((o) => o.id).filter((id) => !baseIds.has(id)));
+  for (const v of client.variants) {
+    if (new Set(v.hiddenOverlayIds).size !== v.hiddenOverlayIds.length) problems.push(`Variant ${v.id} hides an overlay twice`);
+    const unknown = v.hiddenOverlayIds.filter((id) => !baseIds.has(id) && !removedIds.has(id));
+    if (unknown.length) problems.push(`Variant ${v.id} hides ${unknown.slice(0, 3).join(', ')}, which is not an overlay of the base cut`);
   }
   if (problems.length) return { edl: stored, problems };
   const sameCut =
@@ -81,20 +97,20 @@ export function mergeClientEdl(stored: Edl, client: Edl): { edl: Edl; problems: 
     captions: client.captions,
     variants: client.variants.map((v) => {
       const t = storedVariants.get(v.id)!;
-      return { ...t, segmentOrder: v.segmentOrder, overlays: v.overlays };
+      return { ...t, segmentOrder: v.segmentOrder, overlays: v.overlays, hiddenOverlayIds: v.hiddenOverlayIds.filter((id) => baseIds.has(id)) };
     }),
   };
   return { edl, problems };
 }
 
-/** Removes every overlay (base and per-variant) that shows the given B-roll asset. */
+/** Removes every overlay (base and per-variant) that shows the given B-roll asset, and every variant's mention of it. */
 export function withoutAsset(edl: Edl, assetId: string): Edl {
   const keep = (o: Edl['overlays'][number]) => !(o.type === 'broll' && o.assetId === assetId);
-  return {
+  return pruneHiddenOverlays({
     ...edl,
     overlays: edl.overlays.filter(keep),
     variants: edl.variants.map((v) => ({ ...v, overlays: v.overlays.filter(keep) })),
-  };
+  });
 }
 
 /** Checks an EDL from the app against the stored video. Returns problems as strings. */
@@ -141,16 +157,54 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
 
   const summaryOf = async (userId: string, videoId: string) => (await videoSummary(db, storage, userId, videoId))!;
 
+  /**
+   * The creator's videos, a page at a time (the app's library).
+   * - `status`: one status or several, comma-separated (`rendering,done`).
+   * - `batchId`: one batch only.
+   * - `q`: words in the title (case-insensitive substring).
+   * - `order`: `created` (default, newest first) or `batch` (newest batch first, a batch's videos in its own order).
+   * - `limit`: 1..200 for a page; without it up to 500 rows, as before paging existed.
+   * - `after`: the id of the last video of the previous page; the next page follows it in the same order.
+   *   `ListVideosResponse` has no cursor field, so a page shorter than `limit` is the last one.
+   */
   app.get('/videos', async (c) => {
     const userId = c.get('userId');
-    const status = c.req.query('status');
+    const statusParam = c.req.query('status');
     const batchId = c.req.query('batchId');
-    if (status !== undefined && !VideoStatus.safeParse(status).success) throw invalidRequest('status: unknown video status');
+    const q = c.req.query('q')?.trim();
+    const order = c.req.query('order') ?? 'created';
+    const limitParam = c.req.query('limit');
+    const after = c.req.query('after')?.toLowerCase();
+    const statuses = statusParam === undefined ? [] : [...new Set(statusParam.split(',').map((x) => x.trim()).filter(Boolean))];
+    if (statusParam !== undefined && (!statuses.length || statuses.some((x) => !VideoStatus.safeParse(x).success))) {
+      throw invalidRequest('status: unknown video status');
+    }
     if (batchId !== undefined && !isUuid(batchId)) throw invalidRequest('batchId: not a valid id');
+    if (order !== 'created' && order !== 'batch') throw invalidRequest('order: created or batch');
+    if (q !== undefined && q.length > 120) throw invalidRequest('q: at most 120 characters');
+    const limit = limitParam === undefined ? 500 : Number(limitParam);
+    if (!Number.isInteger(limit) || limit < 1 || (limitParam !== undefined && limit > 200)) throw invalidRequest('limit: a whole number from 1 to 200');
+    if (after !== undefined) {
+      if (!isUuid(after)) throw invalidRequest('after: not a valid id');
+      const [known] = await db`select 1 from videos where id = ${after} and user_id = ${userId}`;
+      if (!known) throw invalidRequest('after: unknown video; start again from the first page');
+    }
+    const like = q ? `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
+    // Keyset paging compares in SQL, at the database's own timestamp precision.
+    const cv = db`(select created_at from videos where id = ${after ?? null})`;
+    const cb = db`(select b2.created_at from videos v2 join batches b2 on b2.id = v2.batch_id where v2.id = ${after ?? null})`;
+    const cbid = db`(select batch_id from videos where id = ${after ?? null})`;
+    const page = !after
+      ? db``
+      : order === 'created'
+        ? db`and (v.created_at < ${cv} or (v.created_at = ${cv} and v.id > ${after}))`
+        : db`and (b.created_at < ${cb} or (b.created_at = ${cb} and (b.id > ${cbid} or (b.id = ${cbid} and (v.created_at > ${cv} or (v.created_at = ${cv} and v.id > ${after}))))))`;
     const where = db`v.user_id = ${userId}
-      ${status ? db`and v.status = ${status}` : db``}
-      ${batchId ? db`and v.batch_id = ${batchId.toLowerCase()}` : db``}`;
-    const body: ListVideosResponse = { videos: await videoSummaries(db, storage, where) };
+      ${statuses.length ? db`and v.status in ${db(statuses)}` : db``}
+      ${batchId ? db`and v.batch_id = ${batchId.toLowerCase()}` : db``}
+      ${like ? db`and v.title ilike ${like}` : db``}
+      ${page}`;
+    const body: ListVideosResponse = { videos: await videoSummaries(db, storage, where, order, limit) };
     return c.json(body);
   });
 

@@ -43,6 +43,8 @@ export function getUploadQueue(): UploadQueue {
       complete: (body) => getApi().completeUploads(body),
       reissue: (body) => getApi().reissueUploads(body),
       concurrency: 3,
+      // One video's files at a time: the first videos start editing while later ones upload.
+      videosAtOnce: 1,
       maxAttempts: 5,
       onStarted: (ids) => onStarted(ids),
       discard: deleteTakeFile,
@@ -84,6 +86,16 @@ export function useUploadJobs(): readonly UploadJob[] {
   );
 }
 
+/** True while uploads are paused for want of a connection. */
+export function useUploadsOffline(): boolean {
+  const q = getUploadQueue();
+  return useSyncExternalStore(
+    (fn) => q.subscribe(fn),
+    () => q.isOffline(),
+    () => false,
+  );
+}
+
 /**
  * Mount once under the query client, signed in, with the account's id. Resumes the
  * account's persisted queue on launch, when the app returns to the foreground and
@@ -116,10 +128,8 @@ export function UploadManager({ userId }: { userId: string }) {
     const app = AppState.addEventListener('change', (s) => {
       if (s === 'active') void q.resume();
     });
-    const net = addNetworkStateListener((s) => {
-      if (s.isConnected === false) q.pause();
-      else void q.resume();
-    });
+    // Lost connection: stop running uploads without spending an attempt, start nothing; back: carry on.
+    const net = addNetworkStateListener((s) => q.setOnline(s.isConnected !== false));
     return () => {
       unsub();
       offSignOut();

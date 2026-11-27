@@ -74,10 +74,19 @@ function loadModules(): Promise<Modules> {
     modules = (async () => {
       const g = globalThis as { document?: unknown };
       if (g.document === undefined) {
-        // fit.ts measures text on a canvas; any consistent widths do here (see above).
+        // fit.ts measures text on a canvas; any consistent widths do here (see above). The
+        // stub answers with every metric fit.ts reads (advance and ink box, at the 200 px it
+        // measures at), so no layout value comes out NaN: React warns about a NaN style.
+        const measureText = (s: string) => ({
+          width: s.length * 110,
+          actualBoundingBoxAscent: 150,
+          actualBoundingBoxDescent: 40,
+          fontBoundingBoxAscent: 190,
+          fontBoundingBoxDescent: 50,
+        });
         g.document = {
           createElement: () => ({
-            getContext: () => ({ font: '', letterSpacing: '', measureText: (s: string) => ({ width: s.length * 110 }) }),
+            getContext: () => ({ font: '', letterSpacing: '', measureText }),
           }),
         };
       }

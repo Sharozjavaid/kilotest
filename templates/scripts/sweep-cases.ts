@@ -4,7 +4,8 @@ import { TemplatePropsSchemas } from '@kilo/edl';
 /**
  * The text cases of the Phase 4 sweep: every template gets each kind of text, at the
  * limits its props schema allows. `covered` says whether the bundled Inter is meant to
- * draw every character (false for emoji and scripts Inter does not have).
+ * draw every character (false for emoji and scripts Inter does not have: those are
+ * drawn by the bundled fallback faces of src/remotion/scripts.ts, which the sweep checks).
  */
 export interface SweepCase {
   kind: string;
@@ -14,7 +15,7 @@ export interface SweepCase {
 
 export const CASE_KINDS = [
   'shortest', 'typical', 'schema maximum', 'long unbroken word', 'all capitals', 'digits and currency', 'accented Latin',
-  'Cyrillic (covered)', 'emoji', 'Japanese (not covered)', 'Arabic (not covered)',
+  'Cyrillic (covered)', 'emoji', 'Japanese', 'Chinese', 'Korean', 'Arabic', 'Hebrew', 'Devanagari', 'Thai',
 ] as const;
 
 const W60 = 'Pneumonoultramicroscopicsilicovolcanoconiosisantidisestabli'; // 60 letters, one word
@@ -33,8 +34,13 @@ export const SWEEP_CASES: Record<TemplateId, SweepCase[]> = {
     { kind: 'accented Latin', covered: true, props: { text: 'Crème brûlée à São Paulo: Łódź, Øresund, Ålesund, naïve' } },
     { kind: 'Cyrillic (covered)', covered: true, props: { text: 'Этот крем изменил мою кожу за одну неделю' } },
     { kind: 'emoji', covered: false, props: { text: 'This changed my skin 🔥😍✨ in a week 👏🏽' } },
-    { kind: 'Japanese (not covered)', covered: false, props: { text: 'この化粧水は本当に一週間で肌が変わりました' } },
-    { kind: 'Arabic (not covered)', covered: false, props: { text: 'هذا المنتج غير بشرتي في أسبوع واحد فقط' } },
+    { kind: 'Japanese', covered: false, props: { text: 'この化粧水は本当に一週間で肌が変わりました' } },
+    { kind: 'Arabic', covered: false, props: { text: 'هذا المنتج غير بشرتي في أسبوع واحد فقط' } },
+    { kind: 'Chinese', covered: false, props: { text: '这款精华真的在一周内改变了我的皮肤' } },
+    { kind: 'Korean', covered: false, props: { text: '이 세럼이 일주일 만에 제 피부를 바꿨어요' } },
+    { kind: 'Hebrew', covered: false, props: { text: 'הסרום הזה שינה לי את העור בשבוע אחד' } },
+    { kind: 'Devanagari', covered: false, props: { text: 'इस सीरम ने एक हफ्ते में मेरी त्वचा बदल दी' } },
+    { kind: 'Thai', covered: false, props: { text: 'เซรั่มนี้เปลี่ยนผิวของฉันในหนึ่งสัปดาห์' } },
   ],
   'numbered-list': [
     { kind: 'shortest', covered: true, props: { items: ['A', 'B'] } },
@@ -56,8 +62,13 @@ export const SWEEP_CASES: Record<TemplateId, SweepCase[]> = {
     { kind: 'accented Latin', covered: true, props: { title: 'Três passos fáceis', items: ['Limpe o rosto às sete', 'Hydratation légère, crème', 'Sérum à la vitamine C', 'Ochrona przeciwsłoneczna'] } },
     { kind: 'Cyrillic (covered)', covered: true, props: { title: 'Три ошибки', items: ['Слишком много крема', 'Неправильный порядок', 'Без защиты от солнца'] } },
     { kind: 'emoji', covered: false, props: { title: 'My routine ✨', items: ['Cleanse 🧼', 'Serum 💧', 'SPF ☀️ every day'] } },
-    { kind: 'Japanese (not covered)', covered: false, props: { title: '三つの間違い', items: ['クリームを塗りすぎる', '順番が間違っている', '日焼け止めを忘れる'] } },
-    { kind: 'Arabic (not covered)', covered: false, props: { title: 'ثلاثة أخطاء', items: ['كمية كبيرة من الكريم', 'ترتيب خاطئ للمنتجات', 'نسيان واقي الشمس'] } },
+    { kind: 'Japanese', covered: false, props: { title: '三つの間違い', items: ['クリームを塗りすぎる', '順番が間違っている', '日焼け止めを忘れる'] } },
+    { kind: 'Arabic', covered: false, props: { title: 'ثلاثة أخطاء', items: ['كمية كبيرة من الكريم', 'ترتيب خاطئ للمنتجات', 'نسيان واقي الشمس'] } },
+    { kind: 'Chinese', covered: false, props: { title: '三个常见错误', items: ['面霜涂得太多', '使用顺序错了', '忘记涂防晒霜'] } },
+    { kind: 'Korean', covered: false, props: { title: '세 가지 실수', items: ['크림을 너무 많이 발라요', '순서가 잘못됐어요', '선크림을 잊어요'] } },
+    { kind: 'Hebrew', covered: false, props: { title: 'שלוש טעויות', items: ['יותר מדי קרם', 'סדר לא נכון', 'שוכחים קרם הגנה'] } },
+    { kind: 'Devanagari', covered: false, props: { title: 'तीन गलतियाँ', items: ['बहुत ज़्यादा क्रीम', 'गलत क्रम में लगाना', 'सनस्क्रीन भूल जाना'] } },
+    { kind: 'Thai', covered: false, props: { title: 'สามข้อผิดพลาด', items: ['ทาครีมมากเกินไป', 'ลำดับไม่ถูกต้อง', 'ลืมทากันแดด'] } },
   ],
   'stat-callout': [
     { kind: 'shortest', covered: true, props: { value: '3', label: 'x' } },
@@ -69,8 +80,13 @@ export const SWEEP_CASES: Record<TemplateId, SweepCase[]> = {
     { kind: 'accented Latin', covered: true, props: { value: '97 %', label: 'des clientes ont vu leur peau s’améliorer, Łódź' } },
     { kind: 'Cyrillic (covered)', covered: true, props: { value: '90%', label: 'людей пропускают этот шаг каждое утро' } },
     { kind: 'emoji', covered: false, props: { value: '10x 🔥', label: 'more glow in one week ✨😍' } },
-    { kind: 'Japanese (not covered)', covered: false, props: { value: '90%', label: 'の人がこのステップを毎朝飛ばしています' } },
-    { kind: 'Arabic (not covered)', covered: false, props: { value: '٪٩٠', label: 'من الناس يتخطون هذه الخطوة كل صباح' } },
+    { kind: 'Japanese', covered: false, props: { value: '90%', label: 'の人がこのステップを毎朝飛ばしています' } },
+    { kind: 'Arabic', covered: false, props: { value: '٪٩٠', label: 'من الناس يتخطون هذه الخطوة كل صباح' } },
+    { kind: 'Chinese', covered: false, props: { value: '90%', label: '的人每天早上都跳过这一步' } },
+    { kind: 'Korean', covered: false, props: { value: '90%', label: '의 사람들이 매일 아침 이 단계를 건너뛰어요' } },
+    { kind: 'Hebrew', covered: false, props: { value: '90%', label: 'מהאנשים מדלגים על השלב הזה כל בוקר' } },
+    { kind: 'Devanagari', covered: false, props: { value: '90%', label: 'लोग हर सुबह यह कदम छोड़ देते हैं' } },
+    { kind: 'Thai', covered: false, props: { value: '90%', label: 'ของคนข้ามขั้นตอนนี้ทุกเช้า' } },
   ],
   'keyword-pop': [
     { kind: 'shortest', covered: true, props: { words: ['A'] } },
@@ -82,8 +98,13 @@ export const SWEEP_CASES: Record<TemplateId, SweepCase[]> = {
     { kind: 'accented Latin', covered: true, props: { words: ['Très', 'économique', 'façon', 'Ćwiczenie'] } },
     { kind: 'Cyrillic (covered)', covered: true, props: { words: ['Это', 'реально', 'работает'] } },
     { kind: 'emoji', covered: false, props: { words: ['🔥', 'Wow', '😍✨'] } },
-    { kind: 'Japanese (not covered)', covered: false, props: { words: ['本当に', '効きます'] } },
-    { kind: 'Arabic (not covered)', covered: false, props: { words: ['هذا', 'رائع', 'حقا'] } },
+    { kind: 'Japanese', covered: false, props: { words: ['本当に', '効きます'] } },
+    { kind: 'Arabic', covered: false, props: { words: ['هذا', 'رائع', 'حقا'] } },
+    { kind: 'Chinese', covered: false, props: { words: ['真的', '有效'] } },
+    { kind: 'Korean', covered: false, props: { words: ['정말', '효과', '있어요'] } },
+    { kind: 'Hebrew', covered: false, props: { words: ['זה', 'באמת', 'עובד'] } },
+    { kind: 'Devanagari', covered: false, props: { words: ['सच में', 'काम', 'करता है'] } },
+    { kind: 'Thai', covered: false, props: { words: ['ได้ผล', 'จริงๆ'] } },
   ],
   'price-tag': [
     { kind: 'shortest', covered: true, props: { price: '$' } },
@@ -95,8 +116,13 @@ export const SWEEP_CASES: Record<TemplateId, SweepCase[]> = {
     { kind: 'accented Latin', covered: true, props: { price: '19,99 €', compareAt: '34,99 €', label: 'Livraison gratuite, dès aujourd’hui' } },
     { kind: 'Cyrillic (covered)', covered: true, props: { price: '990 ₽', compareAt: '1 990 ₽', label: 'Только сегодня' } },
     { kind: 'emoji', covered: false, props: { price: '$19 🔥', compareAt: '$34', label: 'Today only ⏰✨' } },
-    { kind: 'Japanese (not covered)', covered: false, props: { price: '¥1,980', compareAt: '¥3,480', label: '本日限定セール' } },
-    { kind: 'Arabic (not covered)', covered: false, props: { price: '٩٩ ر.س', compareAt: '١٩٩ ر.س', label: 'عرض اليوم فقط' } },
+    { kind: 'Japanese', covered: false, props: { price: '¥1,980', compareAt: '¥3,480', label: '本日限定セール' } },
+    { kind: 'Arabic', covered: false, props: { price: '٩٩ ر.س', compareAt: '١٩٩ ر.س', label: 'عرض اليوم فقط' } },
+    { kind: 'Chinese', covered: false, props: { price: '¥199', compareAt: '¥399', label: '今日限时特价' } },
+    { kind: 'Korean', covered: false, props: { price: '₩19,900', compareAt: '₩39,900', label: '오늘만 특가' } },
+    { kind: 'Hebrew', covered: false, props: { price: '₪99', compareAt: '₪199', label: 'מבצע להיום בלבד' } },
+    { kind: 'Devanagari', covered: false, props: { price: '₹499', compareAt: '₹999', label: 'सिर्फ आज के लिए' } },
+    { kind: 'Thai', covered: false, props: { price: '฿390', compareAt: '฿790', label: 'ราคาพิเศษวันนี้เท่านั้น' } },
   ],
 };
 

@@ -35,6 +35,13 @@ export interface Candidate {
   at: number;
   /** How far the start may slide later to find room. */
   slack: number;
+  /** How far the start may slide earlier (never before `notBefore`), tried after every later start. */
+  backSlack?: number;
+  /**
+   * The creator's own B-roll on a line it matches: placed before anything automatic,
+   * whatever the overlay budget, and an automatic graphic gives way to it.
+   */
+  creator?: boolean;
   duration: number;
   minDuration: number;
   maxDuration: number;
@@ -51,7 +58,15 @@ export function overlayBudget(totalSec: number): number {
   return Math.max(1, Math.floor(totalSec / OVERLAY_SPACING_SEC));
 }
 
-/** Places candidates in priority order around what is already there. */
+/**
+ * Places candidates around what is already there. The creator's own B-roll on lines it
+ * matches goes first, in priority order, and is not limited by the budget: the
+ * creator handed it over for this video. Everything automatic (graphics, stock B-roll,
+ * B-roll that matches no line) then fills the budget that is left, in priority order,
+ * moving within its slack or giving way. The rules that hold for everything: no
+ * overlap (with a small gap), nothing before `notBefore` (the hook), nothing past the
+ * end.
+ */
 export function schedule(input: {
   candidates: Candidate[];
   lines: Line[];
@@ -66,20 +81,23 @@ export function schedule(input: {
   const dedupe = new Set<string>();
   let count = input.occupied.length;
   const byPriority = [...input.candidates].sort((a, b) => b.priority - a.priority || a.at - b.at);
-  let sorted = byPriority;
-  if (input.budget - count >= 2) {
+  const creator = byPriority.filter((c) => c.creator);
+  const automatic = byPriority.filter((c) => !c.creator);
+  let sorted = automatic;
+  const room = input.budget - count - new Set(creator.map((c) => c.dedupe ?? c)).size;
+  if (room >= 2) {
     const firsts = (['graphic', 'broll'] as const)
-      .map((kind) => byPriority.find((c) => c.kind === kind && c.priority >= STRONG_PRIORITY[kind]))
+      .map((kind) => automatic.find((c) => c.kind === kind && c.priority >= STRONG_PRIORITY[kind]))
       .filter((c): c is Candidate => !!c);
     // The graphic goes first: it is pinned to the words it shows, B-roll can move to another line.
-    if (firsts.length === 2) sorted = [...firsts, ...byPriority.filter((c) => !firsts.includes(c))];
+    if (firsts.length === 2) sorted = [...firsts, ...automatic.filter((c) => !firsts.includes(c))];
   }
-  for (const c of sorted) {
-    if (count >= input.budget) break;
-    if (c.dedupe && dedupe.has(c.dedupe)) continue;
+  const place = (c: Candidate): boolean => {
     const latestEnd = Math.min(input.totalSec, c.notAfter ?? Infinity);
-    let done = false;
-    for (let shift = 0; shift <= c.slack + 1e-9 && !done; shift += 0.25) {
+    const shifts: number[] = [];
+    for (let shift = 0; shift <= c.slack + 1e-9; shift += 0.25) shifts.push(shift);
+    for (let shift = 0.25; shift <= (c.backSlack ?? 0) + 1e-9; shift += 0.25) shifts.push(-shift);
+    for (const shift of shifts) {
       const start = Math.max(c.at + shift, c.notBefore);
       for (const dur of [c.duration, (c.duration + c.minDuration) / 2, c.minDuration]) {
         const d = Math.min(c.maxDuration, Math.max(c.minDuration, dur));
@@ -97,10 +115,19 @@ export function schedule(input: {
         taken.push(iv);
         if (c.dedupe) dedupe.add(c.dedupe);
         count++;
-        done = true;
-        break;
+        return true;
       }
     }
+    return false;
+  };
+  for (const c of creator) {
+    if (c.dedupe && dedupe.has(c.dedupe)) continue;
+    place(c);
+  }
+  for (const c of sorted) {
+    if (count >= input.budget) break;
+    if (c.dedupe && dedupe.has(c.dedupe)) continue;
+    place(c);
   }
   return placed;
 }
@@ -150,7 +177,7 @@ export function kenBurnsFor(i: number): KenBurns {
   return { ...KEN_BURNS_PRESETS[i % KEN_BURNS_PRESETS.length]! };
 }
 
-function brollCandidate(asset: BrollAsset, line: Line, priority: number, kbIndex: number): Candidate | null {
+function brollCandidate(asset: BrollAsset, line: Line, priority: number, kbIndex: number, opts: { creator?: boolean } = {}): Candidate | null {
   const avail = asset.kind === 'video' ? (asset.durationSec ?? 0) : Infinity;
   if (avail < BROLL_MIN_SEC) return null;
   const first = line.words[0];
@@ -161,11 +188,15 @@ function brollCandidate(asset: BrollAsset, line: Line, priority: number, kbIndex
     priority,
     at,
     slack: Math.max(0, Math.min(1.5, line.outEnd - at - BROLL_MIN_SEC)),
+    // A line too short for the clip after its first word (the last line, before the end)
+    // may still take it from the line's own start.
+    backSlack: Math.max(0, at - Math.max(HOOK_PROTECT_SEC, line.outStart)),
     duration: want,
     minDuration: BROLL_MIN_SEC,
     maxDuration: Math.min(BROLL_MAX_SEC, avail),
     notBefore: HOOK_PROTECT_SEC,
     dedupe: `broll:${asset.id}`,
+    ...(opts.creator && asset.source === 'user' ? { creator: true } : {}),
     build(anchor, duration, id) {
       // Video overlays never run past the asset: start at its beginning, cap the length.
       return {
@@ -181,22 +212,110 @@ function brollCandidate(asset: BrollAsset, line: Line, priority: number, kbIndex
   };
 }
 
-/** B-roll candidates: matched lines first, then the rest spread over the video. */
+/** Whether B-roll can start on a line: it plays for at least a second after the opening seconds. */
+function brollFits(l: Line): boolean {
+  return l.outEnd - Math.max(l.outStart, HOOK_PROTECT_SEC) >= 1.0 && l.words.length > 0;
+}
+
+/**
+ * The lines an asset fits: those its description matches at least half as well as the
+ * line it matches best (wherever that is). Empty when it matches no line.
+ */
+export function fittingLines(asset: BrollAsset, lines: readonly Line[]): Array<{ line: Line; score: number }> {
+  const scored = lines.filter((l) => l.words.length).map((line) => ({ line, score: matchScore(asset.description, line.text) }));
+  const best = Math.max(0, ...scored.map((x) => x.score));
+  if (best <= 0) return [];
+  return scored.filter((x) => x.score > 0 && x.score >= best / 2);
+}
+
+/**
+ * B-roll candidates. An asset that matches lines goes on the ones it fits (`fittingLines`),
+ * better matches first; the creator's own clips there come before anything automatic.
+ * An asset that matches no line at all is spread over the video, as filler, where the
+ * budget leaves room. An asset whose only fitting lines cannot take it (the opening
+ * seconds) is not moved to a line it does not fit.
+ */
 export function brollCandidates(lines: Line[], assets: BrollAsset[], totalSec: number): Candidate[] {
   const out: Candidate[] = [];
-  const eligible = lines.filter((l) => l.outEnd - Math.max(l.outStart, HOOK_PROTECT_SEC) >= 1.0 && l.words.length);
+  const eligible = lines.filter(brollFits);
   assets.forEach((asset, ai) => {
-    const scored = eligible
-      .map((l) => ({ l, s: matchScore(asset.description, l.text) }))
-      .sort((a, b) => b.s - a.s || a.l.outStart - b.l.outStart);
-    for (const { l, s } of scored) {
-      // Matched placements outrank the fallback spread; better matches outrank weaker ones.
-      const priority = s > 0 ? 72 + Math.min(16, s * 4) : 15 - Math.abs(l.outStart / Math.max(1, totalSec) - (ai + 1) / (assets.length + 1)) * 10;
-      const c = brollCandidate(asset, l, priority, ai);
+    const fits = fittingLines(asset, lines);
+    if (fits.length) {
+      for (const { line, score } of fits.filter((f) => brollFits(f.line)).sort((a, b) => b.score - a.score || a.line.outStart - b.line.outStart)) {
+        const c = brollCandidate(asset, line, 72 + Math.min(16, score * 4), ai, { creator: true });
+        if (c) out.push(c);
+      }
+      return;
+    }
+    const spread = eligible
+      .map((l) => ({ l, p: 15 - Math.abs(l.outStart / Math.max(1, totalSec) - (ai + 1) / (assets.length + 1)) * 10 }))
+      .sort((a, b) => b.p - a.p || a.l.outStart - b.l.outStart);
+    for (const { l, p } of spread) {
+      const c = brollCandidate(asset, l, p, ai);
       if (c) out.push(c);
     }
   });
   return out;
+}
+
+export interface BrollPlacement {
+  assetId: string;
+  placed: boolean;
+  /** The overlay that shows it, when placed. */
+  overlayId?: string;
+  /** The line it starts on, or the line it was meant for. */
+  line?: string;
+  /** Why it is where it is, or why it is not placed. Plain words. */
+  reason: string;
+}
+
+/**
+ * Per asset: where it went and why, or why it was left out. `lines` are the base cut's
+ * lines of `overlays`' EDL (`buildLines`).
+ */
+export function explainBroll(input: {
+  assets: readonly BrollAsset[];
+  lines: readonly Line[];
+  overlays: readonly Overlay[];
+  brollOn: boolean;
+  totalSec: number;
+}): BrollPlacement[] {
+  const start = new Map(input.lines.map((l) => [l.segment.id, l.outStart]));
+  const lineAt = (t: number) => input.lines.find((l) => t >= l.outStart - 1e-9 && t < l.outEnd - 1e-9);
+  return input.assets.map((asset): BrollPlacement => {
+    const ov = input.overlays.find((o) => o.type === 'broll' && o.assetId === asset.id);
+    const fits = fittingLines(asset, input.lines);
+    if (ov) {
+      const at = (start.get(ov.anchorSegmentId) ?? 0) + ov.offsetSec;
+      const line = lineAt(at);
+      const matched = line && fits.some((f) => f.line === line);
+      return {
+        assetId: asset.id, placed: true, overlayId: ov.id, ...(line ? { line: line.text } : {}),
+        reason: matched ? 'On the line its description matches' : fits.length ? 'On a line chosen for it' : 'No line matches its description, so it fills a quiet stretch',
+      };
+    }
+    if (!input.brollOn) return { assetId: asset.id, placed: false, reason: 'B-roll is turned off for this video' };
+    if (asset.kind === 'video' && (asset.durationSec ?? 0) < BROLL_MIN_SEC) {
+      return { assetId: asset.id, placed: false, reason: `The clip is shorter than ${BROLL_MIN_SEC} seconds` };
+    }
+    if (!fits.length) return { assetId: asset.id, placed: false, reason: 'No line matches its description, and the video has no room left for filler' };
+    const best = fits.reduce((a, b) => (b.score > a.score ? b : a));
+    const usable = fits.filter((f) => brollFits(f.line));
+    if (!usable.length) {
+      const inHook = fits.every((f) => f.line.outEnd - HOOK_PROTECT_SEC < 1.0);
+      return {
+        assetId: asset.id, placed: false, line: best.line.text,
+        reason: inHook
+          ? `The line it fits opens the video, and the first ${HOOK_PROTECT_SEC} seconds stay on the speaker`
+          : 'The lines it fits are too short to show it',
+      };
+    }
+    const shortEnd = usable.every((f) => input.totalSec - Math.max(HOOK_PROTECT_SEC, f.line.outStart) < BROLL_MIN_SEC);
+    return {
+      assetId: asset.id, placed: false, line: best.line.text,
+      reason: shortEnd ? 'The line it fits ends the video too soon to show it' : 'Other B-roll of yours already covers the lines it fits',
+    };
+  });
 }
 
 // ---- graphics --------------------------------------------------------------

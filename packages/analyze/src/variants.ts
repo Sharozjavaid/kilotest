@@ -1,7 +1,8 @@
 import type { Edl, Overlay, Variant } from '@kilo/edl';
-import { getTemplate, HOOK_PROTECT_SEC, parseTemplateProps, resolveTimeline, TemplatePropsSchemas } from '@kilo/edl';
+import { getTemplate, parseTemplateProps, TemplatePropsSchemas } from '@kilo/edl';
 import type { Line } from './lines.js';
 import { LEAD_IN, findEmphasis, findPrice, findStat, ordinalAt } from './overlays.js';
+import { overlaysToHide } from './rules.js';
 import { capitalize, clampWords, displayText, norm, tokens } from './text.js';
 
 /** A hook choice: play the natural order, open cold on a later line, or put a title over the opening. */
@@ -126,24 +127,22 @@ function coldOrder(lines: readonly Line[], lineIndex: number): string[] {
   return [...moved, ...lines.map((l) => l.segment.id).filter((id) => !moved.includes(id))];
 }
 
-/** True when moving the line to the front keeps every overlay rule on that variant's own timeline. */
-function coldOpenFits(edl: Edl, lines: readonly Line[], lineIndex: number): boolean {
-  const variant: Variant = { id: 'probe', label: '', hookText: '', segmentOrder: coldOrder(lines, lineIndex), overlays: [] };
-  const tl = resolveTimeline({ ...edl, variants: [variant] }, 'probe');
-  return tl.overlays.every((o, i) => {
-    // The hook stays on the speaker: nothing that covers them in the first seconds.
-    const covers = o.overlay.type === 'broll' || getTemplate(o.overlay.template).placement === 'fullscreen';
-    if (covers && o.outStart < HOOK_PROTECT_SEC - 1e-3) return false;
-    const prev = tl.overlays[i - 1];
-    return !prev || o.outStart >= prev.outEnd - 1e-3;
-  });
+/**
+ * The base overlays a cold open on `lineIndex` hides so its own timeline keeps the
+ * rules: B-roll that would cover the line it now opens on, or that would overlap once
+ * the line moves. The base cut keeps them.
+ */
+export function coldOpenHides(edl: Edl, lines: readonly Line[], lineIndex: number): string[] {
+  return overlaysToHide(edl, { id: 'probe', label: '', hookText: '', segmentOrder: coldOrder(lines, lineIndex), overlays: [], hiddenOverlayIds: [] });
 }
 
 /**
  * Heuristic hooks: the natural order, then cold opens on the strongest later lines
- * that work as a first line (`openingProblem`) and keep the overlay rules when moved
- * to the front; every cold open starts on a different line. Only when the recording
- * has too few such lines are the remaining hooks title cards over the natural
+ * that work as a first line (`openingProblem`); every cold open starts on a different
+ * line. A base overlay in the way of a cold open (B-roll over the line it opens on, or
+ * an overlap after the move) is hidden in that variant rather than refusing the line;
+ * among equally strong lines, the one that hides less comes first. Only when the
+ * recording has too few such lines are the remaining hooks title cards over the natural
  * opening, each showing a different later line (so every hook text differs, though
  * those variants open on the same line). When no distinct title is left, fewer hooks
  * than `count` are returned; with no second hook at all, none.
@@ -156,9 +155,12 @@ export function heuristicHooks(lines: Line[], edl: Edl, count: number): HookPlan
     .slice(1)
     .map((l) => ({ l, s: hookScore(l) }))
     .sort((a, b) => b.s - a.s || a.l.index - b.l.index);
-  for (const { l, s } of ranked) {
+  const opens = ranked
+    .filter(({ l, s }) => s >= 0 && openingProblem(lines, l.index) === null)
+    .map((x) => ({ ...x, hides: coldOpenHides(edl, lines, x.l.index).length }))
+    .sort((a, b) => b.s - a.s || a.hides - b.hides || a.l.index - b.l.index);
+  for (const { l } of opens) {
     if (plans.length >= count) break;
-    if (s < 0 || openingProblem(lines, l.index) !== null || !coldOpenFits(edl, lines, l.index)) continue;
     const text = norm(openingRun(lines, l.index).map(lineText).join(' '));
     if (usedText.has(text)) continue;
     usedText.add(text);
@@ -182,8 +184,53 @@ export function heuristicHooks(lines: Line[], edl: Edl, count: number): HookPlan
   return plans.length > 1 ? plans : [];
 }
 
-/** Turns hook plans into variants. Every variant lists each kept segment exactly once. */
-export function buildVariants(lines: Line[], plans: HookPlan[], usedIds: Set<string>): Variant[] {
+/**
+ * Claude's hooks, checked by the same rules as the heuristic's: the first is the
+ * natural order; a cold open must be on a later line that works as a first line
+ * (`openingProblem`) and differ from every other opening; a title must have its own
+ * text. A hook that fails is replaced by the heuristic's next choice that is not used
+ * yet, so the edit still gets `count` hooks when the recording offers them.
+ */
+export function repairHooks(plans: readonly HookPlan[], lines: Line[], edl: Edl, count: number): HookPlan[] {
+  if (count <= 1 || !lines.length) return [];
+  const key = (p: HookPlan): string | null => {
+    if (p.kind === 'cold_open') {
+      if (!lines[p.lineIndex] || p.lineIndex <= 0 || openingProblem(lines, p.lineIndex) !== null) return null;
+      return norm(openingRun(lines, p.lineIndex).map(lineText).join(' '));
+    }
+    if (p.kind === 'title') {
+      const t = norm(clampWords(p.text, 60));
+      return t ? `title:${t}` : null;
+    }
+    return null;
+  };
+  const used = new Set([norm(lineText(lines[0]!))]);
+  const mine = plans.slice(1, count).map((p) => {
+    const k = key(p);
+    if (!k || used.has(k)) return null;
+    used.add(k);
+    return p;
+  });
+  // The heuristic's choices not already taken, in its order, for the hooks that failed.
+  const spare = heuristicHooks(lines, edl, count + mine.length).slice(1).filter((p) => {
+    const k = key(p);
+    return k !== null && !used.has(k);
+  });
+  const out: HookPlan[] = [{ kind: 'natural' }];
+  for (const p of mine) {
+    const next = p ?? spare.shift();
+    if (next) out.push(next);
+  }
+  while (out.length < count && spare.length) out.push(spare.shift()!);
+  return out.length > 1 ? out : [];
+}
+
+/**
+ * Turns hook plans into variants. Every variant lists each kept segment exactly once.
+ * With `edl` (the base cut with its overlays), each variant hides the base overlays
+ * that would break the hook rules on its own timeline (`overlaysToHide`).
+ */
+export function buildVariants(lines: Line[], plans: HookPlan[], usedIds: Set<string>, edl?: Edl): Variant[] {
   if (plans.length <= 1 || !lines.length) return [];
   const natural = lines.map((l) => l.segment.id);
   return plans.map((plan, i) => {
@@ -214,6 +261,7 @@ export function buildVariants(lines: Line[], plans: HookPlan[], usedIds: Set<str
       });
       hookText = text;
     }
-    return { id, label: `Hook ${letter}`, hookText, segmentOrder: [...segmentOrder], overlays };
+    const variant: Variant = { id, label: `Hook ${letter}`, hookText, segmentOrder: [...segmentOrder], overlays, hiddenOverlayIds: [] };
+    return edl ? { ...variant, hiddenOverlayIds: overlaysToHide(edl, variant) } : variant;
   });
 }

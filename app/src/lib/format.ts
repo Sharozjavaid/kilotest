@@ -72,3 +72,51 @@ export function formatBytes(bytes: number): string {
   if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
   return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
 }
+
+export interface BatchCardState {
+  /** "is uploading", "is editing", "is ready to review", "is exporting", "is finished". */
+  phrase: string;
+  /** Videos past editing (reviewable or further). */
+  done: number;
+  failed: number;
+  /** 0..1 for the bar: editing while anything is editing, then finished videos. */
+  progress: number;
+  progressLabel: string;
+  line: string;
+}
+
+/**
+ * What Home's batch card says. A batch stays on Home until every video is done, so the
+ * card follows it past editing: to review, exporting, and failed videos to retry.
+ */
+export function batchCardState(b: Pick<BatchSummary, 'counts' | 'total'>): BatchCardState {
+  const c = b.counts;
+  const n = (s: VideoStatus) => c[s] ?? 0;
+  const done = batchDoneCount(b);
+  const failed = n('failed');
+  const waiting = n('uploading') + n('queued') + n('analyzing');
+  const finished = n('done');
+  const failedLine = failed ? `${plural(failed, 'video')} couldn't be edited. Tap to retry.` : null;
+  if (n('uploading') > 0 || waiting > 0) {
+    return {
+      phrase: n('uploading') > 0 ? 'is uploading' : 'is editing',
+      done,
+      failed,
+      progress: batchProgress(b),
+      progressLabel: `${done} of ${b.total} done`,
+      line: failedLine ?? "You'll get a notification when the rest are ready.",
+    };
+  }
+  const review = n('ready_for_review');
+  const exporting = n('rendering');
+  const phrase = review > 0 ? 'is ready to review' : exporting > 0 ? 'is exporting' : failed > 0 ? 'needs a retry' : 'is finished';
+  const parts = [review ? `${review} to review` : null, exporting ? `${exporting} exporting` : null, `${finished} of ${b.total} finished`].filter(Boolean);
+  return {
+    phrase,
+    done,
+    failed,
+    progress: b.total > 0 ? finished / b.total : 0,
+    progressLabel: `${finished} of ${b.total} finished`,
+    line: failedLine ?? parts.join(' · '),
+  };
+}

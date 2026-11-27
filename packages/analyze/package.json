@@ -17,7 +17,8 @@
     "score:recorded": "tsx scripts/score-recorded.ts",
     "score:variants": "tsx scripts/score-variants.ts",
     "check:variants-render": "tsx scripts/check-variants-render.ts",
-    "score:broll": "tsx scripts/score-broll.ts"
+    "score:broll": "tsx scripts/score-broll.ts",
+    "score:batch30": "tsx scripts/score-batch30.ts"
   },
   "dependencies": {
     "@kilo/edl": "file:../edl",

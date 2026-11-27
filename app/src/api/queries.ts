@@ -1,8 +1,9 @@
-import { QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { BatchDetail, HomeResponse, RenderView, VideoDetail } from '@kilo/edl';
+import { QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIsFocused } from 'expo-router';
+import type { BatchDetail, HomeResponse, RenderView, VideoDetail, VideoSummary } from '@kilo/edl';
 import { getApi } from './client';
 import { isKiloApiError } from './errors';
-import { isBusy } from './types';
+import { isBusy, type ListVideosQuery } from './types';
 import { uploadActivity, type UploadActivity } from '@/uploads/activity';
 
 /** Query keys, in one place so invalidation stays consistent. */
@@ -57,40 +58,115 @@ export function videoNeedsPolling(video: VideoDetail | undefined): boolean {
   return isBusy(video.status) || video.renders.some((r) => r.status === 'queued' || r.status === 'rendering');
 }
 
+/**
+ * How often a screen's query polls: only while the screen is the one in front (focused)
+ * and something can still move. A screen left under another one in the stack (Home under
+ * Batch, Batch under Review) stays mounted, on web and native, and must not keep fetching.
+ */
+export function pollInterval(focused: boolean, needed: boolean): number | false {
+  return focused && needed ? POLL_MS : false;
+}
+
+/**
+ * Whether the calling screen is in front. A screen under another one also stops
+ * listening to the cache (`subscribed: false`), so invalidations made elsewhere (an upload
+ * finishing) do not refetch it while hidden; it catches up when it comes back to the front.
+ */
+export function useScreenFocused(): boolean {
+  return useIsFocused();
+}
+
 export function useHome() {
+  const focused = useScreenFocused();
   return useQuery({
     queryKey: keys.home,
     queryFn: () => getApi().home(),
-    refetchInterval: (q) => (homeNeedsPolling(q.state.data) ? POLL_MS : false),
+    subscribed: focused,
+    refetchInterval: (q) => pollInterval(focused, homeNeedsPolling(q.state.data)),
   });
 }
 
-export function useBatch(batchId: string | undefined) {
+/** `poll: false` for a screen that only reads the batch (Review's "3 of 30"). */
+export function useBatch(batchId: string | undefined, opts: { poll?: boolean } = {}) {
+  const focused = useScreenFocused();
+  const poll = opts.poll ?? true;
   return useQuery({
     queryKey: keys.batch(batchId ?? ''),
     queryFn: () => getApi().getBatch(batchId!),
     enabled: !!batchId,
-    refetchInterval: (q) => (batchNeedsPolling(q.state.data) ? POLL_MS : false),
+    subscribed: focused,
+    refetchInterval: (q) => pollInterval(focused && poll, batchNeedsPolling(q.state.data)),
   });
 }
 
 export function useVideo(videoId: string | undefined) {
+  const focused = useScreenFocused();
   return useQuery({
     queryKey: keys.video(videoId ?? ''),
     queryFn: () => getApi().getVideo(videoId!),
     enabled: !!videoId,
-    refetchInterval: (q) => (videoNeedsPolling(q.state.data) ? POLL_MS : false),
+    subscribed: focused,
+    refetchInterval: (q) => pollInterval(focused, videoNeedsPolling(q.state.data)),
   });
 }
 
+/** A page of the library. */
+export const LIBRARY_PAGE = 40;
+
+/** Library filters: a status group and words in the title. */
+export type LibraryFilter = 'all' | 'review' | 'progress' | 'finished' | 'failed';
+
+export const LIBRARY_STATUSES: Record<LibraryFilter, ListVideosQuery['status']> = {
+  all: undefined,
+  review: ['ready_for_review'],
+  progress: ['uploading', 'queued', 'analyzing'],
+  finished: ['rendering', 'done'],
+  failed: ['failed'],
+};
+
+/**
+ * The library (All videos): pages of GET /videos in batch order, newest batch first. The
+ * next page starts after the last video of the one before (ListVideosResponse has no
+ * cursor; a short page is the last). Never polls: a list of hundreds refreshes when the
+ * screen comes back to the front or is pulled.
+ */
+export function useLibrary(filter: LibraryFilter, q: string) {
+  const focused = useScreenFocused();
+  return useInfiniteQuery({
+    queryKey: keys.videos({ library: true, filter, q }),
+    queryFn: ({ pageParam }) =>
+      getApi().listVideos({ status: LIBRARY_STATUSES[filter], q: q.trim() || undefined, order: 'batch', limit: LIBRARY_PAGE, after: pageParam ?? undefined }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => (last.videos.length < LIBRARY_PAGE ? undefined : last.videos[last.videos.length - 1]!.id),
+    subscribed: focused,
+    staleTime: 30_000,
+  });
+}
+
+/** Pages joined, without repeats (a video that moved between pages while scrolling shows once). */
+export function libraryRows(pages: readonly { videos: VideoSummary[] }[] | undefined): VideoSummary[] {
+  const seen = new Set<string>();
+  const out: VideoSummary[] = [];
+  for (const p of pages ?? []) {
+    for (const v of p.videos) {
+      if (seen.has(v.id)) continue;
+      seen.add(v.id);
+      out.push(v);
+    }
+  }
+  return out;
+}
+
 export function useRender(renderId: string | null | undefined) {
+  const focused = useScreenFocused();
   return useQuery({
     queryKey: keys.render(renderId ?? ''),
     queryFn: () => getApi().getRender(renderId!),
     enabled: !!renderId,
+    subscribed: focused,
     refetchInterval: (q) => {
       const r: RenderView | undefined = q.state.data;
-      return !r || r.status === 'queued' || r.status === 'rendering' ? 1000 : false;
+      return focused && (!r || r.status === 'queued' || r.status === 'rendering') ? 1000 : false;
     },
   });
 }
