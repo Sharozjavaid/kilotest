@@ -16,43 +16,43 @@
         {
           "utt": "174-168635-0012",
           "role": "line",
-          "gainDb": -0.5
+          "gainDb": -0.1
         },
         {
-          "pause": 0.66
+          "pause": 4.76
         },
         {
           "utt": "174-50561-0012",
           "role": "abandoned",
           "group": "g1",
-          "gainDb": 0.8
+          "gainDb": -0.3
         },
         {
-          "pause": 0.87
+          "pause": 1.31
         },
         {
           "utt": "174-50561-0009",
           "role": "abandoned",
           "group": "g1",
-          "gainDb": 0.8
+          "gainDb": 0.7
         },
         {
-          "pause": 1.3
+          "pause": 0.81
         },
         {
           "utt": "174-50561-0003",
           "role": "line",
           "group": "g1",
-          "gainDb": -0.5,
+          "gainDb": 0.7,
           "note": "the reader says \"the wandering singer\" on its own twice, then the full sentence"
         },
         {
-          "pause": 1.37
+          "pause": 0.29
         },
         {
           "utt": "174-168635-0014",
           "role": "line",
-          "gainDb": -1.2
+          "gainDb": -1.5
         }
       ]
     },
@@ -60,33 +60,33 @@
       "name": "part2",
       "fps": 30,
       "size": "720x1280",
-      "gainDb": 0.3,
-      "leadIn": 1.13,
-      "tail": 0.71,
+      "gainDb": 4.1,
+      "leadIn": 0.47,
+      "tail": 1,
       "pieces": [
         {
           "utt": "174-168635-0016",
-          "words": 5,
+          "words": 8,
           "role": "abandoned",
           "group": "g2",
-          "gainDb": 0.2
+          "gainDb": 0.3
         },
         {
-          "pause": 1.13
+          "pause": 0.46
         },
         {
           "utt": "174-168635-0016",
           "role": "line",
           "group": "g2",
-          "gainDb": -1.3
+          "gainDb": 0.3
         },
         {
-          "pause": 0.85
+          "pause": 0.47
         },
         {
           "utt": "174-168635-0019",
           "role": "line",
-          "gainDb": 0
+          "gainDb": -1.3
         }
       ]
     }

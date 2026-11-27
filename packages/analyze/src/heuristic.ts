@@ -1,6 +1,6 @@
 import type { EditSettings, SegmentReason } from '@kilo/edl';
 import type { Chunk, ClipWords } from './chunks.js';
-import { ORDINALS, STOPWORDS, fullSimilarity, keys, lineMatch, prefixSimilarity, readNumber } from './text.js';
+import { ORDINALS, STOPWORDS, endsClause, fullSimilarity, keys, lineMatch, prefixSimilarity, readNumber } from './text.js';
 
 /** What a decider says about one utterance. */
 export interface ChunkDecision {
@@ -177,9 +177,12 @@ export function separateLines(a: Chunk, b: Chunk, between: readonly Chunk[]): { 
 
 const asks = (c: Chunk) => /\?["')\]]*$/.test(c.words[c.words.length - 1]?.text.trim() ?? '');
 
-/** Keeps the last complete take in a group, cuts the rest. Returns the kept id. */
-function resolveGroup(group: Chunk[], out: CutDecisions, why: string): number {
-  let complete = group.filter((c) => c.complete);
+/**
+ * Keeps the last complete take in a group, cuts the rest. Returns the kept id. `finished` says
+ * whether a take is complete; by default its own `complete`.
+ */
+function resolveGroup(group: Chunk[], out: CutDecisions, why: string, finished: (c: Chunk) => boolean = (c) => c.complete): number {
+  let complete = group.filter(finished);
   // Saying a line back as a question ("It lasts all week? Yeah.") is checking it, not a take.
   // A question that says more than every statement ("The boys look awake enough." / "The boys
   // look awake enough, but who can tell?") is the take itself.
@@ -198,8 +201,8 @@ function resolveGroup(group: Chunk[], out: CutDecisions, why: string): number {
     else
       out.set(c.id, {
         keep: false,
-        reason: c.complete ? 'retake' : 'false_start',
-        note: `${c.complete ? 'Earlier take' : 'Abandoned take'} of utterance ${keep.id}`,
+        reason: finished(c) ? 'retake' : 'false_start',
+        note: `${finished(c) ? 'Earlier take' : 'Abandoned take'} of utterance ${keep.id}`,
       });
   }
   return keep.id;
@@ -265,8 +268,17 @@ function decideByRetakes(cands: Chunk[], offsets: Map<string, number>, out: CutD
     const r = uf.find(c.id);
     groups.set(r, [...(groups.get(r) ?? []), c]);
   }
+  // A take that pauses at a comma and goes on in the next utterance ("...had women to fall
+  // back upon, [pause] whereas he had a woman to provide for.") is finished, not abandoned.
+  const runsOn = (c: Chunk) => {
+    const i = byId.get(c.id);
+    const next = i === undefined ? undefined : all[i + 1];
+    const last = c.words.filter((w) => !w.filler).pop();
+    return !!last && endsClause(last.text) && !!next && next.clipId === c.clipId && next.start - c.end <= 1 &&
+      next.complete && !next.offScript && !next.fillerOnly;
+  };
   for (const group of groups.values()) {
-    if (group.length > 1) resolveGroup(group, out, 'Last complete take');
+    if (group.length > 1) resolveGroup(group, out, 'Last complete take', (c) => c.complete || runsOn(c));
     else out.set(group[0]!.id, { keep: true, reason: 'speech' });
   }
   for (const id of corrections) out.set(id, { keep: false, reason: 'off_script', note: 'Corrects the take before it' });

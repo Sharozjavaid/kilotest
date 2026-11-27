@@ -31,6 +31,27 @@ RUN apt-get update \
 RUN npx -y playwright@1.49.1 install --with-deps chromium-headless-shell \
  && rm -rf /root/.npm /var/lib/apt/lists/*
 
+# Optional: the local, free `whisper` transcriber (KILO_TRANSCRIBER=whisper), an open Whisper model
+# on the CPU through faster-whisper. Off by default, so the image needs no Python; build with
+#   docker build -f server/Dockerfile --build-arg KILO_WITH_WHISPER=1 [--build-arg KILO_WHISPER_MODEL=small.en] .
+# The model (base.en, about 145 MB) is downloaded from Hugging Face at build time, never at run time.
+# NOT YET BUILT: these steps were run by hand outside Docker (packages/analyze/whisper/setup.sh), not here.
+ARG KILO_WITH_WHISPER=0
+ARG KILO_WHISPER_MODEL=base.en
+COPY packages/analyze/whisper/requirements.txt packages/analyze/whisper/kilo_whisper.py /opt/kilo-whisper/
+RUN if [ "$KILO_WITH_WHISPER" = "1" ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends python3 python3-venv \
+      && rm -rf /var/lib/apt/lists/* \
+      && python3 -m venv /opt/whisper-venv \
+      && /opt/whisper-venv/bin/pip install --no-cache-dir -r /opt/kilo-whisper/requirements.txt \
+      && /opt/whisper-venv/bin/python -I /opt/kilo-whisper/kilo_whisper.py --model "$KILO_WHISPER_MODEL" --cache-dir /opt/whisper-models --download-only \
+      && chmod -R a+rX /opt/whisper-models; \
+    fi
+ENV KILO_WHISPER_PYTHON=/opt/whisper-venv/bin/python \
+    KILO_WHISPER_CACHE_DIR=/opt/whisper-models \
+    KILO_WHISPER_MODEL=$KILO_WHISPER_MODEL
+
 # The projects keep the repository layout: every file: dependency is a relative symlink.
 WORKDIR /app
 

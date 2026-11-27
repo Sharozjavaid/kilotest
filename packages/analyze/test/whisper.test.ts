@@ -58,9 +58,10 @@ describe('whisper transcriber: choosing it', () => {
   it('reads its settings from the environment', () => {
     const o = whisperOptionsFromEnv({ KILO_WHISPER_PYTHON: '/opt/py', KILO_WHISPER_MODEL: 'small.en', KILO_WHISPER_CACHE_DIR: '/cache', KILO_WHISPER_THREADS: '3', KILO_WHISPER_ALLOW_DOWNLOAD: '1' });
     expect(o).toMatchObject({ python: '/opt/py', model: 'small.en', cacheDir: '/cache', threads: 3, allowDownload: true });
-    const d = whisperOptionsFromEnv({});
+    const d = whisperOptionsFromEnv({ KILO_WHISPER_PROMPT: '', KILO_WHISPER_MODEL: '' });
     expect(d).toMatchObject({ model: 'base.en', threads: 2, allowDownload: false });
     expect(d.prompt).toBeUndefined();
+    expect(whisperOptionsFromEnv({ KILO_WHISPER_PROMPT: 'none' }).prompt).toBe('');
   });
 });
 
@@ -112,9 +113,13 @@ describe('whisper transcriber: words', () => {
       { text: 'border.', start: 0.6, end: 0.9, probability: 0.95 },
       { text: 'order.', start: 0.9, end: 1.2, probability: 0.4 },
       { text: 'word.', start: 1.3, end: 1.5, probability: 1 },
-      { text: 'guard.', start: 1.5, end: 1.6, probability: 0.05 },
-    ], 2);
-    expect(times(out)).toEqual([['Um,', 0.2, 0.4], ['the', 0.5, 0.6], ['border.', 0.6, 1.2], ['word.', 1.3, 1.5]]);
+      { text: 'Vladimir.', start: 1.5, end: 1.55, probability: 0.97 },
+      { text: 'mirror.', start: 1.55, end: 1.75, probability: 0.3 },
+      { text: 'that,', start: 1.8, end: 1.9, probability: 0.9 },
+      { text: 'that', start: 1.9, end: 2.0, probability: 0.49 },
+      { text: 'guard.', start: 2.1, end: 2.2, probability: 0.05 },
+    ], 3);
+    expect(times(out)).toEqual([['Um,', 0.2, 0.4], ['the', 0.5, 0.6], ['border.', 0.6, 1.2], ['word.', 1.3, 1.5], ['Vladimir.', 1.5, 1.75], ['that,', 1.8, 1.9], ['that', 1.9, 2]]);
     expect(out[0]!.filler).toBe(true);
   });
 

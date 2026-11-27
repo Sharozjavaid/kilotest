@@ -16,25 +16,25 @@
         {
           "utt": "777-126732-0035",
           "role": "line",
-          "gainDb": 0.2
+          "gainDb": 0.7
         },
         {
-          "pause": 1.92
+          "pause": 1.18
         },
         {
           "utt": "777-126732-0043",
           "role": "line",
-          "gainDb": -0.8
+          "gainDb": 0.5
         },
         {
-          "pause": 1.7
+          "pause": 0.36
         },
         {
           "utt": "777-126732-0047",
-          "words": 10,
+          "words": 13,
           "role": "abandoned",
           "group": "g1",
-          "gainDb": 0.4
+          "gainDb": -1.3
         }
       ]
     },
@@ -42,51 +42,51 @@
       "name": "part2",
       "fps": 30,
       "size": "720x1280",
-      "gainDb": 1,
-      "leadIn": 0.56,
-      "tail": 1.41,
+      "gainDb": 2.6,
+      "leadIn": 1.03,
+      "tail": 1.34,
       "pieces": [
         {
           "utt": "777-126732-0047",
           "role": "line",
           "group": "g1",
-          "gainDb": -1.3
+          "gainDb": -0.2
         },
         {
-          "pause": 0.56
+          "pause": 1.12
         },
         {
           "utt": "777-126732-0025",
           "words": 6,
           "role": "abandoned",
           "group": "g2",
-          "gainDb": -0.9
+          "gainDb": -0.4
         },
         {
-          "pause": 0.86
+          "pause": 1.53
         },
         {
           "utt": "777-126732-0003",
           "role": "line",
           "group": "g2",
-          "gainDb": 1.3,
+          "gainDb": 0.7,
           "note": "two sentences that open \"michaelis the ticket of leave apostle\": that opening from one, then the other in full"
         },
         {
-          "pause": 0.94
+          "pause": 0.37
         },
         {
           "utt": "777-126732-0053",
           "role": "line",
-          "gainDb": -0.7
+          "gainDb": 0.2
         },
         {
-          "pause": 1.21
+          "pause": 0.65
         },
         {
           "utt": "777-126732-0058",
           "role": "line",
-          "gainDb": 1.2
+          "gainDb": -1.1
         }
       ]
     }

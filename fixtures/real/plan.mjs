@@ -125,7 +125,8 @@ for (const rec of RECORDINGS) {
     fps: rec.fps ?? 30,
     size: rec.size ?? '720x1280',
     // Level differences: each clip at its own level, as phones at different distances.
-    gainDb: c === 0 ? 0 : round(-7 + r() * 9, 1),
+    // Later clips 4-9 dB quieter (phone further away) or 2-5 dB louder (closer).
+    gainDb: c === 0 ? 0 : r() < 0.6 ? round(-4 - r() * 5, 1) : round(2 + r() * 3, 1),
     leadIn: round(0.3 + r() * 1.2),
     tail: round(0.5 + r() * 1.5),
     pieces: [],

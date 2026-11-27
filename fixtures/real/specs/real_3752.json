@@ -16,33 +16,33 @@
         {
           "utt": "3752-4943-0003",
           "role": "line",
-          "gainDb": -0.3
+          "gainDb": 0.4
         },
         {
-          "pause": 2.27
+          "pause": 3.93
         },
         {
           "utt": "3752-4943-0005",
           "role": "line",
-          "gainDb": -0.1
+          "gainDb": -0.7
         },
         {
-          "pause": 0.52
+          "pause": 0.88
         },
         {
           "utt": "3752-4943-0006",
-          "words": 2,
+          "words": 4,
           "role": "abandoned",
           "group": "g1",
-          "gainDb": 1.1
+          "gainDb": 1.2
         },
         {
-          "pause": 3.3
+          "pause": 0.35
         },
         {
           "utt": "3752-4943-0010",
           "role": "line",
-          "gainDb": -0.8
+          "gainDb": 0.3
         }
       ]
     },
@@ -50,47 +50,47 @@
       "name": "part2",
       "fps": 60,
       "size": "720x1280",
-      "gainDb": 0.9,
-      "leadIn": 0.8,
-      "tail": 0.55,
+      "gainDb": 3.2,
+      "leadIn": 0.34,
+      "tail": 1.12,
       "pieces": [
         {
           "utt": "3752-4943-0006",
           "role": "line",
           "group": "g1",
-          "gainDb": 1.2
+          "gainDb": 0.3
         },
         {
-          "pause": 1.53
+          "pause": 0.68
         },
         {
           "utt": "3752-4943-0013",
           "role": "line",
-          "gainDb": 0.3
+          "gainDb": -1.5
         },
         {
-          "pause": 0.46
+          "pause": 0.32
         },
         {
           "utt": "3752-4943-0014",
           "role": "line",
-          "gainDb": -1
+          "gainDb": 1.3
         },
         {
-          "pause": 4.18
+          "pause": 2.29
         },
         {
           "utt": "3752-4943-0017",
           "role": "line",
-          "gainDb": 1.1
+          "gainDb": -0.4
         },
         {
-          "pause": 0.39
+          "pause": 0.56
         },
         {
           "utt": "3752-4943-0018",
           "role": "line",
-          "gainDb": 0.6
+          "gainDb": 0.7
         }
       ]
     }

@@ -39,7 +39,7 @@ export interface WhisperOptions {
   model: string;
   cacheDir: string;
   threads: number;
-  /** Replaces the disfluent prompt that keeps fillers; "" sends none. */
+  /** Replaces the disfluent prompt that keeps fillers; "" sends none (KILO_WHISPER_PROMPT=none). */
   prompt?: string;
   /** Let the script fetch a missing model from Hugging Face (off by default: a worker should not download on the job path). */
   allowDownload: boolean;
@@ -53,7 +53,8 @@ export function whisperOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): Whi
     model: env.KILO_WHISPER_MODEL || DEFAULT_WHISPER_MODEL,
     cacheDir: env.KILO_WHISPER_CACHE_DIR || DEFAULT_WHISPER_CACHE_DIR,
     threads: Number.isInteger(threads) && threads > 0 ? threads : DEFAULT_WHISPER_THREADS,
-    ...(env.KILO_WHISPER_PROMPT !== undefined ? { prompt: env.KILO_WHISPER_PROMPT } : {}),
+    // Empty means the default prompt (a copied .env.example leaves it empty); "none" sends no prompt.
+    ...(env.KILO_WHISPER_PROMPT ? { prompt: env.KILO_WHISPER_PROMPT === 'none' ? '' : env.KILO_WHISPER_PROMPT } : {}),
     allowDownload: env.KILO_WHISPER_ALLOW_DOWNLOAD === '1',
   };
 }
@@ -126,15 +127,22 @@ export function isLikelyHallucination(w: ScriptWord): boolean {
 
 /** Turns the script's words into Kilo words: likely hallucinations and echoes dropped, fillers flagged by the shared lexicon, times cleaned. */
 export function whisperWords(words: readonly ScriptWord[], durationSec: number): Word[] {
-  // An echo of the word before's ending, right after it ("border." "order."): one word Whisper
-  // wrote twice. It goes, and the word before ends where the echo did.
+  // An echo of the word before's ending, right after it ("border." "order.", or an unlikely
+  // "Vladimir." "mirror."): one word Whisper wrote twice. It goes, and the word before ends
+  // where the echo did. A likely repeat ("that, that place") is the speaker's and stays.
   const kept: ScriptWord[] = [];
   const bare = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
   for (const w of words) {
     if (isLikelyHallucination(w)) continue;
     const prev = kept[kept.length - 1];
     const b = bare(w.text);
-    if (prev && b.length >= 3 && bare(prev.text).length > b.length && bare(prev.text).endsWith(b) && w.start - prev.end < 0.05) {
+    const a = prev ? bare(prev.text) : '';
+    // How many letters the end of the word before shares with the start of this one ("Vladimir" "mirror").
+    let overlap = 0;
+    for (let k = 3; k <= Math.min(a.length, b.length); k++) if (a.endsWith(b.slice(0, k))) overlap = k;
+    const unlikely = typeof w.probability === 'number' && w.probability < 0.35 && w.end - w.start <= 0.4;
+    const echo = (b.length >= 3 && a.length > b.length && a.endsWith(b)) || (overlap >= 3 && unlikely);
+    if (prev && echo && w.start - prev.end < 0.05) {
       kept[kept.length - 1] = { ...prev, end: Math.max(prev.end, w.end) };
       continue;
     }

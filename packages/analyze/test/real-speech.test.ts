@@ -88,6 +88,18 @@ describe('transcripts from speech-to-text', () => {
     ]);
   });
 
+  it('keeps a take that pauses at a comma and goes on, over an earlier take closed with a full stop', () => {
+    expect(decide([clip('c', 0, [
+      ...say('Loathing was all very well for these fellows who knew not Mr. Vladimir.', 1, 4),
+      ...say('Loafing was all very well for these fellows who knew not Mr. Vladimir and had women to fall back upon,', 6, 11),
+      ...say('whereas he had a woman to provide for.', 11.6, 13.4),
+    ])])).toEqual([
+      ['Loathing was all very well for these fellows who knew not Mr. Vladimir.', false],
+      ['Loafing was all very well for these fellows who knew not Mr. Vladimir and had women to fall back upon,', true],
+      ['whereas he had a woman to provide for.', true],
+    ]);
+  });
+
   it('splits an abandoned start off the sentence it ran on from', () => {
     const clips = [
       clip('a', 0, say('A prisoner, said the watchman, wants to...', 1, 4.5)),
