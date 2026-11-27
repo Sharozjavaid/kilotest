@@ -1,0 +1,64 @@
+{
+  "id": "fresh_6345",
+  "title": "Real speech, LibriSpeech speaker 6345 (F)",
+  "mode": "general",
+  "speaker": "6345",
+  "script": true,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.68,
+      "tail": 1.87,
+      "pieces": [
+        {
+          "utt": "6345-93302-0011",
+          "role": "line",
+          "gainDb": 1.1
+        },
+        {
+          "pause": 0.34
+        },
+        {
+          "utt": "6345-93302-0015",
+          "role": "line",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 0.37
+        },
+        {
+          "utt": "6345-93302-0016",
+          "role": "line",
+          "gainDb": -1.4
+        },
+        {
+          "pause": 5.41
+        },
+        {
+          "utt": "6345-93302-0017",
+          "role": "line",
+          "gainDb": 1.4
+        },
+        {
+          "pause": 3.37
+        },
+        {
+          "utt": "6345-93302-0020",
+          "role": "line",
+          "gainDb": 0.3
+        },
+        {
+          "pause": 0.67
+        },
+        {
+          "utt": "6345-93302-0023",
+          "role": "line",
+          "gainDb": 1.3
+        }
+      ]
+    }
+  ]
+}

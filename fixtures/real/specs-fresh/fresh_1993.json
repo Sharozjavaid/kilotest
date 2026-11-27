@@ -1,0 +1,74 @@
+{
+  "id": "fresh_1993",
+  "title": "Real speech, LibriSpeech speaker 1993 (F)",
+  "mode": "general",
+  "speaker": "1993",
+  "script": true,
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 1,
+      "tail": 1.42,
+      "pieces": [
+        {
+          "utt": "1993-147965-0000",
+          "role": "line",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 0.68
+        },
+        {
+          "utt": "1993-147965-0001",
+          "role": "line",
+          "gainDb": 0.3
+        },
+        {
+          "pause": 0.68
+        },
+        {
+          "utt": "1993-147965-0004",
+          "words": 3,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -1
+        },
+        {
+          "pause": 0.76
+        },
+        {
+          "utt": "1993-147965-0004",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0
+        }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": 2.3,
+      "leadIn": 0.49,
+      "tail": 1.44,
+      "pieces": [
+        {
+          "utt": "1993-147965-0007",
+          "role": "line",
+          "gainDb": 0.1
+        },
+        {
+          "pause": 0.57
+        },
+        {
+          "utt": "1993-147965-0008",
+          "role": "line",
+          "gainDb": -0.8
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "id": "heldout_6319",
+  "title": "Real speech, LibriSpeech speaker 6319 (F)",
+  "mode": "general",
+  "speaker": "6319",
+  "script": true,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 1.39,
+      "tail": 1.47,
+      "pieces": [
+        {
+          "utt": "6319-275224-0000",
+          "role": "line",
+          "gainDb": 0.7
+        },
+        {
+          "pause": 1.13
+        },
+        {
+          "utt": "6319-275224-0002",
+          "role": "line",
+          "gainDb": 0.4
+        },
+        {
+          "pause": 0.55
+        },
+        {
+          "utt": "6319-275224-0009",
+          "role": "line",
+          "gainDb": 1
+        },
+        {
+          "pause": 0.39
+        },
+        {
+          "utt": "6319-275224-0010",
+          "words": 7,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 0.8
+        },
+        {
+          "pause": 1.05
+        },
+        {
+          "utt": "6319-275224-0010",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.6
+        },
+        {
+          "pause": 1.53
+        },
+        {
+          "utt": "6319-275224-0012",
+          "role": "line",
+          "gainDb": 0
+        },
+        {
+          "pause": 0.45
+        },
+        {
+          "utt": "6319-275224-0019",
+          "role": "line",
+          "gainDb": -0.7
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "id": "fresh_3536",
+  "title": "Real speech, LibriSpeech speaker 3536 (F)",
+  "mode": "general",
+  "speaker": "3536",
+  "script": false,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 1.23,
+      "tail": 0.59,
+      "pieces": [
+        {
+          "utt": "3536-23268-0005",
+          "role": "line",
+          "gainDb": 0.4
+        },
+        {
+          "pause": 4.89
+        },
+        {
+          "utt": "3536-23268-0010",
+          "role": "line",
+          "gainDb": 0.2
+        },
+        {
+          "pause": 2.27
+        },
+        {
+          "utt": "3536-23268-0013",
+          "role": "line",
+          "gainDb": 0.6
+        },
+        {
+          "pause": 0.7
+        },
+        {
+          "utt": "3536-23268-0014",
+          "words": 5,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 0.3
+        },
+        {
+          "pause": 1.26
+        },
+        {
+          "utt": "3536-23268-0014",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.8
+        },
+        {
+          "pause": 0.66
+        },
+        {
+          "utt": "3536-23268-0015",
+          "role": "line",
+          "gainDb": -1.3
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "id": "fresh_8297",
+  "title": "Real speech, LibriSpeech speaker 8297 (M)",
+  "mode": "general",
+  "speaker": "8297",
+  "script": false,
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 1.43,
+      "tail": 0.65,
+      "pieces": [
+        {
+          "utt": "8297-275154-0013",
+          "role": "line",
+          "gainDb": -1.4
+        },
+        {
+          "pause": 0.29
+        },
+        {
+          "utt": "8297-275154-0015",
+          "role": "line",
+          "gainDb": 0.1
+        },
+        {
+          "pause": 2.18
+        },
+        {
+          "utt": "8297-275154-0019",
+          "words": 10,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -0.1
+        },
+        {
+          "pause": 0.77
+        },
+        {
+          "utt": "8297-275154-0019",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.7
+        }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 3.7,
+      "leadIn": 0.51,
+      "tail": 1.95,
+      "pieces": [
+        {
+          "utt": "8297-275154-0020",
+          "role": "line",
+          "gainDb": 1
+        },
+        {
+          "pause": 0.65
+        },
+        {
+          "utt": "8297-275154-0023",
+          "role": "line",
+          "gainDb": -1.4
+        }
+      ]
+    }
+  ]
+}

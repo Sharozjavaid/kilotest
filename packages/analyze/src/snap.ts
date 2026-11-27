@@ -2,6 +2,7 @@ import type { ClipInfo, EditSettings, Segment, SegmentReason, SilenceGap } from 
 import { PACING_PARAMS } from '@kilo/edl';
 import type { Chunk, ClipWord, ClipWords } from './chunks.js';
 import type { CutDecisions } from './heuristic.js';
+import { endsSentence, hasPunctuation } from './text.js';
 
 /**
  * Snapping is code, never the model. Every cut boundary sits in a silence gap where
@@ -56,6 +57,18 @@ export const MAX_TIMING_ERROR_SEC = 0.35;
  * edges are routinely off. The pacing's padding is used where it is larger.
  */
 export const UNCONFIRMED_EDGE_SEC = 0.15;
+
+/**
+ * Inside a sentence, a pause is cut only when cutting it takes out more than the longest pause the
+ * pacing leaves alone: it must be longer than maxSilenceSec + keptPauseSec (natural 0.82 s, tight
+ * 0.47 s), not just maxSilenceSec. A reader's or speaker's pause inside a sentence often holds a
+ * breath or the soft start of the next word, which forced alignment (and a listener) counts as
+ * part of that word, and a jump cut inside a sentence breaks its rhythm more than one between
+ * sentences. Applies only where the transcript is punctuated, so sentence ends are known.
+ */
+export function deadAirLimit(p: { maxSilenceSec: number; keptPauseSec: number }, insideSentence: boolean): number {
+  return insideSentence ? p.maxSilenceSec + p.keptPauseSec : p.maxSilenceSec;
+}
 
 interface Edge {
   t: number;
@@ -114,6 +127,8 @@ export function planClipCuts(input: {
   silences: SilenceGap[];
   settings: EditSettings;
   fps: number;
+  /** The transcript has punctuation, so a kept word that ends no sentence is inside one. */
+  punctuated?: boolean;
 }): Cut[] {
   const { clip, states, settings, fps } = input;
   const D = clip.durationSec;
@@ -173,7 +188,7 @@ export function planClipCuts(input: {
       else if (A && !B) cuts.push({ start: Math.min(D, aEnd + padA), end: D });
       else if (A && B) {
         const pause = bStart - aEnd;
-        if (pause > p.maxSilenceSec) {
+        if (pause > deadAirLimit(p, !!input.punctuated && !endsSentence(A.text))) {
           const half = Math.max(pad, p.keptPauseSec / 2);
           const start = aEnd + Math.max(half, padA);
           const end = bStart - Math.max(half, padB);
@@ -304,6 +319,7 @@ export function snapSegments(input: {
   const chunkOfWord = new Map<string, Chunk>();
   for (const c of input.chunks) for (const w of c.words) chunkOfWord.set(`${w.clipId}#${w.index}`, c);
   const segments: Segment[] = [];
+  const punctuated = input.clipWords.some((cw) => hasPunctuation(cw.words));
   for (const cw of input.clipWords) {
     const states: WordState[] = cw.words.map((w) => {
       const chunk = chunkOfWord.get(`${w.clipId}#${w.index}`);
@@ -327,6 +343,7 @@ export function snapSegments(input: {
       silences: input.silences.filter((g) => g.clipId === cw.clip.id),
       settings,
       fps: clipFps,
+      punctuated,
     });
     const D = cw.clip.durationSec;
     const ranges: Array<{ start: number; end: number; keep: boolean }> = [];

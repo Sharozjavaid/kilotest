@@ -1,0 +1,67 @@
+{
+  "id": "heldout_8842",
+  "title": "Real speech, LibriSpeech speaker 8842 (F)",
+  "mode": "general",
+  "speaker": "8842",
+  "script": true,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.47,
+      "tail": 0.77,
+      "pieces": [
+        {
+          "utt": "8842-302196-0002",
+          "role": "line",
+          "gainDb": 0
+        },
+        {
+          "pause": 1.66
+        },
+        {
+          "utt": "8842-302196-0006",
+          "role": "line",
+          "gainDb": 0
+        },
+        {
+          "pause": 0.54
+        },
+        {
+          "utt": "8842-302196-0007",
+          "words": 10,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 0.2
+        },
+        {
+          "pause": 0.72
+        },
+        {
+          "utt": "8842-302196-0007",
+          "role": "line",
+          "group": "g1",
+          "gainDb": -1.2
+        },
+        {
+          "pause": 0.51
+        },
+        {
+          "utt": "8842-302196-0008",
+          "role": "line",
+          "gainDb": -0.5
+        },
+        {
+          "pause": 0.29
+        },
+        {
+          "utt": "8842-302196-0011",
+          "role": "line",
+          "gainDb": 1.1
+        }
+      ]
+    }
+  ]
+}

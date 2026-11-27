@@ -4,7 +4,11 @@
 // speaker) and only needs the cache `fetch.py` filled. The specs are committed; rerun this only
 // to change the design, then `node fixtures/real/generate.mjs` to rebuild the media.
 //
-// Usage: node fixtures/real/plan.mjs [--cache <dir>] [--specs <dir>]
+// Usage: node fixtures/real/plan.mjs [--set dev|heldout|fresh] [--cache <dir>] [--specs <dir>]
+//
+// `--set dev` (the default) is the 12 recordings in specs/. `heldout` and `fresh` are two more
+// sets of other speakers, built by the same rules, for checking a pipeline change on recordings it
+// was not designed on: specs-heldout/ and specs-fresh/ (see README.md, "Held-out sets").
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,14 +16,19 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i += 2) {
-  if (!['--cache', '--specs'].includes(args[i]) || args[i + 1] === undefined) {
-    console.error(`plan.mjs: unknown or incomplete argument "${args[i]}". Usage: [--cache <dir>] [--specs <dir>]`);
+  if (!['--cache', '--specs', '--set'].includes(args[i]) || args[i + 1] === undefined) {
+    console.error(`plan.mjs: unknown or incomplete argument "${args[i]}". Usage: [--set dev|heldout|fresh] [--cache <dir>] [--specs <dir>]`);
     process.exit(2);
   }
 }
 const argOf = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
+const set = argOf('--set') ?? 'dev';
+if (!['dev', 'heldout', 'fresh'].includes(set)) {
+  console.error(`plan.mjs: --set must be dev, heldout or fresh, not "${set}"`);
+  process.exit(2);
+}
 const cache = resolve(argOf('--cache') ?? join(here, '.work/cache/librispeech'));
-const specDir = resolve(argOf('--specs') ?? join(here, 'specs'));
+const specDir = resolve(argOf('--specs') ?? join(here, set === 'dev' ? 'specs' : `specs-${set}`));
 
 function rng(seed) {
   let x = seed >>> 0 || 1;
@@ -62,7 +71,7 @@ function abandonAt(u, target, avoid = new Set()) {
  * The recordings. `special` holds retakes made of two different real readings by the same
  * speaker (LibriSpeech has a few sentences a reader says twice, or that open the same way).
  */
-const RECORDINGS = [
+const DEV = [
   { id: 'real_174', speaker: '174', lines: 5, clips: 2, script: true, special: [{ attempts: ['174-50561-0012', '174-50561-0009'], full: '174-50561-0003', why: 'the reader says "the wandering singer" on its own twice, then the full sentence' }] },
   { id: 'real_3081', speaker: '3081', lines: 8, clips: 1, script: false, special: [{ attempts: [['3081-166546-0006', 6]], full: '3081-166546-0011', why: 'two different sentences that open with the same six words: the first six words of one, then the other' }] },
   { id: 'real_777', speaker: '777', lines: 6, clips: 2, script: false, special: [{ attempts: [['777-126732-0025', 6]], full: '777-126732-0003', why: 'two sentences that open "michaelis the ticket of leave apostle": that opening from one, then the other in full' }] },
@@ -76,6 +85,45 @@ const RECORDINGS = [
   { id: 'real_2428', speaker: '2428', lines: 8, clips: 2, script: false },
   { id: 'real_1272', speaker: '1272', lines: 7, clips: 1, script: true },
 ];
+
+/**
+ * The held-out sets, decided before any of their recordings was scored: every speaker the dev set
+ * does not use whose best chapter has at least 5 usable lines, in speaker-number order, dealt in
+ * turn to `heldout` and `fresh`. The designs cycle through the dev set's range (5 to 9 lines,
+ * 1 to 3 clips, with and without a script, some at 60 fps, one landscape); no special retakes,
+ * since these speakers have no known repeats in the cached data.
+ */
+function otherSets() {
+  const devSpeakers = new Set(DEV.map((r) => r.speaker));
+  const eligible = [...bySpeaker.keys()]
+    .filter((s) => !devSpeakers.has(s))
+    .map((s) => {
+      const per = new Map();
+      for (const u of bySpeaker.get(s).filter(usable)) per.set(u.chapter, (per.get(u.chapter) ?? 0) + 1);
+      return { speaker: s, best: Math.max(0, ...per.values()) };
+    })
+    .filter((x) => x.best >= 5)
+    .sort((a, b) => Number(a.speaker) - Number(b.speaker));
+  const sets = { heldout: [], fresh: [] };
+  eligible.forEach((x, k) => {
+    const name = k % 2 === 0 ? 'heldout' : 'fresh';
+    const i = sets[name].length;
+    const lines = Math.min(x.best, [7, 8, 9, 6, 8, 7, 9][i % 7]);
+    const clips = Math.min(lines >= 7 ? 3 : 2, [1, 2, 3, 1, 2, 1, 2][i % 7]);
+    sets[name].push({
+      id: `${name}_${x.speaker}`,
+      speaker: x.speaker,
+      lines,
+      clips,
+      script: i % 2 === 0,
+      ...(i % 5 === 2 ? { fps: 60 } : {}),
+      ...(i === 3 ? { size: '1280x720' } : {}),
+    });
+  });
+  return sets;
+}
+
+const RECORDINGS = set === 'dev' ? DEV : otherSets()[set];
 
 /** Retake designs, used in turn: one abandoned start; two abandoned starts; a start left at the end of a clip. */
 const KINDS = ['abandon', 'abandon2', 'abandon', 'clip_restart', 'abandon2'];

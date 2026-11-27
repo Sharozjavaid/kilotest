@@ -59,6 +59,40 @@ describe('cuts where words touch', () => {
     expect(cut.start).toBeCloseTo(Math.ceil((1.3 + PACING_PARAMS.tight.cutPaddingSec) * 30 - 1e-6) / 30, 6);
   });
 
+  describe('pauses inside a sentence', () => {
+    /** "The sky showed through the roof[,] [pause] which sagged." with a measured pause of `pause` s. */
+    const pauseClip = (pause: number, afterRoof: string): SynthClip => {
+      const w = (text: string, start: number, end: number): Word => ({ text, start, end, confidence: 1, filler: false });
+      const b = 2.0 + pause;
+      const words = [w('The', 0.5, 0.7), w('sky', 0.7, 1.0), w('showed', 1.0, 1.4), w('through', 1.4, 1.6), w('the', 1.6, 1.7), w(afterRoof, 1.7, 2.0), w('which', b, b + 0.3), w('sagged.', b + 0.3, b + 0.8)];
+      const durationSec = b + 1.5;
+      return {
+        info: { id: 'p', order: 0, durationSec, fps: 30, width: 1080, height: 1920 },
+        transcript: { clipId: 'p', language: 'en', durationSec, words },
+        silences: [{ clipId: 'p', start: 0, end: 0.5 }, { clipId: 'p', start: 2.0, end: b }, { clipId: 'p', start: b + 0.8, end: durationSec }],
+        units: [],
+      };
+    };
+    const cutBetween = async (clip: SynthClip, pacing: 'natural' | 'tight') => {
+      const edl = await analyze.decideEdit(decideInput([clip], { pacing }));
+      expect(validateEdl(edl, [clip.info])).toEqual([]);
+      return edl.segments.filter((s) => !s.keep && s.start > 1.9 && s.end < clip.info.durationSec - 1);
+    };
+
+    for (const pacing of ['natural', 'tight'] as const) {
+      const p = PACING_PARAMS[pacing];
+      it(`keeps a pause inside a sentence up to maxSilence + keptPause, cuts it past that (${pacing})`, async () => {
+        const mid = p.maxSilenceSec + p.keptPauseSec;
+        expect(await cutBetween(pauseClip(mid - 0.05, 'roof,'), pacing)).toEqual([]);
+        expect(await cutBetween(pauseClip(mid + 0.1, 'roof,'), pacing)).toHaveLength(1);
+      });
+      it(`still cuts the same pause between sentences (${pacing})`, async () => {
+        const mid = p.maxSilenceSec + p.keptPauseSec;
+        expect(await cutBetween(pauseClip(mid - 0.05, 'roof.'), pacing)).toHaveLength(1);
+      });
+    }
+  });
+
   it("puts a 30 fps clip's boundaries on its own frames inside a 60 fps EDL", async () => {
     const a = touching('a', 30, 0);
     const b = synthClip('b', 1, [{ say: 'Second clip here.' }, { pause: 1.2 }, { say: 'And more words.' }], { fps: 60 });

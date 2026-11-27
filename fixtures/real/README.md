@@ -91,6 +91,29 @@ Scoring (in packages/analyze): `npm run score:real` (whisper) and `npm run score
 
 12 recordings, 19 clips, 611 s, 22 retake groups, 5 female and 7 male readers.
 
+## Held-out sets
+
+The 12 recordings above are the development set: pipeline changes were made while looking at
+them. Two more sets check a change on recordings it was not designed on. They use the same
+construction rules and other LibriSpeech speakers, already in the cache (no extra download). The
+speakers were fixed before either set was scored: every speaker the dev set does not use whose
+best chapter has at least 5 usable lines, in speaker-number order, dealt in turn to `heldout` and
+`fresh`. The designs cycle through the dev set's range: 5 to 9 lines, 1 to 3 clips, with and
+without a script, some at 60 fps, one landscape. They have no real-repeat retakes.
+
+| Set | Specs | Output (gitignored) | Recordings | Clips | Length | Retake groups (as scored) | Readers |
+|---|---|---|---|---|---|---|---|
+| heldout | `specs-heldout/` | `.work/out-heldout/` | 13 | 22 | 637 s | 16 | 8 F, 5 M |
+| fresh | `specs-fresh/` | `.work/out-fresh/` | 12 | 20 | 535 s | 13 | 7 F, 5 M |
+
+```sh
+node fixtures/real/plan.mjs --set heldout      # only to change the design: rewrites specs-heldout/*.json
+node fixtures/real/generate.mjs --specs fixtures/real/specs-heldout --out fixtures/real/.work/out-heldout
+cd packages/analyze && KILO_REAL_FIXTURES=../../fixtures/real/.work/out-heldout npm run score:real   # or -- --truth
+```
+
+`plan.mjs` with no `--set` (or `--set dev`) still writes exactly the committed `specs/`.
+
 ## Ground truth
 
 Units are the runs of a line's words between pauses of 0.1 s or more (MFA times moved onto the

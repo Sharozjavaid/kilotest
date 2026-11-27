@@ -1,0 +1,75 @@
+{
+  "id": "fresh_2412",
+  "title": "Real speech, LibriSpeech speaker 2412 (F)",
+  "mode": "general",
+  "speaker": "2412",
+  "script": false,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "1280x720",
+      "gainDb": 0,
+      "leadIn": 1.21,
+      "tail": 0.68,
+      "pieces": [
+        {
+          "utt": "2412-153954-0003",
+          "role": "line",
+          "gainDb": 0.4
+        },
+        {
+          "pause": 0.61
+        },
+        {
+          "utt": "2412-153954-0005",
+          "role": "line",
+          "gainDb": 1.4
+        },
+        {
+          "pause": 0.31
+        },
+        {
+          "utt": "2412-153954-0008",
+          "words": 4,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 1.1
+        },
+        {
+          "pause": 0.96
+        },
+        {
+          "utt": "2412-153954-0008",
+          "role": "line",
+          "group": "g1",
+          "gainDb": -0.3
+        },
+        {
+          "pause": 0.39
+        },
+        {
+          "utt": "2412-153954-0012",
+          "role": "line",
+          "gainDb": -0.3
+        },
+        {
+          "pause": 0.47
+        },
+        {
+          "utt": "2412-153954-0013",
+          "role": "line",
+          "gainDb": 0
+        },
+        {
+          "pause": 0.28
+        },
+        {
+          "utt": "2412-153954-0020",
+          "role": "line",
+          "gainDb": 0.9
+        }
+      ]
+    }
+  ]
+}
