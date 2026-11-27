@@ -223,4 +223,23 @@ The app is named **kilo**, with the line "AI video editor". Light, calm, glassy,
 | Controls | Pill buttons (radius = half height), primary 56 high, secondary 52, minimum touch target 44 |
 | Kept vs cut | Kept: solid `accent`. Cut: white with a `cut` outline, text struck through in `muted`. They differ in lightness, not only hue. |
 
-No emoji. Icons are simple 2px-stroke line icons. Text contrast at least 4.5:1.
+No emoji. Icons are simple 2px-stroke line icons; on iOS, native chrome uses SF Symbols. Text contrast at least 4.5:1.
+
+**Dark mode.** The app follows the system appearance. Dark values:
+
+| Token | Dark |
+|---|---|
+| `ground` | `#0A0F1A` |
+| `skyTint` | `#11244D`, same 36% fade |
+| `surface` | `rgba(28,34,48,0.85)`, `hairline` border, no shadow |
+| `ink` / `muted` | `#F2F5FA` / `#9AA4B5` |
+| `accent` | `#4C7DFF` |
+| `accentGloss` | `#3A72FF` to `#2257F0` |
+| `track` | `#2A3346` |
+| `hairline` / `outline` | `rgba(255,255,255,0.08)` / `rgba(255,255,255,0.16)` |
+| `cut` / `record` | `#F0875A` / `#FF5A45` |
+| Kept vs cut | Kept: solid `accent` bar on a `surface` row. Cut: transparent row, 1px `cut` outline, struck `muted` text. |
+
+The recorder is dark in both modes.
+
+**iOS 26.** Liquid Glass is the control layer only: tab bar, header buttons, floating toolbars, recorder controls, sheets, menus, toasts and small controls over video. Content (cards, transcript rows, chips, lists, the scrub strip) is never glass. One filled accent element per screen, its primary action. `docs/design/ios-redesign.md` is the screen-by-screen brief, with the motion and haptics spec and the fallbacks for older iOS, Android and web.
