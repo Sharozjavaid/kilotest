@@ -14,7 +14,7 @@ Each directory is one independent npm project with its own `node_modules`. There
 | `templates` | `@kilo/templates` | The five motion graphic templates and their renderer. Exports `templates: TemplatesApi`. |
 | `server` | `@kilo/server` | HTTP API, database migrations, storage drivers, auth, job queue and worker, push notifications, goal reminders, the `kilo` command-line tool. |
 | `app` | `kilo` | The Expo app: every screen, the API client, uploads, the recorder. |
-| `fixtures` | — | Synthetic test recordings (`node fixtures/generate.mjs`). Output in `fixtures/out/` is not committed. |
+| `fixtures` | — | Synthetic test recordings (`node fixtures/generate.mjs`), and in `fixtures/real/` recordings assembled from real read speech (LibriSpeech, see its README). Output in `fixtures/out/` and `fixtures/real/.work/` is not committed. |
 
 If you need a change to `@kilo/edl`, do not edit it. Work around it locally and say exactly what you need in your final report.
 
@@ -58,13 +58,17 @@ ingestBroll ──────┴───────────────�
 
 | Concern | Variable | Values | Default |
 |---|---|---|---|
-| Transcription | `KILO_TRANSCRIBER` | `deepgram`, `openai`, `fixture` | `deepgram` if `DEEPGRAM_API_KEY` is set, else `openai` if `OPENAI_API_KEY` is set, else `fixture` |
+| Transcription | `KILO_TRANSCRIBER` | `deepgram`, `openai`, `whisper`, `fixture` | `deepgram` if `DEEPGRAM_API_KEY` is set, else `openai` if `OPENAI_API_KEY` is set, else `fixture`; `whisper` only when named |
 | Edit decisions | `KILO_DECIDER` | `claude`, `heuristic` | `claude` if `ANTHROPIC_API_KEY` is set, else `heuristic` |
 | Claude model | `KILO_CLAUDE_MODEL` | a model id | `claude-fable-5-2` |
 | B-roll description | follows the decider | Claude vision, or file name and probe data | |
 | Stock B-roll | `PEXELS_API_KEY` | | none: `suggestStockBroll` returns `[]` |
 
 `openai` means any endpoint compatible with the OpenAI transcription API (`OPENAI_BASE_URL` overrides the host), asked for word timestamps.
+
+`whisper` runs an open Whisper model on the worker's CPU (faster-whisper, CTranslate2 int8): no key, and no network once installed. It needs Python with `packages/analyze/whisper/requirements.txt` and a downloaded model. `npm run whisper:setup` in `packages/analyze` puts both under `packages/analyze/.work/` (gitignored); the server image does the same with `--build-arg KILO_WITH_WHISPER=1`. Nothing else needs Python. A missing Python, package or model fails the clip with a message naming the fix, and the model is never downloaded during a job unless `KILO_WHISPER_ALLOW_DOWNLOAD=1`. Word times are moved to the measured silences, likely hallucinated or echoed words are dropped, and fillers are flagged by the shared lexicon. Whisper still drops about a third of "um" and "uh" even with Kilo's prompt, so some fillers stay in the edit.
+
+`detectSilence` runs ffmpeg's silencedetect plus a pass against the local room tone, and settles every silence edge where the level is back at room tone, so a cut never starts inside a fading word.
 
 ### The fixture transcriber
 
@@ -183,7 +187,7 @@ Optional, with defaults. `server/.env.example` is the full list for the server.
 | API | `KILO_CORS_ORIGINS` (browser origins allowed, default any), `KILO_MAX_BODY_BYTES`, `KILO_MAX_UPLOAD_BYTES`, `KILO_URL_TTL_SEC`, `KILO_LOCAL_SIGNING_SECRET` |
 | Per-user limits | `KILO_MAX_ACTIVE_VIDEOS`, `KILO_MAX_QUEUED_RENDERS`, `KILO_MAX_REPLANS_PER_HOUR`, `KILO_MAX_BATCHES_PER_DAY` |
 | Worker | `KILO_PIPELINE` (`real` or `fake`), `KILO_PUSH` (`expo` or `log`), `KILO_WORK_DIR`, `KILO_ANALYZE_CONCURRENCY`, `KILO_RENDER_CONCURRENCY`, `KILO_JOB_RETRY_LIMIT`, `KILO_JOB_EXPIRE_SEC` (a job with no heartbeat for this long is retried, default 90), `KILO_STOP_GRACE_MS`, `KILO_SWEEP_GRACE_SEC`, `KILO_ALLOW_STAND_INS` |
-| Analysis | `KILO_DEEPGRAM_MODEL`, `DEEPGRAM_BASE_URL`, `KILO_OPENAI_TRANSCRIBE_MODEL`, `KILO_OPENAI_MAX_UPLOAD_BYTES` |
+| Analysis | `KILO_DEEPGRAM_MODEL`, `DEEPGRAM_BASE_URL`, `KILO_OPENAI_TRANSCRIBE_MODEL`, `KILO_OPENAI_MAX_UPLOAD_BYTES`; for `whisper`: `KILO_WHISPER_PYTHON`, `KILO_WHISPER_MODEL` (default `base.en`), `KILO_WHISPER_CACHE_DIR`, `KILO_WHISPER_THREADS` (default 2), `KILO_WHISPER_PROMPT` (empty: Kilo's prompt that keeps fillers; `none`: no prompt), `KILO_WHISPER_ALLOW_DOWNLOAD` |
 | ffmpeg | `KILO_FFMPEG`, `KILO_FFPROBE` (binary paths), `KILO_FFMPEG_THREADS`, `KILO_RENDER_THREADS`, `KILO_RENDER_PRESET`, and the time limit on one ffmpeg run: `KILO_MEDIA_TIMEOUT_SEC` (a fixed limit), or `KILO_MEDIA_TIMEOUT_FLOOR_SEC` (default 180) and `KILO_MEDIA_TIMEOUT_FACTOR` (seconds allowed per second of media, default 10) |
 | Motion graphics | `KILO_TEMPLATES_CACHE_DIR`, `KILO_TEMPLATES_CACHE_MAX_MB`, `KILO_TEMPLATES_CACHE_MAX_AGE_DAYS`, `KILO_CHROMIUM_PATH`, `REMOTION_LICENSE_KEY` |
 

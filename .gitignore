@@ -21,3 +21,7 @@ app/web-build/
 
 # committed media
 !app/assets/**
+
+# Python
+__pycache__/
+*.pyc
