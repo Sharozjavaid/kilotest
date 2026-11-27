@@ -1,0 +1,6 @@
+# The `whisper` transcriber (packages/analyze/src/whisper.ts). Only needed when KILO_TRANSCRIBER=whisper.
+# Tested on Python 3.13, Linux x86-64, CPU, with faster-whisper 1.2.1, ctranslate2 4.9.1,
+# tokenizers 0.23.3, huggingface_hub 2.5.0 and numpy 2.5.5. kilo_whisper.py reads the WAV itself,
+# so faster-whisper's own decoder (PyAV, which pip also installs) is never used.
+faster-whisper==1.2.1
+ctranslate2==4.9.1

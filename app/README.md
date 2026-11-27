@@ -138,8 +138,8 @@ Profiles in `eas.json`:
 |---|---|---|
 | `development` | Dev client, internal distribution (Android APK) | EAS env `development` |
 | `development-simulator` | Same, for the iOS simulator (no camera there) | EAS env `development` |
-| `preview` | Release build for testers, internal distribution, update channel `preview` | EAS env `preview` |
-| `production` | Store build, build number auto-incremented, channel `production` | EAS env `production` |
+| `preview` | Release build for testers, internal distribution | EAS env `preview` |
+| `production` | Store build, build number auto-incremented. Refuses to build without an `https://` `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` (`app.config.js`), so it can never ship with development sign-in or the mock | EAS env `production` |
 
 Set `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` per EAS environment. Push notifications need the EAS project id (from `eas init`) and, for iOS, push credentials (`eas credentials`).
 
