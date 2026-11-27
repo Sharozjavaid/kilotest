@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { BatchSummary, GoalView } from '@kilo/edl';
 import { useHome } from '@/api/queries';
-import { batchDoneCount, batchProgress, compactNotice, formatDuration, goalLine, plural, reviewSubtitle } from '@/lib/format';
+import { batchDoneCount, batchProgress, finishedSubtitle, goalLine, plural, reviewSubtitle } from '@/lib/format';
 import { VideoRow } from '@/components/VideoRow';
 import {
   Card,
@@ -94,7 +94,7 @@ export default function HomeScreen() {
                 <VideoRow
                   key={v.id}
                   video={v}
-                  subtitle={`${v.keptSec != null ? formatDuration(v.keptSec) : ''}${v.postedAt ? ' · Posted' : ' · Ready to post'}${compactNotice(v.notice) ? ` · ${compactNotice(v.notice)}` : ''}`}
+                  subtitle={finishedSubtitle(v)}
                   divider={i > 0}
                   onPress={() => router.push(`/export/${v.id}`)}
                 />

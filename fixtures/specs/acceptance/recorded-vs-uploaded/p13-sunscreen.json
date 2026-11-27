@@ -1,0 +1,69 @@
+{
+  "id": "p13-sunscreen",
+  "title": "Sunscreen, an improvised better take",
+  "challenge": "The last take departs from the script wording; the creator keeps it.",
+  "script": [
+    "This is the best sunscreen I have ever used.",
+    "It goes on clear and never feels greasy.",
+    "Wear it every single day."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "This is the best sunscreen I have ever used.",
+          "reason": "retake"
+        }
+      ]
+    },
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "Honestly? Best sunscreen I've ever put on my face.",
+          "keep": true
+        }
+      ],
+      "before": 1.3
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "It goes on clear and never feels greasy.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Wear it every",
+          "reason": "false_start"
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "pause": 0.7
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Wear it every single day.",
+          "keep": true
+        }
+      ]
+    }
+  ],
+  "upload": {
+    "splitBefore": [
+      2
+    ]
+  }
+}

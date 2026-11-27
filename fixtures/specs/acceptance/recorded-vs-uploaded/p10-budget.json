@@ -1,0 +1,89 @@
+{
+  "id": "p10-budget",
+  "title": "Saving money, reworded and abandoned takes",
+  "challenge": "A shortened retake, an abandoned last take with an apology, a reworded closing line.",
+  "script": [
+    "I saved two hundred dollars this month.",
+    "I stopped buying coffee out.",
+    "I cooked dinner five nights a week.",
+    "Try it for one month."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "I saved two hundred dollars this month.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "I stopped buying coffee on the way to work.",
+          "reason": "retake"
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "I stopped buying coffee out.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "I cooked dinner five nights a week.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "I cooked dinner five",
+          "reason": "false_start"
+        },
+        {
+          "pause": 0.6
+        },
+        {
+          "say": "ugh, sorry",
+          "aside": true
+        }
+      ],
+      "before": 1.0
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "Try it for one month.",
+          "reason": "retake"
+        }
+      ]
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "Just try it for one month and see.",
+          "keep": true
+        }
+      ]
+    }
+  ],
+  "upload": {
+    "splitBefore": [
+      3
+    ]
+  }
+}

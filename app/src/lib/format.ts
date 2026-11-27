@@ -15,6 +15,13 @@ export function reviewSubtitle(v: VideoSummary): string {
   return notice ? `${line} · ${notice}` : line;
 }
 
+/** Home's Finished row: length, then exporting, posted or ready to post. */
+export function finishedSubtitle(v: VideoSummary): string {
+  const state = v.status === 'rendering' ? 'Exporting' : v.postedAt ? 'Posted' : 'Ready to post';
+  const notice = compactNotice(v.notice);
+  return [v.keptSec != null ? formatDuration(v.keptSec) : null, state, notice].filter(Boolean).join(' · ');
+}
+
 /** A video's notice, short enough for a list row (the Review screen shows it in full). */
 export function compactNotice(notice: string | null | undefined): string | null {
   if (!notice) return null;

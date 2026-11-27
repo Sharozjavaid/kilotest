@@ -1,0 +1,67 @@
+{
+  "id": "br-kitchen",
+  "title": "Weeknight dinner",
+  "mode": "general",
+  "clips": [
+    {
+      "name": "talk",
+      "fps": 30,
+      "units": [
+        {
+          "say": "Okay so here is my fastest weeknight dinner."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "First I chop two onions really thin."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "Then the garlic goes in the pan with olive oil."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "It simmers for twenty minutes while I set the table."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "Honestly my kids ask for this every week."
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "onion_chopping.mp4",
+      "kind": "video",
+      "label": "onions chopped",
+      "durationSec": 4
+    },
+    {
+      "file": "garlic_pan.jpg",
+      "kind": "image",
+      "label": "garlic in pan",
+      "color": "0x355C7D"
+    },
+    {
+      "file": "kitchen_timer.jpg",
+      "kind": "image",
+      "label": "kitchen timer",
+      "color": "0x355C7D"
+    }
+  ],
+  "expect": {
+    "broll": {
+      "onion_chopping.mp4": "chop two onions",
+      "garlic_pan.jpg": "garlic goes in the pan",
+      "kitchen_timer.jpg": "twenty minutes"
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "id": "p12-hair-steps",
+  "title": "Hair steps, a misread that matches the previous line",
+  "challenge": "A take of step two misreads it as step one; steps share most of their words.",
+  "script": [
+    "Step one, wet your hair.",
+    "Step two, wet the brush.",
+    "Step three, brush from the ends up."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "Step one, wet your hair.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "Step two, wet your hair.",
+          "reason": "retake"
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "Step two, wet the brush.",
+          "keep": true
+        }
+      ],
+      "before": 0.9
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Step three, brush from the ends up.",
+          "keep": true
+        }
+      ]
+    }
+  ]
+}

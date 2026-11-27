@@ -48,7 +48,11 @@ export interface Config {
 export interface Limits {
   /** Videos uploading, queued or analysing at once (`KILO_MAX_ACTIVE_VIDEOS`). */
   activeVideos: number;
-  /** Renders queued or rendering at once (`KILO_MAX_QUEUED_RENDERS`). */
+  /**
+   * Renders queued or rendering at once (`KILO_MAX_QUEUED_RENDERS`). The default fits a whole
+   * batch exported at once: 50 videos (the most a batch holds) with 5 openings each, plus previews.
+   * Jobs are served round-robin between users, so a long queue holds up nobody else.
+   */
   queuedRenders: number;
   /** Replans of one video in an hour (`KILO_MAX_REPLANS_PER_HOUR`). */
   replansPerHour: number;
@@ -56,7 +60,7 @@ export interface Limits {
   batchesPerDay: number;
 }
 
-export const DEFAULT_LIMITS: Limits = { activeVideos: 150, queuedRenders: 30, replansPerHour: 12, batchesPerDay: 40 };
+export const DEFAULT_LIMITS: Limits = { activeVideos: 150, queuedRenders: 300, replansPerHour: 12, batchesPerDay: 40 };
 export const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 function int(value: string | undefined, fallback: number, name: string): number {

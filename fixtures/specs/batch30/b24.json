@@ -1,0 +1,43 @@
+{
+  "id": "b24",
+  "title": "Sneaker cleaning",
+  "clips": [
+    {
+      "name": "b24_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.3,
+      "tail": 0.7,
+      "units": [
+        {
+          "say": "White sneakers, good as new, for one dollar.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g0"
+        },
+        {
+          "pause": 1.3
+        },
+        {
+          "say": "White sneakers, good as new, for one dollar.",
+          "group": "g0"
+        },
+        {
+          "say": "Baking soda and a little dish soap.",
+          "group": "g1"
+        },
+        {
+          "say": "Scrub with an old toothbrush.",
+          "group": "g2"
+        },
+        {
+          "say": "Wipe them and let them dry in the shade.",
+          "group": "g3"
+        },
+        {
+          "pause": 1.2
+        }
+      ]
+    }
+  ]
+}

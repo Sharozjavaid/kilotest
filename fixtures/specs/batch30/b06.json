@@ -1,0 +1,84 @@
+{
+  "id": "b06",
+  "title": "Five minute pasta",
+  "clips": [
+    {
+      "name": "b06_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.4,
+      "tail": 0.9,
+      "units": [
+        {
+          "say": "hold on",
+          "keep": false,
+          "reason": "off_script"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "Dinner in five minutes, no excuses.",
+          "group": "g0"
+        }
+      ]
+    },
+    {
+      "name": "b06_take2",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.4,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Boil thin noodles for three minutes.",
+          "group": "g1"
+        },
+        {
+          "pause": 2
+        }
+      ]
+    },
+    {
+      "name": "b06_take3",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.6,
+      "tail": 1.2,
+      "units": [
+        {
+          "say": "Toss them with butter, garlic and lemon.",
+          "group": "g2"
+        },
+        {
+          "say": "Grate a lot of cheese on top.",
+          "group": "g3"
+        }
+      ]
+    },
+    {
+      "name": "b06_take4",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.4,
+      "tail": 1.2,
+      "units": [
+        {
+          "say": "That is it, go eat.",
+          "group": "g4"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "pause": 1.8
+        },
+        {
+          "say": "let me do that again",
+          "keep": false,
+          "reason": "off_script"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "id": "b04",
+  "title": "Plant care",
+  "clips": [
+    {
+      "name": "b04_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.6,
+      "tail": 1.1,
+      "units": [
+        {
+          "say": "Your plants are dying for one simple reason.",
+          "group": "g0"
+        }
+      ]
+    },
+    {
+      "name": "b04_take2",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.6,
+      "tail": 0.9,
+      "units": [
+        {
+          "say": "You water",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g1"
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "say": "You water them on a schedule.",
+          "group": "g1"
+        },
+        {
+          "filler": "er"
+        },
+        {
+          "say": "Push a finger into the soil instead.",
+          "group": "g2"
+        },
+        {
+          "say": "If it, wait, no",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g3"
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "If it is dry to the knuckle, water it.",
+          "group": "g3"
+        },
+        {
+          "pause": 1.9
+        },
+        {
+          "pause": 1
+        },
+        {
+          "say": "If not, leave, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g4"
+        }
+      ]
+    },
+    {
+      "name": "b04_take3",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.5,
+      "units": [
+        {
+          "say": "If not, leave it alone.",
+          "group": "g4"
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "pause": 1.2
+        }
+      ]
+    }
+  ]
+}

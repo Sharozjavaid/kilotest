@@ -1,0 +1,82 @@
+{
+  "id": "b05",
+  "title": "Running shoes",
+  "clips": [
+    {
+      "name": "b05_take1",
+      "fps": 60,
+      "size": "1280x720",
+      "leadIn": 0.6,
+      "tail": 1,
+      "units": [
+        {
+          "say": "I ran two hundred miles in these shoes.",
+          "group": "g0"
+        },
+        {
+          "filler": "er"
+        },
+        {
+          "say": "The cushion, wait, no",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g1"
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "The cushion is still soft at the heel.",
+          "group": "g1"
+        },
+        {
+          "say": "The grip is fine on wet roads.",
+          "group": "g2"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "say": "The only problem is the narrow toe box.",
+          "group": "g3"
+        },
+        {
+          "pause": 2.3
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "Seven out of ten, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g4"
+        },
+        {
+          "pause": 1.5
+        },
+        {
+          "say": "Seven out of ten from me.",
+          "group": "g4"
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "b05_photo1.jpg",
+      "kind": "image",
+      "label": "Running shoes photo 1",
+      "color": "0x8A6A2F"
+    },
+    {
+      "file": "b05_shot2.mp4",
+      "kind": "video",
+      "label": "Running shoes shot 2",
+      "durationSec": 4
+    }
+  ]
+}

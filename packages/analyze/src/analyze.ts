@@ -58,10 +58,32 @@ export const NO_SPEECH_MESSAGE = "We couldn't hear any speech in this video, so 
 
 /** Something about a decided edit worth telling the creator. `message` is safe to show. */
 export interface DecideNotice {
-  code: 'no_speech';
+  code: 'no_speech' | 'few_openings';
   message: string;
   /** True when no speech-to-text ran at all (the offline fixture transcriber had no transcript). */
   transcriptUnavailable: boolean;
+}
+
+/**
+ * The notice for an edit that has fewer hook variations than the creator asked for,
+ * because the recording has fewer lines that work as a first line. Null when it has
+ * all of them.
+ */
+export function fewOpeningsNotice(edl: Edl): DecideNotice | null {
+  const wanted = edl.settings.hookVariations;
+  if (wanted <= 1) return null;
+  const got = edl.variants.length;
+  const openings = new Set(edl.variants.map((v) => v.segmentOrder[0])).size;
+  if (got >= wanted && openings >= wanted) return null;
+  let message: string;
+  if (got === 0) message = `Only one line in this video works as an opening, so it has no hook variations (you asked for ${wanted})`;
+  else if (openings < got) {
+    message =
+      `Only ${openings} ${openings === 1 ? 'line' : 'lines'} in this video ${openings === 1 ? 'works' : 'work'} as an opening, so ` +
+      `${got - openings === 1 ? 'one hook variation puts' : `${got - openings} hook variations put`} a title card over the same first line`;
+    if (got < wanted) message += `, and there are ${got} instead of ${wanted}`;
+  } else message = `Only ${got} lines in this video work as an opening, so it has ${got} hook variations instead of ${wanted}`;
+  return { code: 'few_openings', message, transcriptUnavailable: false };
 }
 
 /**
@@ -439,7 +461,9 @@ export function createAnalyze(opts: AnalyzeOptions = {}): Analyze {
         }, input.broll)
       : null;
     const edl = finish(runPasses(base, input, ['broll', 'graphics', 'variants'], passPlan), input.clips);
-    return { edl, notices };
+    // Claude may choose a title card on purpose; the notice explains the heuristic's fallback.
+    const few = noSpeech || edl.decidedBy !== 'heuristic' ? null : fewOpeningsNotice(edl);
+    return { edl, notices: few ? [...notices, few] : notices };
   }
 
   async function decideEdit(raw: DecideInput): Promise<Edl> {

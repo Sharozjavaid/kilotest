@@ -1,0 +1,151 @@
+{
+  "id": "b27",
+  "title": "Small business week",
+  "clips": [
+    {
+      "name": "b27_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.8,
+      "tail": 0.7,
+      "units": [
+        {
+          "say": "A week of running",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g0"
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "say": "A week of running my candle business from a spare room.",
+          "group": "g0"
+        },
+        {
+          "pause": 2.6
+        },
+        {
+          "say": "Monday is pouring day, forty candles in one go.",
+          "group": "g1"
+        },
+        {
+          "pause": 1.3
+        },
+        {
+          "say": "The wax has to cool slowly or the, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g2"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "The wax has to cool slowly or the tops crack.",
+          "group": "g2"
+        }
+      ]
+    },
+    {
+      "name": "b27_take2",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.4,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Tuesday I take the photos by the window, before noon.",
+          "group": "g3"
+        },
+        {
+          "say": "Wednesday is packing, no, again",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g4"
+        },
+        {
+          "pause": 1.6
+        },
+        {
+          "say": "Wednesday is packing orders, and it always takes longer than planned.",
+          "group": "g4"
+        },
+        {
+          "pause": 2.7
+        },
+        {
+          "say": "Every box gets a handwritten note.",
+          "group": "g5"
+        },
+        {
+          "say": "Thursday I answer messages and post three videos.",
+          "group": "g6"
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "pause": 1.6
+        },
+        {
+          "say": "Friday is the post, sorry",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g7"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "Friday is the post office run.",
+          "group": "g7"
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "This week we shipped eighty two orders.",
+          "group": "g8"
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "pause": 3.2
+        },
+        {
+          "say": "That is our best week since we started.",
+          "group": "g9"
+        },
+        {
+          "pause": 2.6
+        },
+        {
+          "say": "The hardest part is still saying no to custom requests.",
+          "group": "g10"
+        },
+        {
+          "pause": 2.8
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "If you have a small business, tell me what yours is.",
+          "group": "g11"
+        },
+        {
+          "pause": 2.7
+        },
+        {
+          "say": "I read every comment.",
+          "group": "g12"
+        },
+        {
+          "pause": 1.6
+        }
+      ]
+    }
+  ]
+}

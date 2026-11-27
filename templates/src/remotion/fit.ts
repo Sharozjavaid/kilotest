@@ -63,12 +63,12 @@ export function fontCss(font: FontSpec, size: number): React.CSSProperties {
  * minimising the widest line (balanced lines, no orphan word on the last line).
  * Returns the index where each line starts.
  */
-function balancedBreaks(widths: number[], gap: number, lines: number): number[] {
+function balancedBreaks(widths: number[], gaps: number[], lines: number): number[] {
   const n = widths.length;
   const lineWidth = (i: number, j: number) => {
     let w = 0;
-    for (let x = i; x < j; x++) w += widths[x]!;
-    return w + gap * (j - i - 1);
+    for (let x = i; x < j; x++) w += widths[x]! + (x > i ? gaps[x]! : 0);
+    return w;
   };
   // best[k][i]: minimal max width placing the first i items on k lines.
   const best: number[][] = Array.from({ length: lines + 1 }, () => new Array<number>(n + 1).fill(Infinity));
@@ -98,10 +98,11 @@ function balancedBreaks(widths: number[], gap: number, lines: number): number[] 
   return starts;
 }
 
-function greedyLineCount(widths: number[], gap: number, maxWidth: number): number {
+function greedyLineCount(widths: number[], gaps: number[], maxWidth: number): number {
   let lines = 1;
   let cur = 0;
-  for (const w of widths) {
+  for (const [i, w] of widths.entries()) {
+    const gap = gaps[i]!;
     if (cur === 0) cur = w;
     else if (cur + gap + w <= maxWidth) cur += gap + w;
     else {
@@ -129,6 +130,8 @@ export interface FlowOptions {
   unit: number[];
   /** Gap between items at 1px. */
   gapUnit: number;
+  /** Per item: the gap before it at 1px, when not `gapUnit` (0 for characters of a script written without spaces). */
+  gapsBeforeUnit?: number[];
   maxWidth: number;
   /** Height of one line at 1px (line-height or chip height plus row gap). */
   lineUnit: number;
@@ -146,18 +149,19 @@ export function fitFlow(o: FlowOptions): FlowFit | null {
   for (let size = Math.floor(o.maxSize); size >= o.minSize; size--) {
     const widths = o.unit.map((u) => u * size);
     if (widths.some((w) => w > o.maxWidth)) continue;
-    const count = greedyLineCount(widths, o.gapUnit * size, o.maxWidth);
+    const gaps = o.unit.map((_, i) => (o.gapsBeforeUnit?.[i] ?? o.gapUnit) * size);
+    const count = greedyLineCount(widths, gaps, o.maxWidth);
     if (count > o.maxLines) continue;
     const height = count * o.lineUnit * size + (count - 1) * rowGap * size;
     if (height > o.maxHeight) continue;
-    const starts = balancedBreaks(widths, o.gapUnit * size, Math.min(count, n));
+    const starts = balancedBreaks(widths, gaps, Math.min(count, n));
     const lines: number[][] = [];
     for (let k = 0; k < starts.length; k++) {
       const s = starts[k]!;
       const e = k + 1 < starts.length ? starts[k + 1]! : n;
       lines.push(Array.from({ length: e - s }, (_, x) => s + x));
     }
-    const lineWidths = lines.map((ix) => ix.reduce((a, i) => a + widths[i]!, 0) + (ix.length - 1) * o.gapUnit * size);
+    const lineWidths = lines.map((ix) => ix.reduce((a, i, k) => a + widths[i]! + (k > 0 ? gaps[i]! : 0), 0));
     if (lineWidths.some((w) => w > o.maxWidth)) continue;
     return { size, lines, lineWidths };
   }
@@ -169,7 +173,69 @@ export interface TextFit {
   /** Lines of words. */
   lines: string[][];
   lineWidths: number[];
+  /**
+   * Line pitch in em to draw with: the requested line height, or more when the text's
+   * own ink is taller (marks above capitals, emoji), so adjacent lines never touch.
+   */
+  line: number;
 }
+
+/** Scripts written without spaces: a line may break between any two of their characters. */
+const NO_SPACE_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}\u3000-\u303f\uff00-\uffef]/u;
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/** Words split further into characters where the script has no spaces; `glued` tokens join the one before without a space. */
+function tokenize(text: string): Array<{ text: string; glued: boolean }> {
+  const out: Array<{ text: string; glued: boolean }> = [];
+  for (const word of text.trim().split(/\s+/).filter(Boolean)) {
+    if (!NO_SPACE_SCRIPT.test(word)) {
+      out.push({ text: word, glued: false });
+      continue;
+    }
+    let first = true;
+    let run = '';
+    for (const { segment } of segmenter.segment(word)) {
+      // Characters of other scripts stay together ("SPF50", "1,980").
+      if (NO_SPACE_SCRIPT.test(segment) || !run) {
+        if (run) {
+          out.push({ text: run, glued: !first });
+          first = false;
+        }
+        run = segment;
+        if (NO_SPACE_SCRIPT.test(segment)) {
+          out.push({ text: run, glued: !first });
+          first = false;
+          run = '';
+        }
+      } else run += segment;
+    }
+    if (run) out.push({ text: run, glued: !first });
+  }
+  return out;
+}
+
+/** Rebuilds lines of words from lines of tokens, joining glued tokens. */
+function joinTokens(tokens: Array<{ text: string; glued: boolean }>, line: number[]): string[] {
+  const words: string[] = [];
+  line.forEach((i, k) => {
+    const t = tokens[i]!;
+    if (k > 0 && t.glued) words[words.length - 1] += t.text;
+    else words.push(t.text);
+  });
+  return words;
+}
+
+/** Height of the text's ink at 1px: the tallest ascent plus the deepest descent of any character. */
+function inkHeight(text: string, font: FontSpec): number {
+  unitWidth(' ', font); // creates the context
+  const size = 200;
+  ctx!.font = `${font.weight} ${size}px ${familyList(font)}`;
+  const m = ctx!.measureText(font.uppercase ? text.toUpperCase() : text);
+  return (m.actualBoundingBoxAscent + m.actualBoundingBoxDescent) / size;
+}
+
+/** Space kept between the ink of two lines, in em. */
+const LINE_INK_GAP = 0.06;
 
 export interface TextOptions {
   font: FontSpec;
@@ -200,21 +266,24 @@ function breakWord(word: string, font: FontSpec, size: number, maxWidth: number)
 
 /** Fits text into a box: the largest size at which it wraps into at most `maxLines` balanced lines. */
 export function fitText(text: string, o: TextOptions): TextFit {
-  const words = text.trim().split(/\s+/).filter(Boolean);
+  const tokens = tokenize(text);
+  const words = tokens.map((t) => t.text);
   const space = unitWidth(' ', o.font);
   const unit = words.map((w) => unitWidth(w, o.font));
+  const line = Math.max(o.lineHeight, inkHeight(text, o.font) + LINE_INK_GAP);
   const flow = fitFlow({
     unit,
     gapUnit: space,
+    gapsBeforeUnit: tokens.map((t) => (t.glued ? 0 : space)),
     maxWidth: o.maxWidth,
-    lineUnit: o.lineHeight,
+    lineUnit: line,
     maxHeight: o.maxHeight,
     maxLines: o.maxLines,
     maxSize: o.maxSize,
     minSize: o.minSize,
   });
   if (flow) {
-    return { size: flow.size, lines: flow.lines.map((ix) => ix.map((i) => words[i]!)), lineWidths: flow.lineWidths };
+    return { size: flow.size, lines: flow.lines.map((ix) => joinTokens(tokens, ix)), lineWidths: flow.lineWidths, line };
   }
   // Only reachable for pathological input (a very long single word): break words.
   const floor = o.floorSize ?? Math.max(8, Math.floor(o.minSize * 0.5));
@@ -239,14 +308,14 @@ export function fitText(text: string, o: TextOptions): TextFit {
       }
     }
     if (cur.length) lines.push(cur);
-    const height = lines.length * o.lineHeight * size;
+    const height = lines.length * line * size;
     if (lines.length <= Math.max(o.maxLines, 1) * 2 && height <= o.maxHeight) {
-      return { size, lines, lineWidths: lines.map((l) => measure(l.join(' '), o.font, size)) };
+      return { size, lines, lineWidths: lines.map((l) => measure(l.join(' '), o.font, size)), line };
     }
   }
   const size = floor;
   const lines = words.flatMap((w) => breakWord(w, o.font, size, o.maxWidth)).map((w) => [w]);
-  return { size, lines, lineWidths: lines.map((l) => measure(l.join(' '), o.font, size)) };
+  return { size, lines, lineWidths: lines.map((l) => measure(l.join(' '), o.font, size)), line };
 }
 
 /** Widest of several single-line strings at 1px. */

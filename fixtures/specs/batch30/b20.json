@@ -1,0 +1,81 @@
+{
+  "id": "b20",
+  "title": "Hair tie trick",
+  "clips": [
+    {
+      "name": "b20_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.6,
+      "tail": 0.8,
+      "units": [
+        {
+          "say": "one more time",
+          "keep": false,
+          "reason": "off_script"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "The hair tie trick nobody shows you.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.9
+        },
+        {
+          "pause": 0.7
+        },
+        {
+          "say": "Loop it twice around, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g1"
+        }
+      ]
+    },
+    {
+      "name": "b20_take2",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.4,
+      "tail": 1,
+      "units": [
+        {
+          "say": "Loop it twice around the bun.",
+          "group": "g1"
+        }
+      ]
+    },
+    {
+      "name": "b20_take3",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.7,
+      "tail": 0.8,
+      "units": [
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "Pull the last loop over the top.",
+          "group": "g2"
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "It holds all day without a headache.",
+          "group": "g3"
+        },
+        {
+          "pause": 2.1
+        }
+      ]
+    }
+  ]
+}

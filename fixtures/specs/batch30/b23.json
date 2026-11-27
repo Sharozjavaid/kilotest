@@ -1,0 +1,110 @@
+{
+  "id": "b23",
+  "title": "Sleep routine",
+  "clips": [
+    {
+      "name": "b23_take1",
+      "fps": 30,
+      "size": "1280x720",
+      "leadIn": 0.3,
+      "tail": 1.1,
+      "units": [
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "I fall asleep in ten minutes now.",
+          "group": "g0"
+        }
+      ]
+    },
+    {
+      "name": "b23_take2",
+      "fps": 30,
+      "size": "1280x720",
+      "leadIn": 0.6,
+      "tail": 0.5,
+      "units": [
+        {
+          "say": "Same bedtime even, sorry",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g1"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "Same bedtime, even on weekends.",
+          "group": "g1"
+        },
+        {
+          "pause": 1.9
+        }
+      ]
+    },
+    {
+      "name": "b23_take3",
+      "fps": 30,
+      "size": "1280x720",
+      "leadIn": 0.8,
+      "tail": 1.2,
+      "units": [
+        {
+          "say": "No screens for the last half hour.",
+          "group": "g2"
+        },
+        {
+          "filler": "er"
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "The room is cold and completely dark.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g3"
+        }
+      ]
+    },
+    {
+      "name": "b23_take4",
+      "fps": 30,
+      "size": "1280x720",
+      "leadIn": 0.3,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "The room is cold and completely dark.",
+          "group": "g3"
+        },
+        {
+          "pause": 1.9
+        }
+      ]
+    },
+    {
+      "name": "b23_take5",
+      "fps": 30,
+      "size": "1280x720",
+      "leadIn": 0.5,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Give it",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g4"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "Give it two weeks.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

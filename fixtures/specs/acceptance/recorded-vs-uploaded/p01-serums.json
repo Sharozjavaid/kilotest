@@ -1,0 +1,70 @@
+{
+  "id": "p01-serums",
+  "title": "Three serums, near-identical lines",
+  "challenge": "Script lines differ by one word; an abandoned take of line 2 sounds like line 1.",
+  "script": [
+    "This one is for dry skin.",
+    "This one is for oily skin.",
+    "And this one is for everyone.",
+    "Pick the one that matches your skin."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "This one is for dry skin.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "This one is for dry",
+          "reason": "false_start"
+        }
+      ],
+      "before": 0.9
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "This one is for oily skin.",
+          "keep": true
+        }
+      ],
+      "before": 1.0
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "And this one is for everyone.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "Pick the one that matches your skin.",
+          "reason": "retake"
+        }
+      ]
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "Pick the one that matches your skin.",
+          "keep": true
+        }
+      ],
+      "before": 1.6
+    }
+  ]
+}

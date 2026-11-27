@@ -1,0 +1,66 @@
+{
+  "id": "p04-blender",
+  "title": "Travel blender, price aside",
+  "challenge": "A wrong-number retake and an aside that repeats the price line as a question.",
+  "script": [
+    "This blender fits in a cup holder.",
+    "It charges over USB in an hour.",
+    "The price is thirty dollars.",
+    "Link is in my bio."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "This blender fits in a cup holder.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "It charges over USB in about an hour.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "The price is twenty dollars.",
+          "reason": "retake"
+        },
+        {
+          "pause": 0.7
+        },
+        {
+          "say": "wait, is it twenty or thirty dollars?",
+          "aside": true
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "The price is thirty dollars.",
+          "keep": true
+        }
+      ],
+      "before": 2.0
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "Link is in my bio.",
+          "keep": true
+        }
+      ]
+    }
+  ]
+}

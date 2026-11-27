@@ -1,0 +1,67 @@
+{
+  "id": "br-workout",
+  "title": "Morning workout",
+  "mode": "general",
+  "clips": [
+    {
+      "name": "talk",
+      "fps": 30,
+      "units": [
+        {
+          "say": "This is the workout I do every single morning."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "I start with ten push ups on the floor."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "Then I go for a short run around the park."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "I finish with a cold shower and a big glass of water."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "Try it tomorrow and tell me how it went."
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "pushups_floor.mp4",
+      "kind": "video",
+      "label": "push ups",
+      "durationSec": 4
+    },
+    {
+      "file": "running_park.mp4",
+      "kind": "video",
+      "label": "running in park",
+      "durationSec": 3
+    },
+    {
+      "file": "glass_of_water.jpg",
+      "kind": "image",
+      "label": "glass of water",
+      "color": "0x355C7D"
+    }
+  ],
+  "expect": {
+    "broll": {
+      "pushups_floor.mp4": "ten push ups",
+      "running_park.mp4": "run around the park",
+      "glass_of_water.jpg": "glass of water"
+    }
+  }
+}

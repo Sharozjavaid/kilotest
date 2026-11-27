@@ -1,0 +1,95 @@
+{
+  "id": "b21",
+  "title": "Headphones unboxing",
+  "clips": [
+    {
+      "name": "b21_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.4,
+      "tail": 0.5,
+      "units": [
+        {
+          "say": "Unboxing the headphones everyone keeps asking about.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g0"
+        },
+        {
+          "pause": 1
+        },
+        {
+          "say": "Unboxing the headphones everyone keeps asking about.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.8
+        },
+        {
+          "say": "The case is tiny, smaller than my palm.",
+          "group": "g1"
+        },
+        {
+          "pause": 2.5
+        },
+        {
+          "say": "They pair the moment you open the, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g2"
+        },
+        {
+          "pause": 0.7
+        },
+        {
+          "say": "They pair the moment you open the lid.",
+          "group": "g2"
+        },
+        {
+          "pause": 2.1
+        },
+        {
+          "say": "The noise cancelling is honestly scary, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g3"
+        },
+        {
+          "pause": 1.3
+        },
+        {
+          "say": "The noise cancelling is honestly scary good.",
+          "group": "g3"
+        },
+        {
+          "say": "Full review on Friday.",
+          "group": "g4"
+        },
+        {
+          "pause": 1.2
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "b21_photo1.jpg",
+      "kind": "image",
+      "label": "Headphones unboxing photo 1",
+      "color": "0x7D3535"
+    },
+    {
+      "file": "b21_shot2.mp4",
+      "kind": "video",
+      "label": "Headphones unboxing shot 2",
+      "durationSec": 5
+    },
+    {
+      "file": "b21_photo3.jpg",
+      "kind": "image",
+      "label": "Headphones unboxing photo 3",
+      "color": "0x8A6A2F",
+      "size": "1600x1200"
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+{
+  "id": "b07",
+  "title": "Phone camera tips",
+  "clips": [
+    {
+      "name": "b07_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.8,
+      "tail": 1,
+      "units": [
+        {
+          "say": "one more time",
+          "keep": false,
+          "reason": "off_script"
+        },
+        {
+          "pause": 1
+        },
+        {
+          "filler": "er"
+        },
+        {
+          "say": "Your phone camera can do so much more.",
+          "group": "g0"
+        },
+        {
+          "say": "Wipe the lens before every shot.",
+          "group": "g1"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "Tap to focus, then slide down, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g2"
+        },
+        {
+          "pause": 1.5
+        },
+        {
+          "say": "Tap to focus, then slide down to darken.",
+          "group": "g2"
+        }
+      ]
+    },
+    {
+      "name": "b07_take2",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.8,
+      "tail": 0.9,
+      "units": [
+        {
+          "say": "Turn on the grid and keep the horizon straight.",
+          "group": "g3"
+        },
+        {
+          "say": "Follow for part two.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g4"
+        },
+        {
+          "pause": 1.6
+        },
+        {
+          "say": "Follow for part two.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

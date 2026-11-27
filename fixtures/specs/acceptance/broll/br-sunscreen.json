@@ -1,0 +1,69 @@
+{
+  "id": "br-sunscreen",
+  "title": "Sunscreen month, with a retake",
+  "mode": "general",
+  "clips": [
+    {
+      "name": "talk",
+      "fps": 30,
+      "units": [
+        {
+          "say": "I tried this sunscreen every day for a month."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "It goes on clear with no white cast at all."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "I reapply it at the pool every",
+          "keep": false,
+          "reason": "retake"
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "I reapply it at the beach every two hours."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "And the tube fits in my smallest bag."
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "beach_umbrella.mp4",
+      "kind": "video",
+      "label": "beach",
+      "durationSec": 4
+    },
+    {
+      "file": "small_bag_tube.jpg",
+      "kind": "image",
+      "label": "tube in bag",
+      "color": "0x355C7D"
+    },
+    {
+      "file": "clear_skin_closeup.jpg",
+      "kind": "image",
+      "label": "clear skin",
+      "color": "0x355C7D"
+    }
+  ],
+  "expect": {
+    "broll": {
+      "beach_umbrella.mp4": "at the beach",
+      "small_bag_tube.jpg": "fits in my smallest bag",
+      "clear_skin_closeup.jpg": "goes on clear"
+    }
+  }
+}

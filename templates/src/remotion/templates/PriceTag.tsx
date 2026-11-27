@@ -43,7 +43,7 @@ export const PriceTag: React.FC<TemplateComponentProps<PriceTagProps>> = ({ prop
     const priceW = measure(props.price, f.heavy, size);
     const compareW = compareAt ? measure(compareAt, f.display, compareSize) : 0;
     const labelFit = label
-      ? fitText(label, { font: f.label, maxWidth: maxInner - 64, maxHeight: 200, lineHeight: 1.15, maxLines: 2, maxSize: 50, minSize: 30 })
+      ? fitText(label, { font: f.label, maxWidth: maxInner - 64, maxHeight: 200, lineHeight: 1.15, maxLines: 2, maxSize: 50, minSize: 36, floorSize: 36 })
       : null;
     const contentW = row ? priceW + compareW + ROW_GAP * size : Math.max(priceW, compareW);
     const labelW = labelFit ? Math.max(...labelFit.lineWidths) + labelFit.size * 1.4 : 0;
@@ -82,6 +82,7 @@ export const PriceTag: React.FC<TemplateComponentProps<PriceTagProps>> = ({ prop
     >
       <span style={{ ...fontCss(f.display, cs), lineHeight: `${cs * 1.1}px` }}>{compareAt}</span>
       <div
+        data-probe="decoration"
         style={{
           position: 'absolute',
           left: '-5%',
@@ -143,7 +144,7 @@ export const PriceTag: React.FC<TemplateComponentProps<PriceTagProps>> = ({ prop
           }}
         >
           {lf.lines.map((line, i) => (
-            <div key={i} style={{ ...fontCss(f.label, lf.size), lineHeight: `${lf.size * 1.15}px` }}>
+            <div key={i} style={{ ...fontCss(f.label, lf.size), lineHeight: `${lf.size * lf.line}px` }}>
               {line.join(' ')}
             </div>
           ))}

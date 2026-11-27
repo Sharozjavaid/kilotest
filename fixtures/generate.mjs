@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Builds synthetic test recordings with known word timings and known right answers.
-// Needs ffmpeg and espeak-ng. Usage: node fixtures/generate.mjs [--only <id>] [--out <dir>]
+// Needs ffmpeg and espeak-ng. Usage: node fixtures/generate.mjs [--only <id>] [--out <dir>] [--specs <dir>]
+//
+// --specs reads the specs from another folder (default fixtures/specs); only those specs' output
+// folders are replaced. Any other argument is refused, so a typo cannot regenerate everything.
 //
 // For each spec in fixtures/specs/*.json this writes, under fixtures/out/<id>/:
 //   <clip>.mp4          the recording (speech with pauses, fillers, retakes)
@@ -18,6 +21,12 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const argOf = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
+for (let i = 0; i < args.length; i += 2) {
+  if (!['--only', '--out', '--specs'].includes(args[i]) || args[i + 1] === undefined) {
+    console.error(`generate.mjs: unknown or incomplete argument "${args[i]}". Usage: [--only <id>] [--out <dir>] [--specs <dir>]`);
+    process.exit(2);
+  }
+}
 const outRoot = resolve(argOf('--out') ?? join(here, 'out'));
 const only = argOf('--only');
 const FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
@@ -159,7 +168,7 @@ function buildBroll(asset, dir) {
   return { ...asset, file: `broll/${asset.file}` };
 }
 
-const specDir = join(here, 'specs');
+const specDir = resolve(argOf('--specs') ?? join(here, 'specs'));
 for (const name of readdirSync(specDir).filter((f) => f.endsWith('.json')).sort()) {
   const spec = JSON.parse(readFileSync(join(specDir, name), 'utf8'));
   if (only && spec.id !== only) continue;

@@ -248,6 +248,32 @@ function splitByGroups(
   return parts;
 }
 
+/**
+ * A cut stretch of words also holds the dead air around them, up to the next kept word. Where
+ * that silence is longer than a pause the edit keeps, it becomes a segment of its own, so putting the
+ * words back with one tap does not put the pause back with them.
+ */
+function carveSilence(part: { start: number; end: number; states: WordState[] }, settings: EditSettings, fps: number): Array<{ start: number; end: number; states: WordState[] }> {
+  if (!part.states.length) return [part];
+  const p = PACING_PARAMS[settings.pacing];
+  const room = Math.max(p.cutPaddingSec, p.keptPauseSec / 2);
+  const minLen = MIN_FRAMES / fps;
+  const first = Math.min(...part.states.map((s) => s.word.start));
+  const last = Math.max(...part.states.map((s) => s.word.end));
+  let a = frameFloor(first - room, fps);
+  let b = frameCeil(last + room, fps);
+  // Silence beyond that room is carved off once it is longer than a pause the edit would keep.
+  const carve = Math.max(minLen, p.keptPauseSec);
+  if (!(a - part.start > carve)) a = part.start;
+  if (!(part.end - b > carve)) b = part.end;
+  if (a === part.start && b === part.end) return [part];
+  const out: Array<{ start: number; end: number; states: WordState[] }> = [];
+  if (a > part.start) out.push({ start: part.start, end: a, states: [] });
+  out.push({ start: a, end: b, states: part.states });
+  if (b < part.end) out.push({ start: b, end: part.end, states: [] });
+  return out;
+}
+
 function dominantReason(states: WordState[]): SegmentReason {
   if (!states.length) return 'dead_air';
   const dur = new Map<SegmentReason, number>();
@@ -287,7 +313,9 @@ export function snapSegments(input: {
       return {
         word: w,
         keep: chunkKeep && !fillerCut,
-        reason: !chunkKeep ? d!.reason : fillerCut ? 'filler' : 'speech',
+        // A filler stays a filler inside a cut take, so it gets a segment of its own: putting the
+        // take back with one tap must not put its "um" back too.
+        reason: fillerCut ? 'filler' : !chunkKeep ? d!.reason : 'speech',
         chunkId: chunk?.id ?? -1,
       };
     });
@@ -313,7 +341,9 @@ export function snapSegments(input: {
     for (const r of ranges) {
       const parts = r.keep
         ? splitByGroups(r.start, r.end, states.filter((s) => s.keep), (s) => String(s.chunkId), clipFps)
-        : splitByGroups(r.start, r.end, states.filter((s) => !s.keep), (s) => `${s.chunkId}:${s.reason}`, clipFps);
+        : splitByGroups(r.start, r.end, states.filter((s) => !s.keep), (s) => `${s.chunkId}:${s.reason}`, clipFps).flatMap((part) =>
+            carveSilence(part, settings, clipFps),
+          );
       for (const part of parts) {
         segments.push({
           id: '',

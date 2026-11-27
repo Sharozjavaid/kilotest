@@ -1,0 +1,108 @@
+{
+  "id": "b03",
+  "title": "Budget rules",
+  "clips": [
+    {
+      "name": "b03_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.7,
+      "units": [
+        {
+          "say": "let me do that again",
+          "keep": false,
+          "reason": "off_script"
+        },
+        {
+          "pause": 1
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "Three money rules, sorry",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g0"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "Three money rules I wish I knew at twenty.",
+          "group": "g0"
+        },
+        {
+          "pause": 2.6
+        },
+        {
+          "say": "One pay yourself first, wait, no",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g1"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "One, pay yourself first, every single month.",
+          "group": "g1"
+        },
+        {
+          "pause": 2.4
+        },
+        {
+          "say": "Two, never buy anything the same day you see it.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g2"
+        },
+        {
+          "pause": 1
+        },
+        {
+          "say": "Two, never buy anything the same day you see it.",
+          "group": "g2"
+        },
+        {
+          "say": "Three, keep one month of rent in cash.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g3"
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "Three, keep one month of rent in cash.",
+          "group": "g3"
+        },
+        {
+          "say": "Save this for, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g4"
+        },
+        {
+          "pause": 0.7
+        },
+        {
+          "say": "Save this for later.",
+          "group": "g4"
+        },
+        {
+          "pause": 1.7
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "hold on",
+          "keep": false,
+          "reason": "off_script"
+        }
+      ]
+    }
+  ]
+}

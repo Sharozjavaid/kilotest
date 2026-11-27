@@ -1,0 +1,116 @@
+{
+  "id": "b12",
+  "title": "Thrift haul",
+  "clips": [
+    {
+      "name": "b12_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.3,
+      "tail": 1.2,
+      "units": [
+        {
+          "filler": "um"
+        },
+        {
+          "say": "Everything I, wait, no",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g0"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "Everything I am wearing cost eighteen dollars.",
+          "group": "g0"
+        }
+      ]
+    },
+    {
+      "name": "b12_take2",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.7,
+      "units": [
+        {
+          "say": "The jacket was six dollars.",
+          "group": "g1"
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "The jeans were eight.",
+          "group": "g2"
+        }
+      ]
+    },
+    {
+      "name": "b12_take3",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.4,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "The shirt was four, and it still had, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g3"
+        },
+        {
+          "pause": 1.5
+        },
+        {
+          "say": "The shirt was four, and it still had the tags.",
+          "group": "g3"
+        },
+        {
+          "pause": 2.5
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "say": "Go early on weekday mornings.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g4"
+        },
+        {
+          "pause": 0.6
+        },
+        {
+          "say": "Go early on weekday mornings.",
+          "group": "g4"
+        },
+        {
+          "pause": 2.6
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "b12_photo1.jpg",
+      "kind": "image",
+      "label": "Thrift haul photo 1",
+      "color": "0x3D5A80"
+    },
+    {
+      "file": "b12_shot2.mp4",
+      "kind": "video",
+      "label": "Thrift haul shot 2",
+      "durationSec": 5
+    },
+    {
+      "file": "b12_photo3.jpg",
+      "kind": "image",
+      "label": "Thrift haul photo 3",
+      "color": "0x6C5B7B",
+      "size": "1600x1200"
+    }
+  ]
+}

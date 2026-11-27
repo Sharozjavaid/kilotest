@@ -1,0 +1,76 @@
+{
+  "id": "b08",
+  "title": "Carry-on packing",
+  "clips": [
+    {
+      "name": "b08_take1",
+      "fps": 30,
+      "size": "1080x1920",
+      "leadIn": 0.4,
+      "tail": 1.1,
+      "units": [
+        {
+          "say": "A whole",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g0"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "A whole week in one carry-on bag.",
+          "group": "g0"
+        },
+        {
+          "filler": "er"
+        },
+        {
+          "say": "Roll your clothes instead of folding them.",
+          "group": "g1"
+        },
+        {
+          "pause": 1.3
+        },
+        {
+          "say": "Wear the heavy shoes on the plane.",
+          "group": "g2"
+        },
+        {
+          "say": "Put socks inside the other, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g3"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "Put socks inside the other shoes.",
+          "group": "g3"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "Pack one outfit less than you think.",
+          "group": "g4"
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "b08_photo1.jpg",
+      "kind": "image",
+      "label": "Carry-on packing photo 1",
+      "color": "0x6C5B7B"
+    },
+    {
+      "file": "b08_shot2.mp4",
+      "kind": "video",
+      "label": "Carry-on packing shot 2",
+      "durationSec": 4
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "id": "b01",
+  "title": "Coffee hack",
+  "clips": [
+    {
+      "name": "b01_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.4,
+      "tail": 0.5,
+      "units": [
+        {
+          "say": "This coffee trick changed my mornings.",
+          "group": "g0"
+        },
+        {
+          "say": "Put a pinch of salt in the grounds.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g1"
+        },
+        {
+          "pause": 0.7
+        },
+        {
+          "say": "Put a pinch of salt in the grounds.",
+          "group": "g1"
+        },
+        {
+          "filler": "er"
+        },
+        {
+          "say": "It takes the bitter edge right off.",
+          "group": "g2"
+        },
+        {
+          "say": "Try it tomorrow and tell me.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g3"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "Try it tomorrow and tell me.",
+          "group": "g3"
+        },
+        {
+          "pause": 1.5
+        }
+      ]
+    }
+  ]
+}

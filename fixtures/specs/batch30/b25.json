@@ -1,0 +1,88 @@
+{
+  "id": "b25",
+  "title": "First apartment",
+  "clips": [
+    {
+      "name": "b25_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.6,
+      "tail": 1.2,
+      "units": [
+        {
+          "filler": "um"
+        },
+        {
+          "say": "Things nobody, no, again",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g0"
+        },
+        {
+          "pause": 0.7
+        },
+        {
+          "say": "Things nobody tells you about your first apartment.",
+          "group": "g0"
+        }
+      ]
+    },
+    {
+      "name": "b25_take2",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.6,
+      "tail": 0.5,
+      "units": [
+        {
+          "say": "Take photos of every wall before you move in.",
+          "group": "g1"
+        },
+        {
+          "pause": 1.8
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "Buy a plunger before you need one.",
+          "group": "g2"
+        },
+        {
+          "pause": 2.4
+        },
+        {
+          "say": "Learn where the water shut off is.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g3"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "Learn where the water shut off is.",
+          "group": "g3"
+        },
+        {
+          "pause": 2.6
+        },
+        {
+          "say": "Renter insurance is cheaper than you think.",
+          "group": "g4"
+        },
+        {
+          "pause": 2.2
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "one more time",
+          "keep": false,
+          "reason": "off_script"
+        }
+      ]
+    }
+  ]
+}

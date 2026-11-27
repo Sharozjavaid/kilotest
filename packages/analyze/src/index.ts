@@ -1,6 +1,6 @@
 export {
   analyze, canonicalInput, createAnalyze, enforceSettings, edlFps, selectDecider, describeProviders, decideNotices, keepFootageSegments,
-  NO_SPEECH_MESSAGE,
+  NO_SPEECH_MESSAGE, fewOpeningsNotice,
 } from './analyze.js';
 export type { Analyze, AnalyzeOptions, DeciderName, DecideNotice, ProviderInfo, ProvidersReport } from './analyze.js';
 export { PipelineError, UnsupportedMediaError, MediaTimeoutError, MediaStoppedError, isPipelineError, UNSUPPORTED_MEDIA_MESSAGE } from './errors.js';

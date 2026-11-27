@@ -1,0 +1,67 @@
+{
+  "id": "br-packing",
+  "title": "One-bag packing",
+  "mode": "general",
+  "clips": [
+    {
+      "name": "talk",
+      "fps": 30,
+      "units": [
+        {
+          "say": "Here is how I pack for a week in one bag."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "Rolled shirts go at the very bottom."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "Shoes go in a separate shoe bag."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "My passport and charger live in the front pocket."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "That is it, see you at the airport."
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "rolled_shirts.jpg",
+      "kind": "image",
+      "label": "rolled shirts",
+      "color": "0x355C7D"
+    },
+    {
+      "file": "passport_charger.jpg",
+      "kind": "image",
+      "label": "passport and charger",
+      "color": "0x355C7D"
+    },
+    {
+      "file": "airport_terminal.mp4",
+      "kind": "video",
+      "label": "airport",
+      "durationSec": 4
+    }
+  ],
+  "expect": {
+    "broll": {
+      "rolled_shirts.jpg": "Rolled shirts",
+      "passport_charger.jpg": "passport and charger",
+      "airport_terminal.mp4": "see you at the airport"
+    }
+  }
+}

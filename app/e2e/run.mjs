@@ -3,6 +3,7 @@
 // static web export of the app pointed at it, then drives the flows with Playwright and tears it
 // all down. `npm run e2e` in app/. Options (environment):
 //   E2E_ONLY=upload,review   run only these flows (later flows need the earlier ones' state)
+//   E2E_ONLY=batch30         the 30-video run (opt-in, about an hour; `npm run e2e:batch30`)
 //   E2E_SKIP_BUILD=1         reuse the last web export in .work/e2e/web
 //   E2E_API_PORT / E2E_WEB_PORT   ports (default 8791 / 8792)
 import { spawn } from 'node:child_process';
@@ -35,7 +36,14 @@ const API_URL = `http://localhost:${API_PORT}`;
 const DB_NAME = 'kilo_e2e';
 
 const FLOWS = ['upload', 'review', 'broll', 'export', 'recorder', 'styles', 'failures'];
+// Long flows that run only when named in E2E_ONLY, after the default ones.
+const OPT_IN = ['batch30'];
 const only = process.env.E2E_ONLY ? process.env.E2E_ONLY.split(',').map((s) => s.trim()) : FLOWS;
+const unknown = only.filter((n) => !FLOWS.includes(n) && !OPT_IN.includes(n));
+if (unknown.length) {
+  console.error(`unknown flow(s) in E2E_ONLY: ${unknown.join(', ')} (flows: ${[...FLOWS, ...OPT_IN].join(', ')})`);
+  process.exit(2);
+}
 
 mkdirSync(WORK, { recursive: true });
 const logFile = createWriteStream(join(WORK, 'e2e.log'));
@@ -93,6 +101,8 @@ function serverControl(databaseUrl) {
   });
   const control = {
     url: API_URL,
+    storageDir,
+    workDir,
     async start() {
       if (child) return;
       child = spawn(join(SERVER_DIR, 'node_modules', '.bin', 'tsx'), ['src/main.ts', 'dev'], { cwd: SERVER_DIR, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -174,6 +184,7 @@ try {
     apiUrl: API_URL,
     appUrl: `http://localhost:${WEB_PORT}`,
     server,
+    databaseUrl,
     userId,
     api: apiClient(API_URL, userId),
     state: {},
@@ -181,7 +192,7 @@ try {
     log,
   };
   log(`api ${API_URL}  app ${ctx.appUrl}  user ${userId}`);
-  for (const name of FLOWS) {
+  for (const name of [...FLOWS, ...OPT_IN]) {
     if (!only.includes(name)) continue;
     const started = Date.now();
     log(`\n== ${name}`);

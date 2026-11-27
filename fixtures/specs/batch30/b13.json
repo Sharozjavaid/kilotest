@@ -1,0 +1,100 @@
+{
+  "id": "b13",
+  "title": "Meal prep Sunday",
+  "clips": [
+    {
+      "name": "b13_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 1,
+      "units": [
+        {
+          "say": "One hour on Sunday, lunch for the whole week.",
+          "group": "g0"
+        },
+        {
+          "pause": 0.9
+        }
+      ]
+    },
+    {
+      "name": "b13_take2",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.7,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Rice in the cooker, chicken in the oven.",
+          "group": "g1"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "pause": 1.1
+        }
+      ]
+    },
+    {
+      "name": "b13_take3",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.7,
+      "tail": 0.7,
+      "units": [
+        {
+          "say": "Chop the vegetables while both cook.",
+          "group": "g2"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "Split it into five boxes.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g3"
+        }
+      ]
+    },
+    {
+      "name": "b13_take4",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.3,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Split it into five boxes.",
+          "group": "g3"
+        }
+      ]
+    },
+    {
+      "name": "b13_take5",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.7,
+      "units": [
+        {
+          "say": "It saves me about sixty dollars a week.",
+          "group": "g4"
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "say": "okay wait",
+          "keep": false,
+          "reason": "off_script"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "id": "b17",
+  "title": "Kitchen reset",
+  "clips": [
+    {
+      "name": "b17_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.4,
+      "tail": 0.4,
+      "units": [
+        {
+          "filler": "um"
+        },
+        {
+          "say": "A clean kitchen in ten minutes flat.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g0"
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "say": "A clean kitchen in ten minutes flat.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.5
+        },
+        {
+          "pause": 1
+        },
+        {
+          "filler": "er"
+        },
+        {
+          "say": "Dishes in the",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g1"
+        }
+      ]
+    },
+    {
+      "name": "b17_take2",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.5,
+      "units": [
+        {
+          "say": "Dishes in the machine first.",
+          "group": "g1"
+        },
+        {
+          "pause": 1.6
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "say": "Wipe the counters from back to front.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g2"
+        }
+      ]
+    },
+    {
+      "name": "b17_take3",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.8,
+      "tail": 0.5,
+      "units": [
+        {
+          "say": "Wipe the counters from back to front.",
+          "group": "g2"
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "Sweep the crumbs straight into the bin.",
+          "group": "g3"
+        },
+        {
+          "filler": "uh"
+        }
+      ]
+    },
+    {
+      "name": "b17_take4",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.4,
+      "tail": 0.7,
+      "units": [
+        {
+          "say": "Set a timer and race it.",
+          "group": "g4"
+        },
+        {
+          "pause": 1
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "id": "p05-refrain",
+  "title": "Face washing, a repeated line",
+  "challenge": "The script repeats its opening line at the end on purpose.",
+  "script": [
+    "Stop washing your face twice a day.",
+    "Your skin needs its oils.",
+    "Once at night is plenty.",
+    "Seriously, stop washing your face twice a day."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "Stop washing your face twice a day.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "Your skin needs",
+          "reason": "false_start"
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "pause": 0.8
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "Your skin needs its oils.",
+          "keep": true
+        }
+      ],
+      "before": 0.8
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Once at night is plenty.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "Seriously, stop washing your face twice a day.",
+          "keep": true
+        }
+      ]
+    }
+  ]
+}

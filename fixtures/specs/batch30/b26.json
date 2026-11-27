@@ -1,0 +1,193 @@
+{
+  "id": "b26",
+  "title": "Standing desk review",
+  "clips": [
+    {
+      "name": "b26_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.7,
+      "tail": 0.7,
+      "units": [
+        {
+          "filler": "er"
+        },
+        {
+          "say": "I used, wait, no",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g0"
+        },
+        {
+          "pause": 1
+        },
+        {
+          "say": "I used a standing desk every day for six months, here is my honest review.",
+          "group": "g0"
+        },
+        {
+          "pause": 2
+        },
+        {
+          "say": "First, the setup took about forty minutes on my own.",
+          "group": "g1"
+        }
+      ]
+    },
+    {
+      "name": "b26_take2",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.3,
+      "tail": 0.5,
+      "units": [
+        {
+          "say": "The instructions were clear, and every screw was labelled.",
+          "group": "g2"
+        },
+        {
+          "say": "The motor is quiet, quieter than my laptop fan.",
+          "group": "g3"
+        },
+        {
+          "pause": 2.8
+        },
+        {
+          "say": "It goes from sitting to standing in about twelve seconds.",
+          "group": "g4"
+        },
+        {
+          "pause": 2.8
+        },
+        {
+          "say": "There are four memory buttons, and I use two of them.",
+          "group": "g5"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "pause": 2.7
+        },
+        {
+          "say": "The top is solid wood, and it has not scratched yet.",
+          "group": "g6"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "pause": 3.2
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "say": "Now the, wait, no",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g7"
+        },
+        {
+          "pause": 1.5
+        },
+        {
+          "say": "Now the problems.",
+          "group": "g7"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "At full height there is a little wobble when I type hard.",
+          "group": "g8"
+        },
+        {
+          "say": "The cable tray is too small for a real setup.",
+          "group": "g9"
+        }
+      ]
+    },
+    {
+      "name": "b26_take3",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.4,
+      "tail": 0.8,
+      "units": [
+        {
+          "say": "And the anti collision sensor stops for no reason sometimes.",
+          "group": "g10"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "filler": "er"
+        },
+        {
+          "say": "Did it help my back?",
+          "group": "g11"
+        },
+        {
+          "pause": 2.3
+        },
+        {
+          "filler": "er"
+        },
+        {
+          "say": "Yes, but only once I started switching every hour.",
+          "group": "g12"
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "say": "Standing all day hurt more than sitting all day.",
+          "group": "g13"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "say": "Would I buy it again? Yes, at this price.",
+          "group": "g14"
+        },
+        {
+          "say": "It is four hundred dollars, and it goes on sale often.",
+          "group": "g15"
+        },
+        {
+          "pause": 1.9
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "say": "Questions in the comments, I answer all of them.",
+          "group": "g16"
+        },
+        {
+          "pause": 0.9
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "b26_photo1.jpg",
+      "kind": "image",
+      "label": "Standing desk review photo 1",
+      "color": "0x6C5B7B"
+    },
+    {
+      "file": "b26_shot2.mp4",
+      "kind": "video",
+      "label": "Standing desk review shot 2",
+      "durationSec": 4
+    }
+  ]
+}

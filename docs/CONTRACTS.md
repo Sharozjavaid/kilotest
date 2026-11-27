@@ -83,7 +83,7 @@ Base path `/v1`. JSON in and out. Bodies are the zod schemas in `packages/edl/sr
 | Method and path | Request | Response | Notes |
 |---|---|---|---|
 | `GET /v1/health` | | `{ ok: true }` | No auth. |
-| `GET /v1/home` | | `HomeResponse` | |
+| `GET /v1/home` | | `HomeResponse` | `recent` holds the 50 latest videos that are exporting (`rendering`) or `done`, most recently updated first. |
 | `POST /v1/batches` | `CreateBatchRequest` | `CreateBatchResponse` | Creates the batch, videos, clips and B-roll rows and an upload target for each file. 400 `unsupported_file_type` for a file extension outside the allowed list. |
 | `GET /v1/batches/:id` | | `BatchDetail` | |
 | `POST /v1/uploads/complete` | `CompleteUploadsRequest` | `CompleteUploadsResponse` | Answers 200 with a result per id; one bad id never fails the others. A video is queued once every clip and B-roll file it was created with is in. |
@@ -133,7 +133,7 @@ Rules the server enforces, which the app must expect:
 - A saved EDL holds at most 4000 segments, 40 overlays, 5 variants and 10 overlays per variant, and a variant may list a segment only once.
 - File types. Clips: `mp4`, `mov`, `m4v`, `webm`, `mkv`, `3gp`. B-roll: those, plus `jpg`, `jpeg`, `png`, `webp`, `heic`. Anything else answers 400 `unsupported_file_type`.
 - JSON request bodies over `KILO_MAX_BODY_BYTES` (default 2 MiB) answer 413 `body_too_large`.
-- Per-user limits answer 429: `too_many_active_videos` (`KILO_MAX_ACTIVE_VIDEOS`, default 150 uploading, queued or analysing), `too_many_renders` (`KILO_MAX_QUEUED_RENDERS`, default 30 queued or rendering), `too_many_replans` (`KILO_MAX_REPLANS_PER_HOUR`, default 12 per video), `too_many_batches` (`KILO_MAX_BATCHES_PER_DAY`, default 40). Setting one to 0 turns it off.
+- Per-user limits answer 429: `too_many_active_videos` (`KILO_MAX_ACTIVE_VIDEOS`, default 150 uploading, queued or analysing), `too_many_renders` (`KILO_MAX_QUEUED_RENDERS`, default 300 queued or rendering, enough to export a full batch at once), `too_many_replans` (`KILO_MAX_REPLANS_PER_HOUR`, default 12 per video), `too_many_batches` (`KILO_MAX_BATCHES_PER_DAY`, default 40). Setting one to 0 turns it off.
 - Jobs are queued so users take turns: a 30-video batch does not hold up another user's single video.
 - `VideoSummary.notice` carries a short message when the video was analysed but something is worth telling the user, such as no speech being heard; null otherwise.
 - A failed clip or render carries the pipeline's own user message (unsupported file, or took too long) rather than a generic one.

@@ -1,0 +1,92 @@
+{
+  "id": "b09",
+  "title": "Night skincare",
+  "clips": [
+    {
+      "name": "b09_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 1.1,
+      "units": [
+        {
+          "say": "My night routine takes four minutes.",
+          "group": "g0"
+        }
+      ]
+    },
+    {
+      "name": "b09_take2",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.4,
+      "tail": 0.8,
+      "units": [
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "Cleanser first, for about a minute.",
+          "group": "g1"
+        }
+      ]
+    },
+    {
+      "name": "b09_take3",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.5,
+      "tail": 0.9,
+      "units": [
+        {
+          "say": "Then a thin layer of serum.",
+          "group": "g2"
+        },
+        {
+          "pause": 1.5
+        }
+      ]
+    },
+    {
+      "name": "b09_take4",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.8,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "Then moisturiser, a pea sized amount.",
+          "group": "g3"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "pause": 2.6
+        }
+      ]
+    },
+    {
+      "name": "b09_take5",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.7,
+      "tail": 0.7,
+      "units": [
+        {
+          "say": "Skip the fancy stuff until this is a habit.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g4"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "Skip the fancy stuff until this is a habit.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

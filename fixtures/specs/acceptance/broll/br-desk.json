@@ -1,0 +1,74 @@
+{
+  "id": "br-desk",
+  "title": "Desk setup",
+  "mode": "general",
+  "clips": [
+    {
+      "name": "talk",
+      "fps": 30,
+      "units": [
+        {
+          "say": "My desk used to be a total disaster."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "Cables everywhere and papers in every drawer."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "This cable tray hides everything under the table."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "Now my laptop sits on a stand and my notes have a tray."
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "The whole setup cost me forty dollars."
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "messy_desk_cables.jpg",
+      "kind": "image",
+      "label": "messy cables",
+      "color": "0x355C7D"
+    },
+    {
+      "file": "cable_tray_under_table.mp4",
+      "kind": "video",
+      "label": "cable tray",
+      "durationSec": 4
+    },
+    {
+      "file": "laptop_stand.jpg",
+      "kind": "image",
+      "label": "laptop stand",
+      "color": "0x355C7D"
+    },
+    {
+      "file": "money_receipt.jpg",
+      "kind": "image",
+      "label": "receipt",
+      "color": "0x355C7D"
+    }
+  ],
+  "expect": {
+    "broll": {
+      "messy_desk_cables.jpg": "Cables everywhere",
+      "cable_tray_under_table.mp4": "cable tray hides",
+      "laptop_stand.jpg": "laptop sits on a stand",
+      "money_receipt.jpg": "forty dollars"
+    }
+  }
+}

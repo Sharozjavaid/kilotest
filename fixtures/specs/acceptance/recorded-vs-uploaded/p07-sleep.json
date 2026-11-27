@@ -1,0 +1,63 @@
+{
+  "id": "p07-sleep",
+  "title": "Sleep tips, retake across two uploaded clips",
+  "challenge": "A numbered list; a retake that the upload splits across two files.",
+  "script": [
+    "Three tips for better sleep.",
+    "Number one, no screens after ten.",
+    "Number two, keep the room cold.",
+    "Number three, same wake up time every day."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "Three tips for better sleep.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "Number one, no screens after ten.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Number two, keep the room cold.",
+          "reason": "retake"
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Number two, keep the room cold.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "Number three, same wake up time every day.",
+          "keep": true
+        }
+      ]
+    }
+  ],
+  "upload": {
+    "splitBefore": [
+      3
+    ]
+  }
+}

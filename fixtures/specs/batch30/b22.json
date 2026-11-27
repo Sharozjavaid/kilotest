@@ -1,0 +1,70 @@
+{
+  "id": "b22",
+  "title": "Grocery savings",
+  "clips": [
+    {
+      "name": "b22_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.6,
+      "tail": 0.9,
+      "units": [
+        {
+          "say": "I cut my grocery bill, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g0"
+        },
+        {
+          "pause": 0.6
+        },
+        {
+          "say": "I cut my grocery bill in half.",
+          "group": "g0"
+        },
+        {
+          "say": "Shop with a list and never hungry.",
+          "group": "g1"
+        },
+        {
+          "pause": 1.8
+        },
+        {
+          "say": "Buy store brands for the basics.",
+          "group": "g2"
+        },
+        {
+          "filler": "er"
+        },
+        {
+          "say": "Plan meals around what is on sale.",
+          "group": "g3"
+        },
+        {
+          "pause": 1.7
+        }
+      ]
+    },
+    {
+      "name": "b22_take2",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.7,
+      "tail": 0.5,
+      "units": [
+        {
+          "say": "Freeze bread before it goes stale.",
+          "group": "g4"
+        },
+        {
+          "pause": 1.9
+        },
+        {
+          "say": "let me do that again",
+          "keep": false,
+          "reason": "off_script"
+        }
+      ]
+    }
+  ]
+}

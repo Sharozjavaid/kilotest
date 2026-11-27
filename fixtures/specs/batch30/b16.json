@@ -1,0 +1,68 @@
+{
+  "id": "b16",
+  "title": "Book picks",
+  "clips": [
+    {
+      "name": "b16_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.7,
+      "tail": 1.2,
+      "units": [
+        {
+          "say": "Three books that actually changed how I, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g0"
+        },
+        {
+          "pause": 1.5
+        },
+        {
+          "say": "Three books that actually changed how I think.",
+          "group": "g0"
+        },
+        {
+          "pause": 2
+        },
+        {
+          "say": "The first one is about habits.",
+          "group": "g1"
+        },
+        {
+          "say": "The second, wait, no",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g2"
+        },
+        {
+          "pause": 0.6
+        },
+        {
+          "say": "The second is about money and patience.",
+          "group": "g2"
+        },
+        {
+          "say": "The third is a novel, and it made, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g3"
+        },
+        {
+          "pause": 1
+        },
+        {
+          "say": "The third is a novel, and it made me cry.",
+          "group": "g3"
+        },
+        {
+          "pause": 2
+        },
+        {
+          "say": "Tell me yours in the comments.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

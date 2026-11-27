@@ -1,0 +1,95 @@
+{
+  "id": "p14-grinder",
+  "title": "Coffee grinder ad (held out)",
+  "mode": "ugc_ad",
+  "challenge": "Written after the analysis fixes, not tuned: a filler-ended false start, a camera aside, a corrected discount.",
+  "script": [
+    "I used to buy ground coffee every week.",
+    "This grinder takes ten seconds.",
+    "It's quiet enough to use at six a.m.",
+    "Use my code for fifteen percent off."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "I used to buy ground coffee every week.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "This grinder takes",
+          "reason": "false_start"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "pause": 0.6
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "This grinder takes about ten seconds.",
+          "keep": true
+        }
+      ],
+      "before": 1.0
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "It's quiet enough to use at six in the morning.",
+          "keep": true
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "is the light okay?",
+          "aside": true
+        }
+      ]
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "Use my code for ten percent off.",
+          "reason": "retake"
+        },
+        {
+          "pause": 0.6
+        },
+        {
+          "say": "no, fifteen",
+          "aside": true
+        }
+      ]
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "Use my code for fifteen percent off.",
+          "keep": true
+        }
+      ],
+      "before": 1.4
+    }
+  ],
+  "upload": {
+    "splitBefore": [
+      3
+    ]
+  }
+}

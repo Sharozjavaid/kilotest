@@ -1,0 +1,68 @@
+{
+  "id": "b19",
+  "title": "Bike commute",
+  "clips": [
+    {
+      "name": "b19_take1",
+      "fps": 60,
+      "size": "1080x1920",
+      "leadIn": 0.6,
+      "tail": 1,
+      "units": [
+        {
+          "say": "I bike to work every day, even in winter.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "Lights on front, wait, no",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g1"
+        },
+        {
+          "pause": 1.3
+        },
+        {
+          "say": "Lights on, front and back, always.",
+          "group": "g1"
+        },
+        {
+          "pause": 1.8
+        },
+        {
+          "say": "Waterproof gloves matter more than the jacket.",
+          "group": "g2"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "pause": 2.3
+        },
+        {
+          "say": "Leave five minutes earlier than you, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g3"
+        },
+        {
+          "pause": 1
+        },
+        {
+          "say": "Leave five minutes earlier than you need.",
+          "group": "g3"
+        },
+        {
+          "pause": 1
+        },
+        {
+          "say": "You will arrive happier.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

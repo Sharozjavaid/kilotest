@@ -110,8 +110,12 @@ const iso = (d: Date | string) => new Date(d).toISOString();
  * Video rows with what a summary needs: current EDL, first thumbnail, last post.
  * `where` is a SQL fragment over alias `v`.
  */
-export async function summaryRows(db: Db, where: Fragment, order: 'created' | 'updated' = 'created', limit = 500): Promise<SummaryRow[]> {
-  const orderBy = order === 'created' ? db`v.created_at desc, v.id` : db`v.updated_at desc, v.id`;
+export type SummaryOrder = 'created' | 'updated' | 'oldest';
+
+export async function summaryRows(db: Db, where: Fragment, order: SummaryOrder = 'created', limit = 500): Promise<SummaryRow[]> {
+  // 'oldest': creation order at the database's microsecond precision. The API's ISO timestamps keep
+  // only milliseconds, and the videos of one batch are often created within the same millisecond.
+  const orderBy = order === 'created' ? db`v.created_at desc, v.id` : order === 'oldest' ? db`v.created_at asc, v.id` : db`v.updated_at desc, v.id`;
   return db<SummaryRow[]>`
     select v.*, e.edl,
       (select c.thumb_key from clips c where c.video_id = v.id and c.user_id = v.user_id and c.thumb_key is not null order by c.ord limit 1) as thumb_key,
@@ -148,7 +152,7 @@ export async function toSummary(storage: StorageDriver, row: SummaryRow): Promis
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
-export async function videoSummaries(db: Db, storage: StorageDriver, where: Fragment, order: 'created' | 'updated' = 'created', limit?: number) {
+export async function videoSummaries(db: Db, storage: StorageDriver, where: Fragment, order: SummaryOrder = 'created', limit?: number) {
   const rows = await summaryRows(db, where, order, limit);
   return Promise.all(rows.map((r) => toSummary(storage, r)));
 }

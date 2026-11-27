@@ -1,0 +1,76 @@
+{
+  "id": "b29",
+  "title": "Lip balm",
+  "clips": [
+    {
+      "name": "b29_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.7,
+      "tail": 0.6,
+      "units": [
+        {
+          "say": "This lip balm sold out three times this year.",
+          "group": "g0"
+        },
+        {
+          "say": "It is not sticky and it does not smell.",
+          "group": "g1"
+        },
+        {
+          "say": "One tube lasted me four months.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g2"
+        },
+        {
+          "pause": 1.5
+        },
+        {
+          "say": "One tube lasted me four months.",
+          "group": "g2"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "Right now it, sorry",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g3"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "Right now it is eight dollars for two.",
+          "group": "g3"
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "Grab it from the shop link.",
+          "group": "g4"
+        },
+        {
+          "filler": "er"
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "b29_photo1.jpg",
+      "kind": "image",
+      "label": "Lip balm photo 1",
+      "color": "0x8A6A2F"
+    },
+    {
+      "file": "b29_shot2.mp4",
+      "kind": "video",
+      "label": "Lip balm shot 2",
+      "durationSec": 4
+    }
+  ]
+}

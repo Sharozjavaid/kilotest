@@ -102,6 +102,20 @@ interface Span {
   f1: number;
 }
 
+/**
+ * A recorder take is known to be a take of its line, so a reading of that line may
+ * stray further from the script's wording (a reworded or improvised take) and still
+ * count as one. Utterances of a clip with no take information must match more closely.
+ */
+const MATCH_MIN = { free: { f1: 0.45, coverage: 0.6 }, take: { f1: 0.35, coverage: 0.4 } } as const;
+/** Share of a script line a finished reading must cover to count as a complete take. */
+const COMPLETE_COVERAGE = { free: 0.8, take: 0.4 } as const;
+
+/** True when the chunk comes from a recorder take of `line`. */
+function isTakeOf(c: Chunk, line: number): boolean {
+  return c.scriptLineIndex === line;
+}
+
 /** Joins neighbouring utterances of one clip when together they say one script line better. */
 function matchSpans(cands: Chunk[], script: string[][], allowed: (c: Chunk) => number[] | null): { spans: Span[]; unmatched: Chunk[] } {
   const spans: Span[] = [];
@@ -122,10 +136,17 @@ function matchSpans(cands: Chunk[], script: string[][], allowed: (c: Chunk) => n
       const ks = group.flatMap((c) => c.keys);
       for (const line of lines) {
         const m = lineMatch(ks, script[line] ?? []);
+        // A restart is two takes, not one reading: never join an utterance that already says
+        // part of the line to a later one that says it at least as fully on its own
+        // ("the trick is to, the trick is to apply it"). A lead-in that says none of the
+        // line ("Honestly? Best sunscreen I've ever used.") still joins.
+        if (n > 1 && lineMatch(group[0]!.keys, script[line] ?? []).coverage > 0 &&
+          group.slice(1).some((c) => lineMatch(c.keys, script[line] ?? []).coverage >= m.coverage - 1e-9)) continue;
         if (!best || m.f1 > best.f1 + (n > best.chunks.length ? 0.08 : 0)) best = { chunks: group, line, coverage: m.coverage, f1: m.f1 };
       }
     }
-    if (best && (best.f1 >= 0.45 || best.coverage >= 0.6)) {
+    const min = best && isTakeOf(first, best.line) ? MATCH_MIN.take : MATCH_MIN.free;
+    if (best && (best.f1 >= min.f1 || best.coverage >= min.coverage)) {
       spans.push(best);
       i += best.chunks.length;
     } else {
@@ -146,7 +167,15 @@ function decideByScript(cands: Chunk[], scriptText: string[], out: CutDecisions)
   const byLine = new Map<number, Span[]>();
   for (const s of spans) byLine.set(s.line, [...(byLine.get(s.line) ?? []), s]);
   for (const [line, list] of byLine) {
-    const isComplete = (s: Span) => s.coverage >= 0.8 && s.chunks[s.chunks.length - 1]!.complete && !s.chunks.some((c) => c.interrupted);
+    // A reading that asks what the script states ("It lasts all week? Yeah.") is the
+    // speaker checking the line, not saying it.
+    const lineAsks = /\?["')\]]*\s*$/.test(scriptText[line] ?? '');
+    const isComplete = (s: Span) => {
+      const last = s.chunks[s.chunks.length - 1]!;
+      const need = s.chunks.every((c) => isTakeOf(c, line)) ? COMPLETE_COVERAGE.take : COMPLETE_COVERAGE.free;
+      const asks = /\?["')\]]*$/.test(last.words[last.words.length - 1]?.text.trim() ?? '');
+      return s.coverage >= need && last.complete && !s.chunks.some((c) => c.interrupted) && (lineAsks || !asks);
+    };
     const complete = list.filter(isComplete);
     let keep: Span;
     if (complete.length) keep = complete[complete.length - 1]!;

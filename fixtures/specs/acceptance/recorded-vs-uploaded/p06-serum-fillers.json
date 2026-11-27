@@ -1,0 +1,76 @@
+{
+  "id": "p06-serum-fillers",
+  "title": "Serum, fillers touching words",
+  "challenge": "Fillers with no pause either side, dead air inside a take, an abandoned first take.",
+  "script": [
+    "So this serum is honestly the best thing I've tried.",
+    "I put it on every night.",
+    "My skin is softer in a week."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "So this serum is,",
+          "keep": true,
+          "touch": true
+        },
+        {
+          "filler": "um",
+          "touch": true
+        },
+        {
+          "say": "honestly the best thing I've tried.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "I put it on",
+          "keep": true,
+          "touch": true
+        },
+        {
+          "filler": "uh",
+          "touch": true
+        },
+        {
+          "say": "every night.",
+          "keep": true
+        },
+        {
+          "pause": 2.0
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "My skin is",
+          "reason": "false_start"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "pause": 1.0
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "My skin is softer in a week.",
+          "keep": true
+        }
+      ],
+      "before": 1.5
+    }
+  ]
+}

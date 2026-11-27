@@ -1,0 +1,87 @@
+{
+  "id": "p03-packing",
+  "title": "Packing a carry-on, abandoned last take",
+  "challenge": "The last take of a line is abandoned mid-line; a filler touches the words; a closing aside.",
+  "script": [
+    "Here is how I pack a carry on.",
+    "Roll every shirt instead of folding it.",
+    "Shoes go at the bottom, heels together.",
+    "Fill the gaps with socks."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "Here is how I pack a carry on.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "Roll every shirt instead of folding it.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "Roll every shirt instead of",
+          "reason": "false_start"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "hang on",
+          "aside": true
+        }
+      ],
+      "before": 1.0
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Shoes go at the bottom,",
+          "keep": true,
+          "touch": true
+        },
+        {
+          "filler": "um",
+          "touch": true
+        },
+        {
+          "say": "heels together.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "Fill the gaps with socks.",
+          "keep": true
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "Was that okay?",
+          "aside": true
+        }
+      ]
+    }
+  ],
+  "upload": {
+    "splitBefore": [
+      3
+    ]
+  }
+}

@@ -13,7 +13,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "preview": "tsx scripts/preview.ts"
+    "preview": "tsx scripts/preview.ts",
+    "sweep": "tsx scripts/run-sweep.ts"
   },
   "dependencies": {
     "@kilo/edl": "file:../packages/edl",

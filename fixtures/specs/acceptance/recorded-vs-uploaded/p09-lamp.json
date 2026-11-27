@@ -1,0 +1,59 @@
+{
+  "id": "p09-lamp",
+  "title": "Folding lamp, aside that repeats the line",
+  "challenge": "After the kept reading, the speaker repeats the line to themselves as a question.",
+  "script": [
+    "This lamp folds flat into your bag.",
+    "It lasts all week on one charge.",
+    "It costs less than a pizza."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "This lamp folds flat into your bag.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "It lasts all week on",
+          "reason": "false_start"
+        },
+        {
+          "pause": 0.7
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "It lasts all week on one charge.",
+          "keep": true
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "It lasts all week on one charge? Yeah.",
+          "aside": true
+        }
+      ],
+      "before": 1.0
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "It costs less than a pizza.",
+          "keep": true
+        }
+      ]
+    }
+  ]
+}

@@ -113,6 +113,9 @@ export function userRoutes(deps: AppDeps): Hono<Env> {
     return c.body(null, 204);
   });
 
+  /** The most a batch holds (CreateBatchRequest), so one batch's finished videos always fit. */
+  const HOME_RECENT_LIMIT = 50;
+
   app.get('/home', async (c) => {
     const userId = c.get('userId');
     const active = await db<{ id: string }[]>`
@@ -122,7 +125,9 @@ export function userRoutes(deps: AppDeps): Hono<Env> {
       goalView(db, userId, now()),
       active.length ? batchSummaries(db, userId, active.map((r) => r.id)) : Promise.resolve([]),
       videoSummaries(db, storage, db`v.user_id = ${userId} and v.status = 'ready_for_review'`),
-      videoSummaries(db, storage, db`v.user_id = ${userId} and v.status = 'done'`, 'updated', 20),
+      // Exporting videos too (reviewed, finishing), and enough rows for a whole batch: a creator who
+      // exports 30 videos at once sees all 30 on Home, not just the last 20 to finish.
+      videoSummaries(db, storage, db`v.user_id = ${userId} and v.status in ('rendering', 'done')`, 'updated', HOME_RECENT_LIMIT),
     ]);
     const body: HomeResponse = { goal, activeBatches, readyToReview, recent };
     return c.json(body);

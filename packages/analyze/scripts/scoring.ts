@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from '
 import { mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { BrollAsset, Edl, IngestedClip, Mode, SilenceGap, Transcript, Word } from '@kilo/edl';
+import type { BrollAsset, DecideInput, EditSettings, Edl, IngestedBroll, IngestedClip, Mode, SilenceGap, Transcript, Word } from '@kilo/edl';
 import { MODE_PRESETS, PACING_PARAMS, validateEdl } from '@kilo/edl';
 import { createAnalyze } from '../src/analyze.js';
 import { fixtureTranscriber } from '../src/transcribe.js';
@@ -70,6 +70,10 @@ export interface FixtureScore {
   /** Cut boundaries not on their clip's frame grid (the renderer would move them). */
   offGridBoundaries: number;
   edl: Edl;
+  /** What decideEdit was given, and the ingested media (for rendering). */
+  input: DecideInput;
+  ingested: IngestedClip[];
+  broll: IngestedBroll[];
 }
 
 export interface ScoreReport {
@@ -262,16 +266,16 @@ async function cachedIngest(fixture: string, dir: string, clip: ManifestClip): P
   return ingested;
 }
 
-async function cachedBroll(fixture: string, dir: string, b: Manifest['broll'][number], i: number): Promise<BrollAsset> {
+async function cachedBroll(fixture: string, dir: string, b: Manifest['broll'][number], i: number): Promise<IngestedBroll> {
   const workDir = join(CACHE, fixture, `broll-${i}`);
-  const infoPath = join(workDir, 'asset.json');
+  const infoPath = join(workDir, 'ingested.json');
   const src = join(dir, b.file);
   if (existsSync(infoPath) && statSync(infoPath).mtimeMs > statSync(src).mtimeMs) {
-    return JSON.parse(readFileSync(infoPath, 'utf8')) as BrollAsset;
+    return JSON.parse(readFileSync(infoPath, 'utf8')) as IngestedBroll;
   }
   const r = await analyze.ingestBroll({ assetId: `b${i + 1}`, inputPath: src, workDir, source: 'user', filename: b.file.split('/').pop() });
-  writeFileSync(infoPath, JSON.stringify(r.asset));
-  return r.asset;
+  writeFileSync(infoPath, JSON.stringify(r));
+  return r;
 }
 
 function overlap(a0: number, a1: number, b0: number, b1: number): number {
@@ -318,6 +322,8 @@ export interface ScoreOptions {
   touching?: boolean;
   /** Only fixtures whose id matches. */
   only?: RegExp;
+  /** Overrides on the fixture's mode preset (for example hookVariations). */
+  settings?: Partial<EditSettings>;
 }
 
 export async function scoreFixture(dir: string, opts: ScoreOptions = {}): Promise<FixtureScore> {
@@ -332,11 +338,12 @@ export async function scoreFixture(dir: string, opts: ScoreOptions = {}): Promis
     transcripts.push(opts.jitterSec ? jitterTranscript(t, opts.jitterSec, transcripts.length + 7) : t);
     silences.push(...(await analyze.detectSilence({ clipId: ic.info.id, audioPath: ic.audioPath })));
   }
-  const broll: BrollAsset[] = [];
-  for (const [i, b] of (manifest.broll ?? []).entries()) broll.push(await cachedBroll(fixture, dir, b, i));
-  const settings = MODE_PRESETS[manifest.mode].settings;
+  const brollIngested: IngestedBroll[] = [];
+  for (const [i, b] of (manifest.broll ?? []).entries()) brollIngested.push(await cachedBroll(fixture, dir, b, i));
+  const broll: BrollAsset[] = brollIngested.map((b) => b.asset);
+  const settings = { ...MODE_PRESETS[manifest.mode].settings, ...opts.settings };
   const clips = ingested.map((i) => i.info);
-  const edl = await analyze.decideEdit({
+  const input: DecideInput = {
     videoId: fixture,
     clips,
     transcripts,
@@ -344,12 +351,14 @@ export async function scoreFixture(dir: string, opts: ScoreOptions = {}): Promis
     settings,
     ...(manifest.script ? { script: manifest.script } : {}),
     broll,
-  });
+  };
+  const edl = await analyze.decideEdit(input);
 
   const score: FixtureScore = {
     id: fixture, dir, clippedWords: 0, clippedDetail: [], retakeGroups: 0, retakeGroupsRight: 0, retakeDetail: [],
     keptUnits: 0, keptUnitsFull: 0, cutUnits: 0, cutUnitsCut: 0, missedCuts: [], deadAirKeptSec: 0,
     longestKeptSilenceSec: 0, outputSec: 0, edlIssues: validateEdl(edl, clips).length, offGridBoundaries: 0, edl,
+    input, ingested, broll: brollIngested,
   };
   for (const c of clips) {
     for (const seg of edl.segments.filter((x) => x.clipId === c.id)) {

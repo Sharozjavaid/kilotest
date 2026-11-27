@@ -13,6 +13,8 @@ export interface NumberedListProps {
 
 const ITEM_LINE = 1.12;
 const TITLE_LINE = 1.04;
+/** The badge digit is 0.58 of the badge: never under the readable 36 px. */
+const MIN_BADGE = 64;
 
 interface ItemLayout {
   size: number;
@@ -44,7 +46,7 @@ function layout(p: NumberedListProps, f: ReturnType<typeof fonts>, width: number
   const passes: Array<[maxLines: number, minSize: number]> = [[1, 66], [2, 38]];
   for (const [itemLines, minSize] of passes)
   for (let size = 124; size >= minSize; size--) {
-    const badge = Math.round(size * 1.34);
+    const badge = Math.max(MIN_BADGE, Math.round(size * 1.34));
     const gap = Math.round(size * 0.42);
     const col = width - badge - gap;
     const items: ItemLayout[] = [];
@@ -60,14 +62,14 @@ function layout(p: NumberedListProps, f: ReturnType<typeof fonts>, width: number
     if (!ok) continue;
     const rowGap = size * 0.62;
     const rowsH = items.reduce((a, it) => a + Math.max(badge, it.lines.length * size * ITEM_LINE), 0) + rowGap * (items.length - 1);
-    let title = null as null | { size: number; lines: string[][] };
+    let title = null as null | { size: number; lines: string[][]; line: number };
     let titleH = 0;
     if (hasTitle) {
       // One line when it can stay clearly bigger than the items; otherwise two balanced lines.
-      let one: { size: number; lines: string[][] } | null = null;
+      let one: { size: number; lines: string[][]; line: number } | null = null;
       for (let s = Math.min(150, Math.round(size * 1.55)); s >= Math.round(size * 1.2) && !one; s--) {
         const l = wrapAt(p.title!, titleFont, s, width, 1);
-        if (l) one = { size: s, lines: l };
+        if (l) one = { size: s, lines: l, line: TITLE_LINE };
       }
       const t = one ?? fitText(p.title!, {
         font: titleFont,
@@ -78,14 +80,14 @@ function layout(p: NumberedListProps, f: ReturnType<typeof fonts>, width: number
         maxSize: Math.min(150, Math.round(size * 1.55)),
         minSize: Math.min(size + 6, 56),
       });
-      title = { size: t.size, lines: t.lines };
-      titleH = t.lines.length * t.size * TITLE_LINE + Math.max(48, t.size * 0.55);
+      title = { size: t.size, lines: t.lines, line: t.line };
+      titleH = t.lines.length * t.size * t.line + Math.max(48, t.size * 0.55);
     }
     if (rowsH + titleH <= height) return { size, badge, gap, col, items, rowGap, title, total: rowsH + titleH };
   }
   // Fallback for pathological input (very long single words): break words at a small size.
   const size = 38;
-  const badge = Math.round(size * 1.34);
+  const badge = Math.max(MIN_BADGE, Math.round(size * 1.34));
   const gap = Math.round(size * 0.42);
   const col = width - badge - gap;
   const items = p.items.map((it) => {
@@ -94,12 +96,12 @@ function layout(p: NumberedListProps, f: ReturnType<typeof fonts>, width: number
   });
   const rowGap = size * 0.5;
   const rowsH = items.reduce((a, it) => a + Math.max(badge, it.lines.length * it.size * ITEM_LINE), 0) + rowGap * (items.length - 1);
-  let title = null as null | { size: number; lines: string[][] };
+  let title = null as null | { size: number; lines: string[][]; line: number };
   let titleH = 0;
   if (hasTitle) {
     const t = fitText(p.title!, { font: titleFont, maxWidth: width, maxHeight: height * 0.25, lineHeight: TITLE_LINE, maxLines: 2, maxSize: 64, minSize: 44 });
-    title = { size: t.size, lines: t.lines };
-    titleH = t.lines.length * t.size * TITLE_LINE + 40;
+    title = { size: t.size, lines: t.lines, line: t.line };
+    titleH = t.lines.length * t.size * t.line + 40;
   }
   return { size, badge, gap, col, items, rowGap, title, total: rowsH + titleH };
 }
@@ -135,13 +137,13 @@ export const NumberedList: React.FC<TemplateComponentProps<NumberedListProps>> =
       }}
     >
       {L.title.lines.map((line, i) => (
-        <div key={i} style={{ ...fontCss(f.headline, L.title!.size), lineHeight: `${L.title!.size * TITLE_LINE}px` }}>
+        <div key={i} style={{ ...fontCss(f.headline, L.title!.size), lineHeight: `${L.title!.size * L.title!.line}px` }}>
           {line.join(' ')}
         </div>
       ))}
     </div>
   ) : null;
-  if (L.title) y += L.title.lines.length * L.title.size * TITLE_LINE + Math.max(48, L.title.size * 0.55);
+  if (L.title) y += L.title.lines.length * L.title.size * L.title.line + Math.max(48, L.title.size * 0.55);
 
   const rows = L.items.map((it, i) => {
     const textH = it.lines.length * it.size * ITEM_LINE;

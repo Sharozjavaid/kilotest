@@ -1,0 +1,69 @@
+{
+  "id": "p11-desk",
+  "title": "Desk organiser, chatter and dead air",
+  "challenge": "Recording chatter before the first line, long dead air, an aside that sounds like a cue.",
+  "script": [
+    "My desk used to be a disaster.",
+    "This organizer fixed it in a day.",
+    "Everything has a place now."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "is this recording?",
+          "aside": true
+        },
+        {
+          "pause": 1.5
+        },
+        {
+          "say": "My desk used to be a disaster.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "This organizer fixed it in a day.",
+          "keep": true
+        },
+        {
+          "pause": 2.5
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Everything has a place",
+          "reason": "false_start"
+        },
+        {
+          "pause": 0.8
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Everything has a place now.",
+          "keep": true
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "okay, what's next on the list?",
+          "aside": true
+        }
+      ],
+      "before": 2.2
+    }
+  ]
+}

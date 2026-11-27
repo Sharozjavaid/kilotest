@@ -1,0 +1,60 @@
+{
+  "id": "p08-damp-skin",
+  "title": "Moisturiser, restart inside a take",
+  "challenge": "The speaker restarts a line inside one take; an aside that sounds like a sign-off.",
+  "script": [
+    "The trick is to apply it on damp skin.",
+    "You only need a pea sized amount.",
+    "Rub it in with upward strokes."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "The trick is to",
+          "reason": "false_start"
+        },
+        {
+          "say": "the trick is to apply it on damp skin.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "You only need a pea sized amount.",
+          "reason": "retake"
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "You only need a pea sized amount.",
+          "keep": true
+        }
+      ],
+      "before": 0.9
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Rub it in with upward strokes.",
+          "keep": true
+        },
+        {
+          "pause": 1.0
+        },
+        {
+          "say": "okay that's it, I think",
+          "aside": true
+        }
+      ]
+    }
+  ]
+}

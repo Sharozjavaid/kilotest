@@ -1,0 +1,71 @@
+{
+  "id": "b11",
+  "title": "Home workout",
+  "clips": [
+    {
+      "name": "b11_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.8,
+      "tail": 0.9,
+      "units": [
+        {
+          "say": "No gym, no equipment,, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g0"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "No gym, no equipment, twenty minutes.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.7
+        },
+        {
+          "say": "Squats for one minute.",
+          "group": "g1"
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "filler": "er"
+        },
+        {
+          "say": "Push ups for one minute.",
+          "group": "g2"
+        },
+        {
+          "say": "Lunges for one, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g3"
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "say": "Lunges for one minute.",
+          "group": "g3"
+        },
+        {
+          "say": "Rest a minute and repeat four, wait, that came out wrong",
+          "keep": false,
+          "reason": "retake",
+          "group": "g4"
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "Rest a minute and repeat four times.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

@@ -135,9 +135,8 @@ export function batchRoutes(deps: AppDeps): Hono<Env> {
     const id = pathId(c, 'id', 'Batch');
     const [batch] = await batchSummaries(db, userId, [id]);
     if (!batch) throw notFound('Batch');
-    const videos = await videoSummaries(db, storage, db`v.batch_id = ${id} and v.user_id = ${userId}`);
-    // A batch reads in the order its videos were created.
-    videos.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    // A batch reads in the order its videos were created (the order the creator put them in).
+    const videos = await videoSummaries(db, storage, db`v.batch_id = ${id} and v.user_id = ${userId}`, 'oldest');
     const body: BatchDetail = { ...batch, videos };
     return c.json(body);
   });

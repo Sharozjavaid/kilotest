@@ -10,11 +10,13 @@ export interface BoldTitleProps {
 }
 
 const LINE = 1.04;
+const INK_MARGIN = 16;
 
 export const BoldTitle: React.FC<TemplateComponentProps<BoldTitleProps>> = ({ props, theme, clock, area }) => {
   const font = fonts(theme).headline;
   // Centred on the frame, narrow enough that lines in the lower half clear the right-hand rail.
-  const maxWidth = 2 * (area.rightLower - DESIGN_WIDTH / 2);
+  // Fitting measures advance widths; heavy glyphs' ink overhangs them slightly, so keep a margin.
+  const maxWidth = 2 * (area.rightLower - DESIGN_WIDTH / 2 - INK_MARGIN);
   const left = DESIGN_WIDTH / 2 - maxWidth / 2;
   const fit = useMemo(
     () =>
@@ -39,7 +41,7 @@ export const BoldTitle: React.FC<TemplateComponentProps<BoldTitleProps>> = ({ pr
   const lastLand = start + stagger * (words.length - 1) + wordDur * 0.6;
 
   const size = fit.size;
-  const blockH = fit.lines.length * size * LINE;
+  const blockH = fit.lines.length * size * fit.line;
   const barH = Math.max(10, Math.round(size * 0.085));
   const barW = Math.min(150, Math.max(90, size * 0.9));
   const barGap = size * 0.3;
@@ -52,7 +54,7 @@ export const BoldTitle: React.FC<TemplateComponentProps<BoldTitleProps>> = ({ pr
     <Plate clock={clock} theme={theme} height={area.height}>
       <div style={{ position: 'absolute', left, width: maxWidth, top, textAlign: 'center' }}>
         {fit.lines.map((line, li) => (
-          <div key={li} style={{ ...fontCss(font, size), lineHeight: `${size * LINE}px`, height: size * LINE, color: theme.foreground }}>
+          <div key={li} style={{ ...fontCss(font, size), lineHeight: `${size * fit.line}px`, height: size * fit.line, color: theme.foreground }}>
             {line.map((word, wi) => {
               const i = w++;
               const p = progress(clock.t, start + i * stagger, wordDur);

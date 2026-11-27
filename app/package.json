@@ -61,7 +61,8 @@
     "typecheck": "tsc --noEmit",
     "export:web": "EXPO_PUBLIC_MOCK=1 expo export --platform web --output-dir .work/web",
     "doctor": "expo-doctor",
-    "e2e": "node e2e/run.mjs"
+    "e2e": "node e2e/run.mjs",
+    "e2e:batch30": "E2E_ONLY=batch30 node e2e/run.mjs"
   },
   "private": true,
   "jest": {

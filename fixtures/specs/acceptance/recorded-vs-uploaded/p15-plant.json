@@ -1,0 +1,76 @@
+{
+  "id": "p15-plant",
+  "title": "Plant care (held out)",
+  "challenge": "Written after the analysis fixes, not tuned: a lengthened retake, an abandoned take with a cue aside.",
+  "script": [
+    "Water it once a week.",
+    "Keep it out of direct sun.",
+    "Turn it a little every week.",
+    "That's all it needs."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "Water it once a week.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "Keep it out of direct sunlight.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Turn it every week.",
+          "reason": "retake"
+        }
+      ]
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Turn it a little every week, so it grows straight.",
+          "keep": true
+        }
+      ],
+      "before": 1.1
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "That's all",
+          "reason": "false_start"
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "hold on, what was the line",
+          "aside": true
+        }
+      ]
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "That's all it needs.",
+          "keep": true
+        }
+      ],
+      "before": 1.3
+    }
+  ]
+}

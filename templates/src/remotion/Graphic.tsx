@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AbsoluteFill, continueRender, delayRender, useCurrentFrame } from 'remotion';
 import type { TemplateComponentProps } from './common';
 import { loadFonts } from './fonts';
 import { makeClock } from './motion';
+import { probeLayout } from './probe';
 import { DESIGN_WIDTH, safeArea, type ThemeInput } from './style';
 import { BoldTitle } from './templates/BoldTitle';
 import { KeywordPop } from './templates/KeywordPop';
@@ -22,6 +23,8 @@ export interface GraphicInput {
   height: number;
   /** The catalog default duration; timings are designed at this length. */
   defaultDurationSec: number;
+  /** Acceptance sweep only: measure the drawn layout and print it (see probe.ts). Never set by the renderer. */
+  probe?: boolean;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -37,6 +40,8 @@ export const Graphic: React.FC<GraphicInput> = (input) => {
   const frame = useCurrentFrame();
   const [handle] = useState(() => delayRender('Loading bundled fonts'));
   const [ready, setReady] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const [probeHandle] = useState(() => (input.probe ? delayRender('Measuring the layout') : null));
   useEffect(() => {
     loadFonts()
       .then(() => {
@@ -49,6 +54,12 @@ export const Graphic: React.FC<GraphicInput> = (input) => {
       });
   }, [handle]);
 
+  useEffect(() => {
+    if (!ready || probeHandle === null || !root.current) return;
+    console.log(`KILO_PROBE ${JSON.stringify({ frame, ...probeLayout(root.current, input.width, input.height) })}`);
+    continueRender(probeHandle);
+  }, [ready, frame, probeHandle, input.width, input.height]);
+
   if (!ready) return null;
   const Component = COMPONENTS[input.template];
   if (!Component) throw new Error(`Unknown template: ${input.template}`);
@@ -57,7 +68,7 @@ export const Graphic: React.FC<GraphicInput> = (input) => {
   const designHeight = input.height / scale;
   const clock = makeClock(frame, input.fps, input.durationSec, input.defaultDurationSec);
   return (
-    <AbsoluteFill style={{ backgroundColor: 'transparent', overflow: 'hidden' }}>
+    <AbsoluteFill ref={root} style={{ backgroundColor: 'transparent', overflow: 'hidden' }}>
       <div
         style={{
           position: 'absolute',

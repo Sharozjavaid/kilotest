@@ -1,0 +1,100 @@
+{
+  "id": "b18",
+  "title": "Notes app review",
+  "clips": [
+    {
+      "name": "b18_take1",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.7,
+      "tail": 1.1,
+      "units": [
+        {
+          "say": "I tried every notes app so you do not have to.",
+          "group": "g0"
+        },
+        {
+          "pause": 2.4
+        }
+      ]
+    },
+    {
+      "name": "b18_take2",
+      "fps": 30,
+      "size": "720x1280",
+      "leadIn": 0.7,
+      "tail": 1,
+      "units": [
+        {
+          "say": "This one opens in under a second.",
+          "group": "g1"
+        },
+        {
+          "pause": 2.5
+        },
+        {
+          "say": "It syncs without an account.",
+          "group": "g2"
+        },
+        {
+          "filler": "um"
+        },
+        {
+          "say": "The search",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g3"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "The search finds words inside photos.",
+          "group": "g3"
+        },
+        {
+          "pause": 2.1
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "It is free, link in bio.",
+          "group": "g4"
+        },
+        {
+          "pause": 1
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "say": "let me do that again",
+          "keep": false,
+          "reason": "off_script"
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "b18_photo1.jpg",
+      "kind": "image",
+      "label": "Notes app review photo 1",
+      "color": "0x3D5A80"
+    },
+    {
+      "file": "b18_shot2.mp4",
+      "kind": "video",
+      "label": "Notes app review shot 2",
+      "durationSec": 5
+    },
+    {
+      "file": "b18_photo3.jpg",
+      "kind": "image",
+      "label": "Notes app review photo 3",
+      "color": "0x6C5B7B",
+      "size": "1600x1200"
+    }
+  ]
+}

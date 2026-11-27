@@ -164,7 +164,7 @@ export class MockKiloApi implements KiloApi {
       goal: this.goal,
       activeBatches,
       readyToReview: summaries.filter((s) => s.status === 'ready_for_review').sort(byNewest),
-      recent: summaries.filter((s) => s.status === 'done').sort(byUpdatedNewest).slice(0, 10),
+      recent: summaries.filter((s) => s.status === 'rendering' || s.status === 'done').sort(byUpdatedNewest).slice(0, 50),
     });
   }
 

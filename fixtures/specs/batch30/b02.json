@@ -1,0 +1,100 @@
+{
+  "id": "b02",
+  "title": "Desk under fifty",
+  "clips": [
+    {
+      "name": "b02_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.7,
+      "tail": 0.5,
+      "units": [
+        {
+          "say": "My whole desk setup cost under fifty dollars.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.7
+        },
+        {
+          "pause": 0.6
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "The lamp was twelve dollars at a thrift store.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g1"
+        }
+      ]
+    },
+    {
+      "name": "b02_take2",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.9,
+      "tail": 0.5,
+      "units": [
+        {
+          "say": "The lamp was twelve dollars at a thrift store.",
+          "group": "g1"
+        },
+        {
+          "say": "The shelf is",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g2"
+        },
+        {
+          "pause": 1.5
+        },
+        {
+          "say": "The shelf is two planks and four brackets.",
+          "group": "g2"
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "say": "And the, no, again",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g3"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "And the plant was free from my neighbour.",
+          "group": "g3"
+        },
+        {
+          "pause": 2.1
+        },
+        {
+          "say": "Links to everything are in my bio.",
+          "group": "g4"
+        },
+        {
+          "pause": 2.6
+        }
+      ]
+    }
+  ],
+  "broll": [
+    {
+      "file": "b02_photo1.jpg",
+      "kind": "image",
+      "label": "Desk under fifty photo 1",
+      "color": "0x6C5B7B"
+    },
+    {
+      "file": "b02_shot2.mp4",
+      "kind": "video",
+      "label": "Desk under fifty shot 2",
+      "durationSec": 4
+    }
+  ]
+}

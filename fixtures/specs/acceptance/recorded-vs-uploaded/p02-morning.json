@@ -1,0 +1,76 @@
+{
+  "id": "p02-morning",
+  "title": "Morning routine, reworded retakes",
+  "challenge": "A retake with changed wording; an aside that corrects the line.",
+  "script": [
+    "I wake up at five every day.",
+    "The first thing I do is drink water.",
+    "Then I write down three goals.",
+    "It changed my whole morning."
+  ],
+  "takes": [
+    {
+      "line": 0,
+      "units": [
+        {
+          "say": "I wake up at five every day.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "The first thing I do is drink coffee.",
+          "reason": "retake"
+        },
+        {
+          "pause": 0.8
+        },
+        {
+          "say": "no, it's water, not coffee",
+          "aside": true
+        }
+      ]
+    },
+    {
+      "line": 1,
+      "units": [
+        {
+          "say": "The first thing I do is drink water.",
+          "keep": true
+        }
+      ],
+      "before": 1.4
+    },
+    {
+      "line": 2,
+      "units": [
+        {
+          "say": "Then I write down three goals.",
+          "keep": true
+        }
+      ]
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "It changed my whole morning.",
+          "reason": "retake"
+        }
+      ]
+    },
+    {
+      "line": 3,
+      "units": [
+        {
+          "say": "Honestly, it changed my entire morning routine.",
+          "keep": true
+        }
+      ],
+      "before": 1.1
+    }
+  ]
+}

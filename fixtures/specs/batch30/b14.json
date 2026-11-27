@@ -1,0 +1,56 @@
+{
+  "id": "b14",
+  "title": "Dog training",
+  "clips": [
+    {
+      "name": "b14_take1",
+      "fps": 60,
+      "size": "1280x720",
+      "leadIn": 0.4,
+      "tail": 0.6,
+      "units": [
+        {
+          "filler": "um"
+        },
+        {
+          "say": "Teach your dog to stay in three days.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g0"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "Teach your dog to stay in three days.",
+          "group": "g0"
+        },
+        {
+          "say": "Start with one second and a treat.",
+          "group": "g1"
+        },
+        {
+          "say": "Add one second each time.",
+          "group": "g2"
+        },
+        {
+          "say": "Step back only when the wait is solid.",
+          "group": "g3"
+        },
+        {
+          "say": "Short sessions",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g4"
+        },
+        {
+          "pause": 1
+        },
+        {
+          "say": "Short sessions, every day.",
+          "group": "g4"
+        }
+      ]
+    }
+  ]
+}

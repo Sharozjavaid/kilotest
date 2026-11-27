@@ -106,7 +106,7 @@ export const StatCallout: React.FC<TemplateComponentProps<StatCalloutProps>> = (
         }}
       >
         {L.label.lines.map((line, i) => (
-          <div key={i} style={{ ...fontCss(f.bold, ls), lineHeight: `${ls * LABEL_LINE}px` }}>
+          <div key={i} style={{ ...fontCss(f.bold, ls), lineHeight: `${ls * L.label.line}px` }}>
             {line.join(' ')}
           </div>
         ))}

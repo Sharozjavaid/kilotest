@@ -1,0 +1,80 @@
+{
+  "id": "b10",
+  "title": "Study tips",
+  "clips": [
+    {
+      "name": "b10_take1",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.8,
+      "tail": 1,
+      "units": [
+        {
+          "say": "How I study for six hours without burning out.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g0"
+        },
+        {
+          "pause": 0.9
+        },
+        {
+          "say": "How I study for six hours without burning out.",
+          "group": "g0"
+        },
+        {
+          "pause": 1.4
+        },
+        {
+          "say": "Fifty minutes on, ten minutes off.",
+          "group": "g1"
+        },
+        {
+          "pause": 2.1
+        },
+        {
+          "say": "Phone in another room, not on silent.",
+          "group": "g2"
+        },
+        {
+          "filler": "uh"
+        },
+        {
+          "pause": 1.1
+        },
+        {
+          "pause": 0.5
+        },
+        {
+          "say": "Write the goal, sorry",
+          "keep": false,
+          "reason": "false_start",
+          "group": "g3"
+        }
+      ]
+    },
+    {
+      "name": "b10_take2",
+      "fps": 60,
+      "size": "720x1280",
+      "leadIn": 0.8,
+      "tail": 1.1,
+      "units": [
+        {
+          "say": "Write the goal for each block on paper.",
+          "group": "g3"
+        },
+        {
+          "pause": 1.3
+        },
+        {
+          "say": "Stop before you are tired, not after.",
+          "group": "g4"
+        },
+        {
+          "pause": 2.1
+        }
+      ]
+    }
+  ]
+}

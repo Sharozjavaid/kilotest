@@ -1,0 +1,125 @@
+{
+  "id": "b30",
+  "title": "Weekend trip",
+  "clips": [
+    {
+      "name": "b30_take1",
+      "fps": 60,
+      "size": "1080x1920",
+      "leadIn": 0.9,
+      "tail": 1,
+      "units": [
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "A perfect weekend in the mountains for under two hundred dollars.",
+          "group": "g0"
+        }
+      ]
+    },
+    {
+      "name": "b30_take2",
+      "fps": 60,
+      "size": "1080x1920",
+      "leadIn": 0.5,
+      "tail": 0.4,
+      "units": [
+        {
+          "say": "We took the early train on Saturday.",
+          "group": "g1"
+        },
+        {
+          "pause": 1.7
+        }
+      ]
+    },
+    {
+      "name": "b30_take3",
+      "fps": 60,
+      "size": "1080x1920",
+      "leadIn": 0.6,
+      "tail": 0.5,
+      "units": [
+        {
+          "say": "The cabin was sixty dollars a night.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g2"
+        },
+        {
+          "pause": 0.6
+        },
+        {
+          "say": "The cabin was sixty dollars a night.",
+          "group": "g2"
+        },
+        {
+          "pause": 2.6
+        }
+      ]
+    },
+    {
+      "name": "b30_take4",
+      "fps": 60,
+      "size": "1080x1920",
+      "leadIn": 0.5,
+      "tail": 1,
+      "units": [
+        {
+          "filler": "uh"
+        },
+        {
+          "say": "Sunday was a long hike and a lake swim.",
+          "group": "g3"
+        }
+      ]
+    },
+    {
+      "name": "b30_take5",
+      "fps": 60,
+      "size": "1080x1920",
+      "leadIn": 0.7,
+      "tail": 0.9,
+      "units": [
+        {
+          "say": "Home by nine on Sunday night.",
+          "keep": false,
+          "reason": "retake",
+          "group": "g4"
+        },
+        {
+          "pause": 1.2
+        },
+        {
+          "say": "Home by nine on Sunday night.",
+          "group": "g4"
+        }
+      ]
+    },
+    {
+      "name": "b30_take6",
+      "fps": 60,
+      "size": "1080x1920",
+      "leadIn": 0.5,
+      "tail": 0.8,
+      "units": [
+        {
+          "filler": "er"
+        },
+        {
+          "say": "Full itinerary in my highlights.",
+          "group": "g5"
+        },
+        {
+          "pause": 1.5
+        },
+        {
+          "say": "let me do that again",
+          "keep": false,
+          "reason": "off_script"
+        }
+      ]
+    }
+  ]
+}
