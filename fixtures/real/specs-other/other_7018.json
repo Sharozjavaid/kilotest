@@ -1,0 +1,108 @@
+{
+  "id": "other_7018",
+  "title": "Real speech, LibriSpeech speaker 7018 (M)",
+  "mode": "general",
+  "speaker": "7018",
+  "script": false,
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.36,
+      "tail": 0.63,
+      "pieces": [
+        {
+          "utt": "7018-75789-0006",
+          "role": "line",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 0.63
+        },
+        {
+          "utt": "7018-75789-0010",
+          "role": "line",
+          "gainDb": 0.6
+        },
+        {
+          "pause": 3.35
+        },
+        {
+          "utt": "7018-75789-0012",
+          "role": "line",
+          "gainDb": 1.5
+        },
+        {
+          "pause": 0.36
+        },
+        {
+          "utt": "7018-75789-0016",
+          "role": "line",
+          "gainDb": -0.6
+        }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": -6.1,
+      "leadIn": 1.45,
+      "tail": 1.8,
+      "pieces": [
+        {
+          "utt": "7018-75789-0019",
+          "words": 6,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -0.2
+        },
+        {
+          "pause": 1.27
+        },
+        {
+          "utt": "7018-75789-0019",
+          "words": 14,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -1.2
+        },
+        {
+          "pause": 1.56
+        },
+        {
+          "utt": "7018-75789-0019",
+          "role": "line",
+          "group": "g1",
+          "gainDb": -0.5
+        },
+        {
+          "pause": 0.4
+        },
+        {
+          "utt": "7018-75789-0021",
+          "role": "line",
+          "gainDb": -1.2
+        },
+        {
+          "pause": 0.46
+        },
+        {
+          "utt": "7018-75789-0022",
+          "role": "line",
+          "gainDb": 0
+        },
+        {
+          "pause": 0.46
+        },
+        {
+          "utt": "7018-75789-0023",
+          "role": "line",
+          "gainDb": 0.7
+        }
+      ]
+    }
+  ]
+}

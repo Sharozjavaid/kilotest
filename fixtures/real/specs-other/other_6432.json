@@ -1,0 +1,134 @@
+{
+  "id": "other_6432",
+  "title": "Real speech, LibriSpeech speaker 6432 (M)",
+  "mode": "general",
+  "speaker": "6432",
+  "script": false,
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 30,
+      "size": "1280x720",
+      "gainDb": 0,
+      "leadIn": 1.25,
+      "tail": 1.91,
+      "pieces": [
+        {
+          "utt": "6432-63722-0011",
+          "role": "line",
+          "gainDb": 0.8
+        },
+        {
+          "pause": 0.64
+        },
+        {
+          "utt": "6432-63722-0012",
+          "role": "line",
+          "gainDb": -0.3
+        },
+        {
+          "pause": 5.4
+        },
+        {
+          "utt": "6432-63722-0013",
+          "role": "line",
+          "gainDb": 0
+        }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 30,
+      "size": "1280x720",
+      "gainDb": -8.4,
+      "leadIn": 0.3,
+      "tail": 1.43,
+      "pieces": [
+        {
+          "utt": "6432-63722-0014",
+          "words": 6,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -0.7
+        },
+        {
+          "pause": 0.85
+        },
+        {
+          "utt": "6432-63722-0016",
+          "role": "line",
+          "gainDb": 1.1
+        },
+        {
+          "pause": 0.63
+        },
+        {
+          "utt": "6432-63722-0017",
+          "role": "line",
+          "gainDb": -0.7
+        }
+      ]
+    },
+    {
+      "name": "part3",
+      "fps": 30,
+      "size": "1280x720",
+      "gainDb": -7,
+      "leadIn": 1.11,
+      "tail": 1.8,
+      "pieces": [
+        {
+          "utt": "6432-63722-0014",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.6
+        },
+        {
+          "pause": 1.22
+        },
+        {
+          "utt": "6432-63722-0020",
+          "words": 3,
+          "role": "abandoned",
+          "group": "g2",
+          "gainDb": -1.3
+        },
+        {
+          "pause": 1.13
+        },
+        {
+          "utt": "6432-63722-0020",
+          "words": 5,
+          "role": "abandoned",
+          "group": "g2",
+          "gainDb": 1
+        },
+        {
+          "pause": 1.34
+        },
+        {
+          "utt": "6432-63722-0020",
+          "role": "line",
+          "group": "g2",
+          "gainDb": 1.4
+        },
+        {
+          "pause": 1.41
+        },
+        {
+          "utt": "6432-63722-0021",
+          "role": "line",
+          "gainDb": -0.6
+        },
+        {
+          "pause": 2.19
+        },
+        {
+          "utt": "6432-63722-0022",
+          "role": "line",
+          "gainDb": -1.1
+        }
+      ]
+    }
+  ]
+}

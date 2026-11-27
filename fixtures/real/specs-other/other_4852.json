@@ -1,0 +1,75 @@
+{
+  "id": "other_4852",
+  "title": "Real speech, LibriSpeech speaker 4852 (M)",
+  "mode": "general",
+  "speaker": "4852",
+  "script": false,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.35,
+      "tail": 1.15,
+      "pieces": [
+        {
+          "utt": "4852-28330-0009",
+          "role": "line",
+          "gainDb": -1.1
+        },
+        {
+          "pause": 0.31
+        },
+        {
+          "utt": "4852-28330-0010",
+          "role": "line",
+          "gainDb": -1.4
+        },
+        {
+          "pause": 0.46
+        },
+        {
+          "utt": "4852-28330-0011",
+          "words": 7,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 0.3
+        },
+        {
+          "pause": 0.98
+        },
+        {
+          "utt": "4852-28330-0011",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.4
+        },
+        {
+          "pause": 0.7
+        },
+        {
+          "utt": "4852-28330-0012",
+          "role": "line",
+          "gainDb": 1.4
+        },
+        {
+          "pause": 0.6
+        },
+        {
+          "utt": "4852-28330-0013",
+          "role": "line",
+          "gainDb": 0.1
+        },
+        {
+          "pause": 0.7
+        },
+        {
+          "utt": "4852-28330-0014",
+          "role": "line",
+          "gainDb": 0.7
+        }
+      ]
+    }
+  ]
+}

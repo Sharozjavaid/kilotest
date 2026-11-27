@@ -13,6 +13,7 @@ two people. See "What this proves" below.
 |---|---|---|
 | LibriSpeech dev-clean (Panayotov et al.), with Montreal Forced Aligner word times, as packaged in `gilkeyio/librispeech-alignments` on Hugging Face (alignments by Loren Lugosch) | CC BY 4.0 | the 12 recordings and their ground truth, and the held-out and fresh sets |
 | LibriSpeech test-clean, from the same package (first 8 of its 27 row groups, 113 MB) | CC BY 4.0 | the final set (`specs-final/`) |
+| LibriSpeech test-other, from the same package (all 30 row groups, 353 MB) | CC BY 4.0 | the "other" set (`specs-other/`) |
 | DisfluencySpeech test split (`amaai-lab/DisfluencySpeech`, Wang and Herremans 2024): one speaker re-enacting Switchboard calls, every "uh" and "um" in the transcript | Apache 2.0 | how many fillers the `whisper` transcriber keeps (`npm run whisper:fillers` in packages/analyze) |
 
 Looked at and not used: PodcastFillers (real podcast fillers, but its filler annotations are
@@ -140,6 +141,31 @@ sound just outside the aligner's edge, about as in held-out and fresh. (The mani
 `.work/out-final/` were built before `generate.mjs` named the split in its `source` line, so they
 say dev-clean there; a rebuild into another folder is identical apart from that line.)
 
+### The "other" set
+
+The final set was spent by the round that followed it (its cuts were looked at). The next round,
+the CTC check on Whisper's words (packages/analyze/src/ctc.ts), was checked on a new set built
+before it: LibriSpeech **test-other**, the harder, noisier half of LibriSpeech's test data, whose
+33 speakers none of the other sets use. Every one of them (all have a chapter of at least 5 usable
+lines), in speaker-number order, with the final set's design cycle. Its baseline was written down in
+totals only before any code changed (`specs-other/PREREGISTRATION.md`), and it was scored once at
+the end. dev-other (33 more unheard speakers) is still untouched.
+
+| Set | Specs | Output (gitignored) | Recordings | Clips | Length | Retake groups (as scored) | Readers |
+|---|---|---|---|---|---|---|---|
+| other | `specs-other/` | `.work/out-other/` | 33 | 57 | 1758 s | 47 | 17 F, 16 M |
+
+```sh
+fixtures/real/.work/venv/bin/python -I fixtures/real/fetch.py librispeech-test-other   # into .work/cache/librispeech-test-other (353 MB)
+node fixtures/real/plan.mjs --set other        # only to change the design: rewrites specs-other/*.json
+node fixtures/real/generate.mjs --specs fixtures/real/specs-other --out fixtures/real/.work/out-other --cache fixtures/real/.work/cache/librispeech-test-other
+cd packages/analyze && KILO_REAL_FIXTURES=../../fixtures/real/.work/out-other npm run score:real   # or -- --truth
+```
+
+`check.mjs --out .work/out-other`: of 582 unit edges, 60 starts and 101 ends have 20 ms or more of
+sound just outside the aligner's edge: its edges are looser here than on any other set, ends
+especially.
+
 ## Ground truth
 
 Units are the runs of a line's words between pauses of 0.1 s or more (MFA times moved onto the
@@ -191,6 +217,50 @@ threads, all threads counted, second look included; fillers kept with Kilo's pro
 
 The bigger models write a phrase said twice as one copy more often (a better language model tidies
 the speech), which is exactly what cutting retakes needs to see, so base.en stays the default.
+(These model rows were measured before the CTC check below, with Whisper alone.)
+
+### The CTC check (`KILO_WHISPER_ALIGN=ctc`, the default since this round)
+
+A small CTC character model (wav2vec2-base-960h as ONNX, fp32, 378 MB, no language model) reads
+each clip, and its greedy reading is set against Whisper's words (packages/analyze/src/ctc.ts):
+Whisper words with no CTC counterpart, in a stretch where the model wrote no letter for 0.3 s or
+more, are dropped (fillers and the halves of a word Whisper split stay), and each kept word's
+edges are held outside its CTC letters, 0.15 s past the last and 0.05 s before the first, never
+shrinking a pause below a length the decider reads. On these recordings the aligner's start comes
+before the CTC start for 99% of words, and its end after the CTC end for 99% of words before a
+pause (a median 0.12 s after), so the CTC letters are a safe floor for what a cut must keep.
+
+Developed on dev, held-out, fresh and final; scored once on the other set afterwards.
+
+| Set | Whisper alone | with the CTC check | True transcript |
+|---|---|---|---|
+| dev (12) | 2, 22/22 | 0, 22/22 | 0, 22/22 |
+| held-out (13) | 0, 16/16 | 0, 16/16 | 0, 16/16 |
+| fresh (12) | 0, 13/13 | 0, 13/13 | 0, 13/13 |
+| final (30), now a development set | 20, 36/42 | 12, 36/42 | 4, 40/42 |
+| **other (33), scored once** | 48, 37/47 | **34, 38/47** | 5, 46/47 |
+
+Word error rate falls a little (final 5.4% to 5.0%, other 10.1% to 9.7%); dead air kept rises by
+at most 0.5 points of the output. Cost: 0.16-0.17 CPU s per audio second more on 2 threads (about
+1 s to load the model per clip on top), 0.52 in all with Whisper on the other set; about 1 GB of
+memory while it runs.
+
+What it fixes is edges: on the other set the kept units cut at an edge fall from 19 to 12, while the
+units lost whole (a wrong take kept, a kept take cut) stay at 14, and 9 retake groups still go
+wrong. Those come from Whisper's punctuation and the decider: an abandoned start Whisper closes with
+a full stop, a pause inside the kept take written as "give...", which no acoustic model can see.
+
+Tried and left out, on the development sets: moving every word onto its CTC times before the edges
+are refined (alone it lost a retake group on dev and on fresh; with the other parts, final 17
+clipped and 34/42, dev 20/22), adding CTC words Whisper did not write (nearly
+all were compounds the model splits, "TO MORROW", "POP CORN"; no folded repeat showed up as a
+separate CTC copy once the unheard copies were dropped), and letting a held edge always reach the
+CTC span whatever the pause (final 10 clipped, but dev 21/22). The int8 ONNX export of the same
+model writes garbage and is not used.
+
+Caveat: wav2vec2-base-960h was fine-tuned on LibriSpeech's 960 h of training speech, other speakers
+but the same kind of audiobook audio as every set here. On a creator's phone in a noisy room it
+will hear less, and a word it hears nothing of is dropped. The gain measured here is an upper bound.
 
 ## What this proves, and what it does not
 

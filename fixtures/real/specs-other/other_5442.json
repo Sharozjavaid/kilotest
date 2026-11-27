@@ -1,0 +1,119 @@
+{
+  "id": "other_5442",
+  "title": "Real speech, LibriSpeech speaker 5442 (F)",
+  "mode": "general",
+  "speaker": "5442",
+  "script": true,
+  "clips": [
+    {
+      "name": "part1",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.86,
+      "tail": 1,
+      "pieces": [
+        {
+          "utt": "5442-41169-0009",
+          "role": "line",
+          "gainDb": -0.1
+        },
+        {
+          "pause": 1.59
+        },
+        {
+          "utt": "5442-41169-0010",
+          "role": "line",
+          "gainDb": -1
+        },
+        {
+          "pause": 0.61
+        },
+        {
+          "utt": "5442-41169-0011",
+          "words": 2,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 1.5
+        },
+        {
+          "pause": 1.27
+        },
+        {
+          "utt": "5442-41169-0011",
+          "words": 4,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 1.4
+        },
+        {
+          "pause": 1.35
+        },
+        {
+          "utt": "5442-41169-0011",
+          "role": "line",
+          "group": "g1",
+          "gainDb": -0.5
+        },
+        {
+          "pause": 0.31
+        },
+        {
+          "utt": "5442-41169-0012",
+          "role": "line",
+          "gainDb": 1
+        }
+      ]
+    },
+    {
+      "name": "part2",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 3,
+      "leadIn": 0.73,
+      "tail": 0.71,
+      "pieces": [
+        {
+          "utt": "5442-41169-0013",
+          "role": "line",
+          "gainDb": 1
+        },
+        {
+          "pause": 0.97
+        },
+        {
+          "utt": "5442-41169-0014",
+          "role": "line",
+          "gainDb": -0.7
+        },
+        {
+          "pause": 0.33
+        },
+        {
+          "utt": "5442-41169-0016",
+          "words": 4,
+          "role": "abandoned",
+          "group": "g2",
+          "gainDb": 1
+        },
+        {
+          "pause": 0.59
+        },
+        {
+          "utt": "5442-41169-0016",
+          "role": "line",
+          "group": "g2",
+          "gainDb": 0.4
+        },
+        {
+          "pause": 0.26
+        },
+        {
+          "utt": "5442-41169-0017",
+          "role": "line",
+          "gainDb": -0.3
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "id": "other_1998",
+  "title": "Real speech, LibriSpeech speaker 1998 (F)",
+  "mode": "general",
+  "speaker": "1998",
+  "script": false,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "1280x720",
+      "gainDb": 0,
+      "leadIn": 0.7,
+      "tail": 1.05,
+      "pieces": [
+        {
+          "utt": "1998-29454-0034",
+          "role": "line",
+          "gainDb": 0.9
+        },
+        {
+          "pause": 0.45
+        },
+        {
+          "utt": "1998-29454-0035",
+          "role": "line",
+          "gainDb": -0.6
+        },
+        {
+          "pause": 0.27
+        },
+        {
+          "utt": "1998-29454-0036",
+          "words": 5,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -1.2
+        },
+        {
+          "pause": 1.11
+        },
+        {
+          "utt": "1998-29454-0036",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.8
+        },
+        {
+          "pause": 0.52
+        },
+        {
+          "utt": "1998-29454-0037",
+          "role": "line",
+          "gainDb": 0.1
+        },
+        {
+          "pause": 0.31
+        },
+        {
+          "utt": "1998-29454-0038",
+          "role": "line",
+          "gainDb": -0.4
+        },
+        {
+          "pause": 0.54
+        },
+        {
+          "utt": "1998-29454-0039",
+          "role": "line",
+          "gainDb": 1.3
+        }
+      ]
+    }
+  ]
+}

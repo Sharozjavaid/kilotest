@@ -4,3 +4,5 @@
 # so faster-whisper's own decoder (PyAV, which pip also installs) is never used.
 faster-whisper==1.2.1
 ctranslate2==4.9.1
+# The CTC check (kilo_ctc.py, KILO_WHISPER_ALIGN=ctc, the default); faster-whisper pulls it in too.
+onnxruntime==1.32.0

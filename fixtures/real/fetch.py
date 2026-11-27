@@ -10,13 +10,15 @@ Writes, under fixtures/real/.work/cache/ (gitignored, never committed):
   librispeech/<utterance id>.flac   LibriSpeech dev-clean audio, as published
   librispeech/<utterance id>.json   its transcript and Montreal Forced Aligner word times
   librispeech-test/<id>.flac + .json  the same from test-clean, for the final set (specs-final/)
+  librispeech-test-other/<id>.flac + .json  the same from test-other, for the "other" set (specs-other/)
   disfluency/<n>.flac + .json       DisfluencySpeech test split, for the filler-retention check
 
     fixtures/real/.work/venv/bin/python -I fixtures/real/fetch.py librispeech-test   # only the final set's audio
+    fixtures/real/.work/venv/bin/python -I fixtures/real/fetch.py librispeech-test-other   # only the other set's audio
 
 Only the parquet row groups the specs use are read (HTTP range requests), so the
-download stays near 140 MB for LibriSpeech dev-clean, 115 MB for test-clean and 71 MB for
-DisfluencySpeech.
+download stays near 140 MB for LibriSpeech dev-clean, 115 MB for test-clean, 355 MB for
+test-other (all of it) and 71 MB for DisfluencySpeech.
 Both datasets are pinned to a revision so the recordings rebuild identically.
 """
 import io
@@ -41,6 +43,10 @@ LIBRI_ROW_GROUPS = [3, 6, 7, 14, 15, 16, 20, 21, 25, 26]
 # row groups, so the first 8 (about 115 MB) give 30 speakers a chapter of 5 or more usable lines.
 LIBRI_TEST_FILE = 'data/test_clean-00000-of-00001.parquet'
 LIBRI_TEST_ROW_GROUPS = list(range(8))
+# test-other, for the "other" set: the harder, noisier half of LibriSpeech, 33 speakers none of the
+# other splits use. All 30 row groups (2938 rows, about 355 MB): every speaker has a usable chapter.
+LIBRI_TEST_OTHER_FILE = 'data/test_other-00000-of-00001.parquet'
+LIBRI_TEST_OTHER_ROW_GROUPS = list(range(30))
 
 # DisfluencySpeech (Apache 2.0): one speaker re-enacting Switchboard calls, fillers included.
 DISFL_REPO = 'datasets/amaai-lab/DisfluencySpeech'
@@ -108,6 +114,8 @@ def main() -> None:
         print('librispeech utterances:', fetch_libri(fs))
     if 'librispeech-test' in which:
         print('librispeech test-clean utterances:', fetch_libri(fs, 'librispeech-test', LIBRI_TEST_FILE, LIBRI_TEST_ROW_GROUPS, 'test-clean'))
+    if 'librispeech-test-other' in which:
+        print('librispeech test-other utterances:', fetch_libri(fs, 'librispeech-test-other', LIBRI_TEST_OTHER_FILE, LIBRI_TEST_OTHER_ROW_GROUPS, 'test-other'))
     if 'disfluency' in which:
         print('disfluency utterances:', fetch_disfluency(fs))
 

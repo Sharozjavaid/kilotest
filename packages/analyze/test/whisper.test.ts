@@ -128,7 +128,7 @@ describe('whisper transcriber: words', () => {
     mkdirSync(WORK, { recursive: true });
     const audio = join(WORK, 'b.wav');
     wav(audio, 3, [[0.5, 1.2], [1.8, 2.4]]);
-    const t = whisperTranscriber(whisperOptionsFromEnv({}), async () => ({
+    const t = whisperTranscriber(whisperOptionsFromEnv({ KILO_WHISPER_ALIGN: 'none' }), async () => ({
       language: 'en',
       words: [{ text: 'Hello', start: 0.3, end: 1.0, probability: 0.9 }, { text: 'there.', start: 1.0, end: 2.4, probability: 0.9 }],
     }));
@@ -237,7 +237,7 @@ describe('whisper transcriber: a second look at stretches it got wrong', () => {
     const audio = join(WORK, 'second-look.wav');
     wav(audio, 10, [[1, 3], [4, 6], [7, 9]]);
     const calls: string[] = [];
-    const t = whisperTranscriber(whisperOptionsFromEnv({}), async (input): Promise<WhisperRaw> => {
+    const t = whisperTranscriber(whisperOptionsFromEnv({ KILO_WHISPER_ALIGN: 'none' }), async (input): Promise<WhisperRaw> => {
       calls.push(input.clipId);
       if (input.clipId.endsWith(EXCERPT_CLIP_SUFFIX)) {
         // The excerpt starts 0.3 s before the stretch (at 3.7 s).

@@ -1,0 +1,83 @@
+{
+  "id": "other_7105",
+  "title": "Real speech, LibriSpeech speaker 7105 (M)",
+  "mode": "general",
+  "speaker": "7105",
+  "script": true,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.43,
+      "tail": 1.87,
+      "pieces": [
+        {
+          "utt": "7105-2330-0030",
+          "role": "line",
+          "gainDb": 0.2
+        },
+        {
+          "pause": 2.39
+        },
+        {
+          "utt": "7105-2330-0031",
+          "role": "line",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 0.47
+        },
+        {
+          "utt": "7105-2330-0032",
+          "words": 2,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": 0.7
+        },
+        {
+          "pause": 1.09
+        },
+        {
+          "utt": "7105-2330-0032",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.2
+        },
+        {
+          "pause": 5.49
+        },
+        {
+          "utt": "7105-2330-0033",
+          "role": "line",
+          "gainDb": 0
+        },
+        {
+          "pause": 0.55
+        },
+        {
+          "utt": "7105-2330-0034",
+          "role": "line",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 5.08
+        },
+        {
+          "utt": "7105-2330-0035",
+          "role": "line",
+          "gainDb": 1
+        },
+        {
+          "pause": 0.58
+        },
+        {
+          "utt": "7105-2330-0036",
+          "role": "line",
+          "gainDb": 1.4
+        }
+      ]
+    }
+  ]
+}

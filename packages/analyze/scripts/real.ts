@@ -7,6 +7,8 @@ import { readPcm16 } from '../src/silence.js';
 import { keys } from '../src/text.js';
 import type { Transcriber } from '../src/transcribe.js';
 import { EXCERPT_CLIP_SUFFIX, WHISPER_SCRIPT, runWhisperScript, whisperOptionsFromEnv, whisperTranscriber, type WhisperOptions, type WhisperRaw } from '../src/whisper.js';
+import { CTC_SCRIPT, parseCtcOutput, type CtcEmissions } from '../src/ctc.js';
+import { mediaTimeoutMs, spawnChecked } from '../src/proc.js';
 import { PKG, REPO, findFixtures, scoreFixture, type FixtureScore } from './scoring.js';
 
 /**
@@ -19,6 +21,7 @@ import { PKG, REPO, findFixtures, scoreFixture, type FixtureScore } from './scor
 
 export const REAL_ROOT = process.env.KILO_REAL_FIXTURES ?? join(REPO, 'fixtures/real/.work/out');
 const WHISPER_CACHE = join(PKG, '.work/score-real/whisper');
+const CTC_CACHE = join(PKG, '.work/score-real/ctc');
 
 export interface WhisperStats {
   files: number;
@@ -32,6 +35,37 @@ export interface WhisperStats {
   /** Every clip's audio and the CPU seconds its transcription took (cached ones as recorded), second looks included. */
   allAudioSec?: number;
   allCpuSec?: number;
+  /** CPU seconds of the CTC check (KILO_WHISPER_ALIGN=ctc), as recorded, over every clip. */
+  ctcCpuSec?: number;
+}
+
+/** The CTC check's script output, cached on disk keyed on the audio and the script. */
+function cachedCtc(opts: WhisperOptions, stats?: WhisperStats) {
+  const script = existsSync(CTC_SCRIPT) ? readFileSync(CTC_SCRIPT) : Buffer.alloc(0);
+  return async (input: { clipId: string; audioPath: string; durationSec: number }): Promise<CtcEmissions> => {
+    const audio = await readFile(input.audioPath);
+    const key = createHash('sha1').update(audio).update(script).digest('hex').slice(0, 20);
+    const file = join(CTC_CACHE, `${key}.json`);
+    let e: CtcEmissions;
+    if (existsSync(file)) e = parseCtcOutput(readFileSync(file, 'utf8'), opts.cacheDir);
+    else {
+      // Cache the script's own line, so a cached run reads exactly what a fresh one does.
+      const line = await runCtcLine(opts, input.audioPath, input.durationSec);
+      await mkdir(CTC_CACHE, { recursive: true });
+      writeFileSync(file, line);
+      e = parseCtcOutput(line, opts.cacheDir);
+    }
+    if (stats) stats.ctcCpuSec = (stats.ctcCpuSec ?? 0) + (e.cpuSec ?? 0);
+    return e;
+  };
+}
+
+async function runCtcLine(opts: WhisperOptions, audioPath: string, durationSec: number): Promise<string> {
+  const r = await spawnChecked(opts.python, ['-I', CTC_SCRIPT, '--cache-dir', opts.cacheDir, '--threads', String(opts.threads), audioPath], {
+    timeoutMs: mediaTimeoutMs(durationSec) + 60_000,
+    maxBuffer: 256 << 20,
+  });
+  return r.stdout.toString('utf8');
 }
 
 /**
@@ -74,7 +108,7 @@ export function cachedWhisper(opts: WhisperOptions = whisperOptionsFromEnv(), st
     await mkdir(WHISPER_CACHE, { recursive: true });
     writeFileSync(file, JSON.stringify(raw));
     return raw;
-  });
+  }, cachedCtc(opts, stats));
 }
 
 // ---- extra measures ------------------------------------------------------------------

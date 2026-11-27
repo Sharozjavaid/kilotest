@@ -9,6 +9,7 @@ import { detectSilence, readPcm16, speechTimer } from './silence.js';
 import { CHUNK_PAUSE_SEC } from './chunks.js';
 import { endsClause, endsSentence, key, lcs } from './text.js';
 import { cleanWords, type TranscribeInput, type Transcriber } from './transcribe.js';
+import { ctcGreedyWords, dropUnheard, holdCtcEdges, runCtcScript, type CtcRunner } from './ctc.js';
 
 /**
  * `KILO_TRANSCRIBER=whisper`: an open Whisper model on this machine's CPU, free and
@@ -46,6 +47,11 @@ export interface WhisperOptions {
   prompt?: string;
   /** Let the script fetch a missing model from Hugging Face (off by default: a worker should not download on the job path). */
   allowDownload: boolean;
+  /**
+   * `ctc` (default): check Whisper's words and edges against a CTC model's reading of the audio
+   * (ctc.ts); `none`: Whisper alone. KILO_WHISPER_ALIGN.
+   */
+  align?: 'ctc' | 'none';
 }
 
 export function whisperOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): WhisperOptions {
@@ -59,6 +65,7 @@ export function whisperOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): Whi
     // Empty means the default prompt (a copied .env.example leaves it empty); "none" sends no prompt.
     ...(env.KILO_WHISPER_PROMPT ? { prompt: env.KILO_WHISPER_PROMPT === 'none' ? '' : env.KILO_WHISPER_PROMPT } : {}),
     allowDownload: env.KILO_WHISPER_ALLOW_DOWNLOAD === '1',
+    align: env.KILO_WHISPER_ALIGN === 'none' ? 'none' : 'ctc',
   };
 }
 
@@ -681,21 +688,33 @@ export function dropWordsOverSilence(words: readonly ScriptWord[], speechTime: (
   });
 }
 
-/** The `whisper` transcriber: the script's words, a second look at stretches it got wrong, fillers flagged, edges moved to the measured silences. */
-export function whisperTranscriber(opts: WhisperOptions = whisperOptionsFromEnv(), run: WhisperRunner = runWhisperScript(opts)): Transcriber {
+/**
+ * The `whisper` transcriber: the script's words, a second look at stretches it got wrong, fillers
+ * flagged, edges moved to the measured silences. With `align: 'ctc'` (the default) words the CTC
+ * model heard nothing of are dropped first, and after the edges are refined each word's edges are
+ * held outside its CTC span (ctc.ts).
+ */
+export function whisperTranscriber(
+  opts: WhisperOptions = whisperOptionsFromEnv(),
+  run: WhisperRunner = runWhisperScript(opts),
+  ctcRun: CtcRunner = runCtcScript(opts),
+): Transcriber {
   return {
     name: 'whisper',
     async transcribe(input) {
       const raw = await run(input);
+      const ctc = opts.align !== 'none' ? ctcGreedyWords(await ctcRun(input)) : null;
       const gaps = await detectSilence({ clipId: input.clipId, audioPath: input.audioPath });
       const pcm = readPcm16(await readFile(input.audioPath));
       const speechTime = speechTimer(pcm);
-      const words = dropWordsOverSilence(await secondLook(input, raw.words, pcm, speechTime, gaps, run), speechTime, input.durationSec);
+      let words = dropWordsOverSilence(await secondLook(input, raw.words, pcm, speechTime, gaps, run), speechTime, input.durationSec);
+      if (ctc) words = dropUnheard(words, ctc);
+      const placed = leanIntoPauses(refineWordTimes(whisperWords(words, input.durationSec), gaps, input.durationSec, speechTime), gaps, input.durationSec);
       return Transcript.parse({
         clipId: input.clipId,
         language: (raw.language ?? 'en').slice(0, 2),
         durationSec: input.durationSec,
-        words: leanIntoPauses(refineWordTimes(whisperWords(words, input.durationSec), gaps, input.durationSec, speechTime), gaps, input.durationSec),
+        words: ctc ? holdCtcEdges(placed, ctc, input.durationSec, DECIDER_PAUSES_SEC) : placed,
       });
     },
   };

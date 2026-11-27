@@ -1,0 +1,72 @@
+{
+  "id": "other_3764",
+  "title": "Real speech, LibriSpeech speaker 3764 (F)",
+  "mode": "general",
+  "speaker": "3764",
+  "script": true,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 60,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 0.84,
+      "tail": 1.58,
+      "pieces": [
+        {
+          "utt": "3764-168670-0025",
+          "role": "line",
+          "gainDb": 0.9
+        },
+        {
+          "pause": 1.05
+        },
+        {
+          "utt": "3764-168670-0026",
+          "role": "line",
+          "gainDb": 0.6
+        },
+        {
+          "pause": 0.31
+        },
+        {
+          "utt": "3764-168670-0027",
+          "role": "line",
+          "gainDb": 0.9
+        },
+        {
+          "pause": 0.45
+        },
+        {
+          "utt": "3764-168670-0029",
+          "role": "line",
+          "gainDb": 1.4
+        },
+        {
+          "pause": 1.43
+        },
+        {
+          "utt": "3764-168670-0030",
+          "role": "line",
+          "gainDb": 1.5
+        },
+        {
+          "pause": 1.37
+        },
+        {
+          "utt": "3764-168670-0032",
+          "role": "line",
+          "gainDb": 1.3
+        },
+        {
+          "pause": 0.57
+        },
+        {
+          "utt": "3764-168670-0033",
+          "role": "line",
+          "gainDb": 1.5
+        }
+      ]
+    }
+  ]
+}

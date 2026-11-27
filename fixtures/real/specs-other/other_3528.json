@@ -1,0 +1,75 @@
+{
+  "id": "other_3528",
+  "title": "Real speech, LibriSpeech speaker 3528 (F)",
+  "mode": "general",
+  "speaker": "3528",
+  "script": true,
+  "clips": [
+    {
+      "name": "take",
+      "fps": 30,
+      "size": "720x1280",
+      "gainDb": 0,
+      "leadIn": 1.27,
+      "tail": 1.92,
+      "pieces": [
+        {
+          "utt": "3528-168669-0066",
+          "role": "line",
+          "gainDb": 0.3
+        },
+        {
+          "pause": 1.62
+        },
+        {
+          "utt": "3528-168669-0067",
+          "role": "line",
+          "gainDb": 0.2
+        },
+        {
+          "pause": 0.63
+        },
+        {
+          "utt": "3528-168669-0069",
+          "role": "line",
+          "gainDb": -1.5
+        },
+        {
+          "pause": 1.57
+        },
+        {
+          "utt": "3528-168669-0071",
+          "words": 3,
+          "role": "abandoned",
+          "group": "g1",
+          "gainDb": -0.8
+        },
+        {
+          "pause": 0.62
+        },
+        {
+          "utt": "3528-168669-0071",
+          "role": "line",
+          "group": "g1",
+          "gainDb": 0.9
+        },
+        {
+          "pause": 0.54
+        },
+        {
+          "utt": "3528-168669-0073",
+          "role": "line",
+          "gainDb": 1.2
+        },
+        {
+          "pause": 0.6
+        },
+        {
+          "utt": "3528-168669-0074",
+          "role": "line",
+          "gainDb": 1.1
+        }
+      ]
+    }
+  ]
+}
