@@ -7,3 +7,10 @@ export function revisionCheck(serverRevision: number, reviewed: number | null): 
   if (reviewed === null || serverRevision === reviewed) return 'ok';
   return serverRevision > reviewed ? 'ahead' : 'behind';
 }
+
+/** Where Export's "Next video" goes for the batch's next video: its export, its review, or the batch while it is not ready. */
+export function nextVideoHref(next: { id: string; batchId: string; status: string }): string {
+  if (next.status === 'done') return `/export/${next.id}`;
+  if (next.status === 'ready_for_review' || next.status === 'rendering') return `/review/${next.id}`;
+  return `/batch/${next.batchId}`;
+}

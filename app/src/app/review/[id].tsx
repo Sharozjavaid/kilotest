@@ -9,7 +9,7 @@ import { errorMessage } from '@/api/errors';
 import { formatDuration, plural, statusLabel } from '@/lib/format';
 import { useEdlSaver } from '@/review/useEdlSaver';
 import { useSkipPlayer } from '@/review/useSkipPlayer';
-import { useStableUrl } from '@/review/stableUrl';
+import { useStableUrl } from '@/lib/stableUrl';
 import { ScrubStrip } from '@/review/ScrubStrip';
 import { TranscriptRowView } from '@/review/TranscriptRowView';
 import { activeRowId, transcriptRows, type TranscriptRow } from '@/review/rows';

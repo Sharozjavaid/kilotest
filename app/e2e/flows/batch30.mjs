@@ -463,8 +463,11 @@ export default async function batch30(ctx) {
     const readyRows = page.getByRole('button', { name: new RegExp(`^(${recs.map((r) => r.title).join('|')}), `) });
     await waitFor('Home to list every video', async () => (await readyRows.count()) === recs.length, { timeoutMs: 30_000 });
     report.timings.homeListMs = Date.now() - tHome;
-    const loadedThumbs = await page.locator('img').evaluateAll((imgs) => imgs.filter((i) => i.src.includes('/v1/local/file/') && i.naturalWidth > 0).length);
-    ctx.log(`  Home lists ${recs.length} ready videos in ${report.timings.homeListMs} ms; ${loadedThumbs} thumbnails loaded`);
+    const imgs = await page.locator('img').evaluateAll((els) => ({ all: els.filter((i) => i.src.includes('/v1/local/file/')).length, loaded: els.filter((i) => i.src.includes('/v1/local/file/') && i.naturalWidth > 0).length }));
+    report.homeImages = imgs;
+    ctx.log(`  Home lists ${recs.length} ready videos in ${report.timings.homeListMs} ms; ${imgs.all} thumbnail <img> in the page (${imgs.loaded} loaded)`);
+    // One picture per row on Home and on the Batch screen beneath it, not one per poll.
+    if (imgs.all > 3 * recs.length) finding('dom_growth', `${imgs.all} thumbnail <img> elements in the page for ${recs.length} videos after the batch was polled to ready`);
     // Scroll the whole list like a thumb would, and count blocked frames.
     await takeLongTasks(page);
     for (let k = 0; k < 25; k++) {
@@ -531,7 +534,13 @@ export default async function batch30(ctx) {
         const firstKept = afterFix.find((s) => s.keep)?.id;
         const kept = afterFix.filter((s) => s.keep && s.text.trim() && s.id !== firstKept && !fixTaps.includes(s.id));
         const marked = new Set(edl0.overlays.map((o) => o.anchorSegmentId));
-        const restorable = afterFix.filter((s) => !s.keep && s.text.trim().split(/\s+/).length >= 2 && ['retake', 'false_start'].includes(s.reason) && !fixTaps.includes(s.id));
+        // A take the ground truth also cuts (a wrongly cut line is a mistake, fixed above, not a deliberate edit).
+        const truthCut = (s) => {
+          const mc = r.manifest.clips[clipIds.indexOf(s.clipId)];
+          const over = mc.units.filter((u) => u.kind !== 'pause' && overlapLen([[s.start, s.end]], u.start, u.end) > 0.02);
+          return over.length > 0 && over.every((u) => !u.keep);
+        };
+        const restorable = afterFix.filter((s) => !s.keep && s.text.trim().split(/\s+/).length >= 2 && ['retake', 'false_start'].includes(s.reason) && !fixTaps.includes(s.id) && truthCut(s));
         let pick = null;
         let action = null;
         if (k % 2 === 1 && restorable.length) {
@@ -624,11 +633,25 @@ export default async function batch30(ctx) {
       if (i === 0) await shot(page, 'b30-08-export-first');
       // Next video, as the Export screen offers it.
       if (i < ids.length - 1) await page.getByRole('button', { name: new RegExp(`^Next video, ${i + 2} of ${recs.length}`) }).click();
-      if (i % 10 === 9) await snapshot(`after reviewing ${i + 1}`);
+      if (i % 10 === 9) {
+        await snapshot(`after reviewing ${i + 1}`);
+        const players = await page.locator('video').count();
+        report.browser.at(-1).videoElements = players;
+        // Each reviewed video's screens should go when the next one opens.
+        if (players > 3) finding('dom_growth', `${players} <video> elements mounted after reviewing ${i + 1} videos`);
+      }
       save();
     }
     report.timings.reviewAllSec = sec(Date.now() - tReview);
     mark('all reviewed');
+    // While the exports run, Home shows every reviewed video (exporting or finished).
+    await page.goto(ctx.appUrl + '/', { waitUntil: 'networkidle' });
+    await seeText(page, 'Finished');
+    const listedWhileExporting = await page.getByRole('button', { name: new RegExp(`^(${recs.map((r) => r.title).join('|')}), .*(Exporting|Ready to post|Posted)`) }).count();
+    report.homeListedWhileExporting = listedWhileExporting;
+    ctx.log(`  Home while exporting lists ${listedWhileExporting} of ${recs.length}`);
+    if (listedWhileExporting < recs.length) finding('home_list', `while exporting, Home lists ${listedWhileExporting} of ${recs.length} reviewed videos`);
+    await shot(page, 'b30-08b-home-exporting');
     await longTasks('review');
 
     // ==== 4. Every export, then every download ==============================================

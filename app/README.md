@@ -36,6 +36,7 @@ With no `EXPO_PUBLIC_SUPABASE_URL` the app signs in with dev auth (`dev:<user id
 npm run e2e                       # everything: database, server, web export, seven flows
 E2E_ONLY=upload,review npm run e2e
 E2E_SKIP_BUILD=1 npm run e2e      # reuse the last web export
+npm run e2e:batch30               # the 30-video run (opt-in, 30 to 60 minutes; E2E_ONLY=batch30)
 ```
 
 `e2e/run.mjs` starts PostgreSQL (`../server/scripts/dev-db.sh`), a fresh `kilo_e2e`
@@ -45,6 +46,33 @@ mode, serves it, and drives it with Playwright at 390x844 through `e2e/flows/`: 
 review, broll, export, recorder (Chromium's fake camera), styles (with the weekly goal) and
 failures. Later flows use what the upload flow made. Logs, downloads and server output go
 to `.work/e2e/`; screenshots of every main screen with real data to `.work/shots-real/`.
+
+### The 30-video run
+
+`npm run e2e:batch30` is PLAN.md's phase 1 test as far as a browser takes it. It needs the
+recordings first: `node ../fixtures/make-batch30.mjs --generate` (specs in
+`fixtures/specs/batch30/`, output in `fixtures/out/batch30/`, about two minutes). As one fresh
+creator, through the UI only, `e2e/flows/batch30.mjs`:
+
+- picks the 72 clips (in two picks, as the device picker takes 60 at a time), merges the
+  multi-clip recordings in the batch editor, names them, adds B-roll to nine, sets General with
+  three hooks, and starts one batch of 30;
+- watches the Batch and Home screens until all 30 are ready (upload and analysis progress, the
+  header count, nothing failed or stuck for ten minutes);
+- reviews every video: rows against the EDL, the automatic edit against the fixture's ground
+  truth (`manifest.json`), fixes every wrong line by tapping its row, makes a deliberate edit on
+  ten (cuts a kept line or restores a cut take), turns captions on for five, Looks good, Next video;
+- waits for all 90 final renders, downloads every version from each Export screen reached from
+  Home's Finished list, and checks each file: 1080x1920, the EDL's frame rate, duration within two
+  frames of the saved edit, -14 LUFS within 1.5, and every frame traced through the edit to the
+  fixture unit it shows (no cut line; the blue kept band and orange cut band where they belong);
+- ends on Home with all 30 finished and marks one as posted.
+
+Mode and hook count are per batch (`CreateBatchRequest.settings`), so one batch cannot mix modes;
+`E2E_BATCH30_MODE` picks the mode, `E2E_BATCH30_COUNT=n` runs the first n recordings while working
+on the flow. Timings, disk, browser memory, request counts, every automatic-edit mistake and every
+finding go to `.work/e2e/batch30/report.json`; the EDLs before and after review to
+`.work/e2e/batch30/edls/`.
 
 ## Behaviour worth knowing
 

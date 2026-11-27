@@ -8,9 +8,10 @@ import { getApi } from '@/api/client';
 import { errorMessage } from '@/api/errors';
 import { keys, useBatch, useMarkPosted, useVideo } from '@/api/queries';
 import { saveToCameraRoll, shareVideo } from '@/export/media';
-import { revisionCheck } from '@/export/revision';
+import { nextVideoHref, revisionCheck } from '@/export/revision';
 import { formatDuration, plural } from '@/lib/format';
 import { VideoModal } from '@/components/VideoModal';
+import { useStableUrl } from '@/lib/stableUrl';
 import { Card, ErrorState, Header, Icon, LoadingBlock, PillButton, ProgressBar, Row, Screen, Text, color, radius, shadow } from '@/ui';
 
 interface Version {
@@ -147,10 +148,11 @@ function ExportBody({ video, reviewedRevision, refetch }: { video: VideoDetail; 
   const idx = list.findIndex((x) => x.id === video.id);
   const next = idx >= 0 ? list[idx + 1] : undefined;
   const goNext = () => {
+    // Reached from Review's "Looks good", this video's Review is the screen underneath. Leave both,
+    // or every video of a batch would stay mounted under the next (30 players for 30 videos).
+    if (reviewedRevision !== null && router.canDismiss()) router.dismiss();
     if (!next) return router.replace('/');
-    if (next.status === 'done') router.replace(`/export/${next.id}`);
-    else if (next.status === 'ready_for_review' || next.status === 'rendering') router.replace(`/review/${next.id}`);
-    else router.replace(`/batch/${next.batchId}`);
+    router.replace(nextVideoHref(next));
   };
 
   const headline = n > 1 ? `${n} versions of ${video.title}` : `${video.title} is ${allDone ? 'ready' : 'exporting'}`;
@@ -271,6 +273,8 @@ function ExportBody({ video, reviewedRevision, refetch }: { video: VideoDetail; 
 
 function VersionTile({ version, selected, single, thumbnailUrl, onPress }: { version: Version; selected: boolean; single: boolean; thumbnailUrl: string | null; onPress: () => void }) {
   const r = version.render;
+  // The screen polls while rendering, signing the link afresh each time; keep the one that works.
+  const thumb = useStableUrl(thumbnailUrl);
   const done = r?.status === 'done';
   const progress = r ? r.progress : 0;
   const state = done ? 'Tap to play' : r?.status === 'failed' ? 'Failed' : `Exporting ${Math.round(progress * 100)}%`;
@@ -283,9 +287,9 @@ function VersionTile({ version, selected, single, thumbnailUrl, onPress }: { ver
       style={styles.tileWrap}
     >
       <View style={[styles.tile, selected && !single && [styles.tileSelected, shadow.selected]]}>
-        {thumbnailUrl ? (
+        {thumb.url ? (
           <>
-            <Image source={{ uri: thumbnailUrl }} style={styles.tileImage} contentFit="cover" accessibilityIgnoresInvertColors />
+            <Image source={{ uri: thumb.url }} onError={() => void thumb.renew()} style={styles.tileImage} contentFit="cover" accessibilityIgnoresInvertColors />
             <View style={styles.tileVeil} />
           </>
         ) : null}

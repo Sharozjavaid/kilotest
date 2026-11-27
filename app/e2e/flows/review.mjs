@@ -1,6 +1,7 @@
 // Flow 2: review a real video. The proxy plays over Range requests, the player skips the cut
 // ranges, the transcript rows match the server's EDL, a toggle saves and survives a reload, a
 // stale save is reconciled after the 409, variants switch, and a rendered preview plays.
+import { checkOverlayRules } from '@kilo/edl';
 import { assert, bodyText, openApp, samplePlayback, seeText, shot, sleep, waitFor } from '../lib.mjs';
 
 /** Rows the review screen should show: segments with words, or silences of a second or more. */
@@ -94,10 +95,16 @@ export default async function review(ctx) {
       ...edl0.variants.map((v) => v.segmentOrder[0]),
       ...edl0.variants.flatMap((v) => v.overlays.map((o) => o.anchorSegmentId)),
     ]);
-    const other = detail.edl.segments.find((s) => s.keep && s.text.trim() && s.id !== cutSeg.id && !hookIds.has(s.id));
-    assert(other, 'no line to cut that leaves the hooks alone');
-    const theirs = { ...detail.edl, segments: detail.edl.segments.map((s) => (s.id === other.id ? { ...s, keep: false, userOverride: true } : s)) };
-    theirs.variants = theirs.variants.map((v) => ({ ...v, segmentOrder: v.segmentOrder.filter((id) => id !== other.id) }));
+    // The other device is a client too: its edit must keep the overlay rules (the app fits overlays
+    // after a cut; this stand-in instead picks a line whose cut leaves them intact).
+    const cutOther = (seg) => {
+      const e = { ...detail.edl, segments: detail.edl.segments.map((s) => (s.id === seg.id ? { ...s, keep: false, userOverride: true } : s)) };
+      e.variants = e.variants.map((v) => ({ ...v, segmentOrder: v.segmentOrder.filter((id) => id !== seg.id) }));
+      return e;
+    };
+    const other = detail.edl.segments.find((s) => s.keep && s.text.trim() && s.id !== cutSeg.id && !hookIds.has(s.id) && checkOverlayRules(cutOther(s)).length === 0);
+    assert(other, 'no line to cut that leaves the hooks and the overlay rules alone');
+    const theirs = cutOther(other);
     await ctx.api.saveEdl(videoId, theirs, detail.edl.revision);
     const srcBefore = await page.evaluate(() => document.querySelector('video').currentSrc);
     const statuses = [];
