@@ -1,43 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Modal, Pressable, ScrollView, StyleSheet, View, type ScrollViewInstance } from 'react-native';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import Animated, { Easing, ReduceMotion, withTiming, type EntryExitAnimationFunction } from 'react-native-reanimated';
 import { RecorderCamera, useRecorderPermissions } from '@/recorder/camera/RecorderCamera';
 import type { CaptureInfo, RecorderCameraHandle } from '@/recorder/camera/types';
 import { fpsLabel, isFullQuality, resolutionLabel } from '@/recorder/camera/capture';
-import {
-  addTake,
-  canFinish,
-  deleteTake,
-  jumpTo,
-  keepTake,
-  keptCount,
-  lineLabel,
-  progressSegments,
-  setPrefs,
-  setStage,
-  takeLabel,
-  type RecorderPrefs,
-  type RecorderSession,
-} from '@/recorder/session';
+import { addTake, canFinish, deleteTake, jumpTo, keepTake, keptCount, lineLabel, progressSegments, setPrefs, setStage, takeLabel, type RecorderPrefs, type RecorderSession } from '@/recorder/session';
 import { loadRecorder, updateRecorder, useRecorder } from '@/recorder/store';
+import { phaseHaptic, type RecorderPhase } from '@/recorder/recordButton';
+import { RecordButton } from '@/recorder/RecordButton';
+import { LinePills } from '@/recorder/LinePills';
+import { Teleprompter } from '@/recorder/Teleprompter';
+import { RecorderSheets } from '@/recorder/RecorderSheets';
 import { formatDuration, plural } from '@/lib/format';
-import { Card, Icon, PillButton, SegmentedControl, Text, accentGloss, color, fontFamily, radius, shadow } from '@/ui';
+import { Glass, GlassGroup, PillButton, PressableScale, SymbolIcon, Text, ThemeScope, haptic, makeStyles, motionHaptics, prefersReducedMotion, useColors, useReducedMotionSetting, type IconName } from '@/ui';
 
-/** Teleprompter type sizes: current line / next line. */
-const TEXT_SIZES: Record<RecorderPrefs['textSize'], { line: number; next: number }> = {
-  S: { line: 22, next: 15 },
-  M: { line: 26, next: 17 },
-  L: { line: 32, next: 19 },
-};
-/** Auto-scroll speeds, px per second. */
-const SCROLL_PX: Record<RecorderPrefs['scrollSpeed'], number> = { 0: 0, 1: 14, 2: 24, 3: 36 };
+const native = Platform.OS !== 'web';
+const standard = Easing.bezier(0.2, 0.8, 0.2, 1);
+const WHITE_70 = 'rgba(255,255,255,0.7)';
 
-type Phase = 'idle' | 'countdown' | 'recording' | 'saving';
-
-/** Record with script, step 2: the camera with the teleprompter (mock-up `Record`). */
+/** Record with script, step 2 (design brief 4.14): the camera, always dark, with glass controls over it. */
 export default function RecorderScreen() {
   const { loaded, session } = useRecorder();
   useEffect(() => {
@@ -49,8 +34,12 @@ export default function RecorderScreen() {
       if (loaded && !session) router.replace('/record');
     }, [loaded, session]),
   );
-  if (!loaded || !session) return <View style={styles.root} />;
-  return <Recorder session={session} />;
+  return (
+    <ThemeScope appearance="dark">
+      <StatusBar style="light" />
+      {!loaded || !session ? <View style={styles.root} /> : <Recorder session={session} />}
+    </ThemeScope>
+  );
 }
 
 function Recorder({ session }: { session: RecorderSession }) {
@@ -60,40 +49,63 @@ function Recorder({ session }: { session: RecorderSession }) {
   return <RecorderBody session={session} />;
 }
 
+const useStyles = makeStyles((t) => ({
+  top: { paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  circle: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  badge: { height: 32, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  recDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: t.color.record },
+  group: { flexDirection: 'row', gap: 8 },
+  freeChip: { alignSelf: 'center', height: 32, paddingHorizontal: 14, flexDirection: 'row', gap: 8, alignItems: 'center' },
+  middle: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
+  countdown: { fontFamily: 'Inter_700Bold', fontSize: 96, lineHeight: 104, color: '#FFFFFF', textShadowColor: 'rgba(0,0,0,0.35)', textShadowRadius: 12, textShadowOffset: { width: 0, height: 2 } },
+  // Solid, not glass: the recorder keeps to six glass views.
+  notice: { alignSelf: 'center', marginHorizontal: 24, marginBottom: 10, paddingVertical: 7, paddingHorizontal: 14, borderRadius: 16, backgroundColor: 'rgba(11,18,32,0.62)' },
+  panel: { marginHorizontal: 12, gap: 14 },
+  counters: { flexDirection: 'row', justifyContent: 'space-between' },
+  controls: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingHorizontal: 4 },
+  side: { width: 84, alignItems: 'center', gap: 6, paddingTop: 12 },
+  sideCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.14)' },
+  sideOn: { backgroundColor: t.color.accent },
+  finish: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: -4 },
+  preview: { width: 150, height: 267, borderRadius: 20, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: t.color.player },
+  previewLabel: { position: 'absolute', left: 10, right: 10, bottom: 10, height: 28, borderRadius: 14, flexDirection: 'row', gap: 6, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(11,18,32,0.55)' },
+  card: { alignSelf: 'stretch', gap: 10, padding: 24, alignItems: 'center' },
+}));
+
 function RecorderBody({ session }: { session: RecorderSession }) {
+  const s = useStyles();
   const insets = useSafeAreaInsets();
   const cam = useRef<RecorderCameraHandle>(null);
   const [info, setInfo] = useState<CaptureInfo | null>(null);
   const [camError, setCamError] = useState<string | null>(null);
   const [camKey, setCamKey] = useState(0);
-  const [phase, setPhase] = useState<Phase>('idle');
+  const [phase, setPhaseState] = useState<RecorderPhase>('idle');
   const [count, setCount] = useState(0);
-  const [elapsed, setElapsed] = useState(0);
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [linesOpen, setLinesOpen] = useState(false);
   const [appActive, setAppActive] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const countdownToken = useRef(0);
+  const phaseRef = useRef<RecorderPhase>('idle');
+
+  // Every phase change plays its haptic once (record start medium, stop light).
+  const setPhase = useCallback((next: RecorderPhase) => {
+    haptic(phaseHaptic(phaseRef.current, next));
+    phaseRef.current = next;
+    setPhaseState(next);
+  }, []);
 
   // Pause the camera in the background; a recording in progress is stopped and kept as a take.
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (s) => setAppActive(s === 'active'));
+    const sub = AppState.addEventListener('change', (st) => setAppActive(st === 'active'));
     return () => sub.remove();
   }, []);
-
-  useEffect(() => {
-    if (phase !== 'recording') return;
-    const started = Date.now();
-    setElapsed(0);
-    const t = setInterval(() => setElapsed((Date.now() - started) / 1000), 250);
-    return () => clearInterval(t);
-  }, [phase]);
 
   const free = session.mode === 'free';
   const line = session.lines[session.current];
   const next = session.lines[session.current + 1];
   const pending = session.pending;
   const busy = phase !== 'idle';
-  const sizes = TEXT_SIZES[session.prefs.textSize];
 
   const start = async () => {
     setCamError(null);
@@ -102,6 +114,7 @@ function RecorderBody({ session }: { session: RecorderSession }) {
       setPhase('countdown');
       for (let i = session.prefs.countdown; i > 0; i--) {
         setCount(i);
+        haptic(motionHaptics.countdownTick);
         await new Promise((r) => setTimeout(r, 1000));
         if (countdownToken.current !== token) return;
       }
@@ -119,7 +132,7 @@ function RecorderBody({ session }: { session: RecorderSession }) {
     setPhase('saving');
     try {
       const file = await cam.current!.stop();
-      updateRecorder((s) => addTake(s, file));
+      updateRecorder((st) => addTake(st, file));
     } catch (e) {
       setCamError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -142,470 +155,394 @@ function RecorderBody({ session }: { session: RecorderSession }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appActive]);
 
-  const close = async () => {
-    countdownToken.current += 1;
-    if (phase === 'recording') await cam.current?.cancel();
+  const leave = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/record');
   };
+  const close = async () => {
+    countdownToken.current += 1;
+    if (phase === 'recording') await cam.current?.cancel();
+    // A take waiting for Keep or Delete is the one thing closing would lose.
+    if (pending && native) {
+      Alert.alert('Leave this take?', 'The take you just recorded is not kept yet. Your kept lines stay saved.', [
+        { text: 'Stay', style: 'cancel' },
+        { text: 'Leave', style: 'destructive', onPress: leave },
+      ]);
+      return;
+    }
+    leave();
+  };
+
+  const keep = () => {
+    haptic(motionHaptics.cut); // `impact light` with the teleprompter's move to the next line
+    updateRecorder((st) => keepTake(st));
+  };
+  // Delete take: the preview shrinks and fades (160 ms) and the warning haptic plays, then the take goes.
+  const removeTake = () => {
+    haptic(motionHaptics.remove);
+    setDeleting(true);
+  };
+  useEffect(() => {
+    if (!deleting) return;
+    updateRecorder(deleteTake);
+    setDeleting(false);
+  }, [deleting]);
 
   const finish = () => {
-    updateRecorder((s) => setStage(s, 'finish'));
+    updateRecorder((st) => setStage(st, 'finish'));
     router.push('/record/finish');
   };
 
   const kept = keptCount(session);
-  const segments = progressSegments(session);
   const quality = info ? isFullQuality(info) : true;
+  const finishable = canFinish(session) && !busy;
+  const onJump = useCallback((i: number) => updateRecorder((st) => jumpTo(st, i)), []);
+  const onPrefs = useCallback((p: Partial<RecorderPrefs>) => updateRecorder((st) => setPrefs(st, p)), []);
 
   return (
     <View style={styles.root} testID="recorder">
-      <RecorderCamera
-        key={`${camKey}-${session.prefs.facing}`}
-        ref={cam}
-        facing={session.prefs.facing}
-        active={appActive}
-        onCaptureInfo={setInfo}
-        onError={setCamError}
-        style={StyleSheet.absoluteFill}
-      />
+      <RecorderCamera key={`${camKey}-${session.prefs.facing}`} ref={cam} facing={session.prefs.facing} active={appActive} onCaptureInfo={setInfo} onError={setCamError} style={StyleSheet.absoluteFill} />
 
-      {/* Top controls */}
-      <View style={[styles.top, { paddingTop: Math.max(insets.top, 20) }]}>
-        <GlassButton icon="close" label="Close camera" onPress={() => void close()} testID="close-camera" />
-        <View style={styles.badge} accessibilityLabel={info ? `Recording at ${fpsLabel(info.fps)}, ${resolutionLabel(info)}` : 'Starting camera'} testID="capture-badge">
-          {phase === 'recording' ? (
-            <>
-              <View style={styles.recDot} />
-              <Text variant="secondary" weight={600} style={{ fontVariant: ['tabular-nums'] }}>
-                {formatDuration(elapsed)}
+      <View style={{ flex: 1, paddingTop: Math.max(insets.top, 12) + 8, paddingBottom: Math.max(insets.bottom, 12) }} pointerEvents="box-none">
+        {/* Top row: close, capture badge, flip and Aa in one glass cluster. */}
+        <View style={s.top}>
+          <CamButton icon="close" label="Close camera" onPress={() => void close()} testID="close-camera" />
+          <Glass kind="button" appearance="dark" radius={16} style={s.badge} accessibilityLabel={info ? `Recording at ${fpsLabel(info.fps)}, ${resolutionLabel(info)}` : 'Starting camera'} testID="capture-badge">
+            {phase === 'recording' ? (
+              <>
+                <View style={s.recDot} />
+                <Timer />
+              </>
+            ) : null}
+            {info ? (
+              <>
+                <Text variant="secondary" weight={600} tone={quality ? 'accent' : 'cut'} tabular>
+                  {fpsLabel(info.fps)}
+                </Text>
+                <Text variant="secondary" weight={600} style={{ color: WHITE_70 }}>
+                  {resolutionLabel(info)}
+                </Text>
+              </>
+            ) : (
+              <Text variant="secondary" weight={600} style={{ color: WHITE_70 }}>
+                Starting…
               </Text>
-            </>
+            )}
+          </Glass>
+          <GlassGroup style={s.group}>
+            <CamButton
+              icon="flip"
+              label={`Switch to the ${session.prefs.facing === 'front' ? 'back' : 'front'} camera`}
+              disabled={busy}
+              onPress={() => updateRecorder((st) => setPrefs(st, { facing: st.prefs.facing === 'front' ? 'back' : 'front' }))}
+              testID="flip-camera"
+            />
+            <CamButton glyph="Aa" label="Script size, scroll speed and countdown" onPress={() => setPrefsOpen(true)} testID="text-size" />
+          </GlassGroup>
+        </View>
+
+        {/* Teleprompter, near the lens. */}
+        <View style={{ marginTop: 12 }}>
+          {free ? (
+            <Glass kind="button" appearance="dark" radius={16} style={s.freeChip} testID="free-chip">
+              <Text variant="label" weight={600} tone="accent" style={{ letterSpacing: 0.5 }}>
+                {lineLabel(session)}
+              </Text>
+              <Text variant="label" style={{ color: WHITE_70 }}>
+                No script
+              </Text>
+            </Glass>
+          ) : line ? (
+            <Teleprompter
+              label={lineLabel(session)}
+              lineKey={line.key}
+              lineText={line.text}
+              nextText={next?.text}
+              textSize={session.prefs.textSize}
+              scrollSpeed={session.prefs.scrollSpeed}
+              recording={phase === 'recording'}
+            />
           ) : null}
-          {info ? (
-            <>
-              <Text variant="secondary" weight={600} tone={quality ? 'accent' : 'cut'}>
-                {fpsLabel(info.fps)}
-              </Text>
-              <Text variant="secondary" weight={600} tone="muted">
-                {resolutionLabel(info)}
-              </Text>
-            </>
-          ) : (
-            <Text variant="secondary" weight={600} tone="muted">
-              Starting…
-            </Text>
-          )}
         </View>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <GlassButton icon="flip" label={`Switch to the ${session.prefs.facing === 'front' ? 'back' : 'front'} camera`} disabled={busy} onPress={() => updateRecorder((s) => setPrefs(s, { facing: s.prefs.facing === 'front' ? 'back' : 'front' }))} testID="flip-camera" />
-          <Pressable onPress={() => setPrefsOpen(true)} accessibilityRole="button" accessibilityLabel="Script size, scroll speed and countdown" style={({ pressed }) => [styles.glassButton, pressed && { opacity: 0.7 }]} testID="text-size">
-            <Text variant="body" weight={600}>
-              Aa
-            </Text>
-          </Pressable>
+
+        <View style={s.middle} pointerEvents="box-none">
+          {phase === 'countdown' ? <Countdown key={count} n={count} /> : null}
+          {camError ? (
+            <ThemeScope appearance="light">
+              <Glass kind="panel" appearance="light" style={s.card}>
+                <Text variant="bodyLg" center>
+                  The camera stopped
+                </Text>
+                <Text variant="secondary" tone="muted" center>
+                  {camError}
+                </Text>
+                <PillButton
+                  variant="secondary"
+                  surface="content"
+                  height={44}
+                  label="Try again"
+                  icon="refresh"
+                  onPress={() => {
+                    setCamError(null);
+                    setCamKey((k) => k + 1);
+                  }}
+                />
+              </Glass>
+            </ThemeScope>
+          ) : null}
+          {pending && phase === 'idle' && !camError && !deleting ? (
+            <TakePreview key={pending.id} uri={pending.uri} label={`Take ${pending.takeNumber} · ${formatDuration(pending.durationSec)}`} />
+          ) : null}
         </View>
-      </View>
 
-      {/* Teleprompter */}
-      {free ? (
-        <View style={styles.freeChip} testID="free-chip">
-          <Text variant="label" weight={600} tone="accent" style={{ letterSpacing: 0.4 }}>
-            {lineLabel(session)}
-          </Text>
-          <Text variant="label" tone="muted">
-            No script
-          </Text>
-        </View>
-      ) : line ? (
-        <Teleprompter session={session} sizes={sizes} recording={phase === 'recording'} lineText={line.text} nextText={next?.text} />
-      ) : null}
-
-      {!quality && info && phase === 'idle' ? (
-        <View style={styles.notice} testID="quality-notice">
-          <Text variant="label" tone="white" center>
-            This camera gives {fpsLabel(info.fps)} at {resolutionLabel(info)}. Kilo edits it as it is.
-          </Text>
-        </View>
-      ) : null}
-
-      <View style={styles.middle} pointerEvents="box-none">
-        {phase === 'countdown' ? (
-          <Text weight={700} style={styles.countdown} accessibilityLiveRegion="assertive" testID="countdown">
-            {count}
-          </Text>
-        ) : null}
-        {camError ? (
-          <Card gap={8} style={styles.errorCard}>
-            <Text variant="body" weight={600}>
-              The camera stopped
+        {!quality && info && phase === 'idle' ? (
+          <View style={s.notice} testID="quality-notice">
+            <Text variant="label" weight={500} tone="white" center>
+              This camera gives {fpsLabel(info.fps)} at {resolutionLabel(info)}. Kilo edits it as it is.
             </Text>
-            <Text variant="secondary" tone="muted">
-              {camError}
-            </Text>
-            <PillButton variant="secondary" height={44} label="Try again" icon="refresh" onPress={() => { setCamError(null); setCamKey((k) => k + 1); }} />
-          </Card>
-        ) : null}
-        {pending && phase === 'idle' && !camError ? <TakePreview key={pending.id} uri={pending.uri} label={`Take ${pending.takeNumber} · ${formatDuration(pending.durationSec)}`} /> : null}
-      </View>
-
-      {/* Bottom sheet */}
-      <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-        <View style={{ gap: 8 }}>
-          <View style={styles.segments} accessibilityLabel={`${plural(kept, free ? 'clip' : 'line')} kept`}>
-            {segments.map((st, i) => (
-              <Pressable
-                key={session.lines[i]!.key}
-                onPress={() => updateRecorder((s) => jumpTo(s, i))}
-                disabled={busy || i === session.current}
-                accessibilityRole="button"
-                accessibilityLabel={`${free ? 'Clip' : 'Line'} ${i + 1}, ${st === 'kept' ? 'kept' : st === 'current' ? 'recording now' : 'to record'}${st === 'kept' ? '. Redo it' : ''}`}
-                style={styles.segHit}
-                testID={`segment-${i}`}
-              >
-                <View style={[styles.seg, { backgroundColor: st === 'kept' ? color.accent : st === 'current' ? color.ink : color.track }]} />
-              </Pressable>
-            ))}
           </View>
-          <View style={styles.counters}>
-            <Text variant="secondary" tone="muted" testID="kept-count">
+        ) : null}
+
+        {/* Control panel: line pills, counters, the controls row, Finish. */}
+        <Glass kind="panel" appearance="dark" radius={32} style={s.panel}>
+          <LinePills states={progressSegments(session)} keys={session.lines.map((l) => l.key)} free={free} disabled={busy} onJump={onJump} />
+          <View style={s.counters}>
+            <Text variant="secondary" style={{ color: WHITE_70 }} testID="kept-count">
               {plural(kept, free ? 'clip' : 'line')} kept
             </Text>
-            <Text variant="secondary" tone="muted" testID="take-label">
+            <Text variant="secondary" style={{ color: WHITE_70 }} testID="take-label">
               {takeLabel(session)}
             </Text>
           </View>
-        </View>
-
-        <View style={styles.controls}>
-          {pending ? (
-            <SideButton icon="trash" label="Delete take" tone="cut" onPress={() => updateRecorder(deleteTake)} disabled={busy} testID="delete-take" />
-          ) : (
-            <SideButton icon="list" label={free ? 'Clips' : 'Lines'} tone="ink" onPress={() => setLinesOpen(true)} disabled={busy} testID="lines" />
-          )}
-          <RecordButton phase={phase} onPress={onRecordPress} again={!!pending} />
-          <SideButton icon="check" label="Keep, next" tone="primary" onPress={() => updateRecorder((s) => keepTake(s))} disabled={!pending || busy} testID="keep-next" />
-        </View>
-
-        <Pressable
-          onPress={finish}
-          disabled={!canFinish(session) || busy}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: !canFinish(session) || busy }}
-          style={({ pressed }) => [styles.finish, (!canFinish(session) || busy) && { opacity: 0.4 }, pressed && { opacity: 0.6 }]}
-          testID="finish"
-        >
-          <Text variant="body" weight={600}>
-            Finish and edit
-          </Text>
-        </Pressable>
+          <View style={s.controls}>
+            {pending ? (
+              <SideButton icon="trash" label="Delete take" tone="cut" onPress={removeTake} disabled={busy} testID="delete-take" />
+            ) : (
+              <SideButton icon="list" label={free ? 'Clips' : 'Lines'} onPress={() => setLinesOpen(true)} disabled={busy} testID="lines" />
+            )}
+            <RecordButton phase={phase} pending={!!pending} onPress={onRecordPress} />
+            <SideButton icon="check" label="Keep, next" tone="accent" onPress={keep} disabled={!pending || busy} testID="keep-next" />
+          </View>
+          <PressableScale
+            onPress={finish}
+            disabled={!finishable}
+            motion="button"
+            restingOpacity={finishable ? 1 : 0.4}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !finishable }}
+            style={s.finish}
+            testID="finish"
+          >
+            <Text variant="body" weight={600} tone="white">
+              Finish and edit
+            </Text>
+          </PressableScale>
+        </Glass>
       </View>
 
-      <PrefsSheet visible={prefsOpen} prefs={session.prefs} onChange={(p) => updateRecorder((s) => setPrefs(s, p))} onClose={() => setPrefsOpen(false)} />
-      <LinesSheet visible={linesOpen} session={session} onPick={(i) => { updateRecorder((s) => jumpTo(s, i)); setLinesOpen(false); }} onClose={() => setLinesOpen(false)} />
+      <RecorderSheets
+        prefsOpen={prefsOpen}
+        linesOpen={linesOpen}
+        session={session}
+        onPrefs={onPrefs}
+        onPick={(i) => {
+          onJump(i);
+          setLinesOpen(false);
+        }}
+        onClosePrefs={() => setPrefsOpen(false)}
+        onCloseLines={() => setLinesOpen(false)}
+      />
     </View>
   );
 }
 
-// ---- Teleprompter ---------------------------------------------------------------------
+// ---- Small parts ------------------------------------------------------------------------------
 
-function Teleprompter({ session, sizes, recording, lineText, nextText }: { session: RecorderSession; sizes: { line: number; next: number }; recording: boolean; lineText: string; nextText?: string }) {
-  const scroll = useRef<ScrollViewInstance>(null);
-  const y = useRef(0);
-  const speed = SCROLL_PX[session.prefs.scrollSpeed];
+/** The recording timer: its own component, so only it re-renders four times a second. */
+function Timer() {
+  const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    y.current = 0;
-    scroll.current?.scrollTo({ y: 0, animated: false });
-  }, [lineText, recording]);
-  useEffect(() => {
-    if (!recording || !speed) return;
-    // Hold the first words for a moment, then roll at the chosen speed.
-    let t: ReturnType<typeof setInterval> | null = null;
-    const delay = setTimeout(() => {
-      t = setInterval(() => {
-        y.current += speed / 20;
-        scroll.current?.scrollTo({ y: y.current, animated: false });
-      }, 50);
-    }, 1200);
-    return () => {
-      clearTimeout(delay);
-      if (t) clearInterval(t);
-    };
-  }, [recording, speed]);
+    const started = Date.now();
+    const t = setInterval(() => setElapsed((Date.now() - started) / 1000), 250);
+    return () => clearInterval(t);
+  }, []);
   return (
-    <View style={styles.panel} testID="teleprompter">
-      <Text variant="label" weight={600} tone="accent" style={{ letterSpacing: 0.4 }} testID="line-label">
-        {lineLabel(session)}
-      </Text>
-      <ScrollView ref={scroll} style={{ maxHeight: sizes.line * 1.25 * 5 }} scrollEnabled={!recording || !speed} showsVerticalScrollIndicator={false}>
-        <Text style={{ fontFamily: fontFamily[600], fontSize: sizes.line, lineHeight: sizes.line * 1.25, letterSpacing: -0.5, color: color.ink }} testID="current-line">
-          {lineText}
-        </Text>
-      </ScrollView>
-      {nextText ? (
-        <Text style={{ fontFamily: fontFamily[400], fontSize: sizes.next, lineHeight: sizes.next * 1.35, color: color.muted }} numberOfLines={2}>
-          Next: {nextText}
-        </Text>
-      ) : (
-        <Text style={{ fontFamily: fontFamily[400], fontSize: sizes.next, lineHeight: sizes.next * 1.35, color: color.muted }}>Last line</Text>
-      )}
-    </View>
+    <Text variant="secondary" weight={600} tone="white" tabular>
+      {formatDuration(elapsed)}
+    </Text>
   );
 }
 
-// ---- Take playback ----------------------------------------------------------------------
+// `countdown`: each numeral scales 1.25 to 1 and fades in (300 ms), then fades out (200 ms).
+function countIn(reduced: boolean): EntryExitAnimationFunction {
+  return () => {
+    'worklet';
+    const t = { duration: 300, easing: standard, reduceMotion: ReduceMotion.Never };
+    return reduced
+      ? { initialValues: { opacity: 0 }, animations: { opacity: withTiming(1, { ...t, duration: 150 }) } }
+      : { initialValues: { opacity: 0, transform: [{ scale: 1.25 }] }, animations: { opacity: withTiming(1, t), transform: [{ scale: withTiming(1, t) }] } };
+  };
+}
+const countOut: EntryExitAnimationFunction = () => {
+  'worklet';
+  return { initialValues: { opacity: 1 }, animations: { opacity: withTiming(0, { duration: 200, easing: standard, reduceMotion: ReduceMotion.Never }) } };
+};
+const countMotion = { full: countIn(false), reduced: countIn(true) };
 
-function TakePreview({ uri, label }: { uri: string; label: string }) {
+function Countdown({ n }: { n: number }) {
+  const s = useStyles();
+  const reduced = useReducedMotionSetting();
+  return (
+    <Animated.Text
+      entering={native ? (reduced ? countMotion.reduced : countMotion.full) : undefined}
+      exiting={native ? countOut : undefined}
+      style={[s.countdown, { position: 'absolute' }]}
+      accessibilityLiveRegion="assertive"
+      testID="countdown"
+    >
+      {n}
+    </Animated.Text>
+  );
+}
+
+// Delete take: the card scales to 0.9 and fades, 160 ms.
+const previewOut: EntryExitAnimationFunction = () => {
+  'worklet';
+  const t = { duration: 160, easing: Easing.bezier(0.4, 0, 1, 1), reduceMotion: ReduceMotion.System };
+  return { initialValues: { opacity: 1, transform: [{ scale: 1 }] }, animations: { opacity: withTiming(0, t), transform: [{ scale: withTiming(0.9, t) }] } };
+};
+const previewIn: EntryExitAnimationFunction = () => {
+  'worklet';
+  const t = { duration: 200, easing: standard, reduceMotion: ReduceMotion.System };
+  return { initialValues: { opacity: 0, transform: [{ scale: 0.96 }] }, animations: { opacity: withTiming(1, t), transform: [{ scale: withTiming(1, t) }] } };
+};
+
+/** The take just recorded, playing in a 9:16 card at the centre with "Take 2 · 0:08". Tap to play it again. */
+const TakePreview = memo(function TakePreview({ uri, label }: { uri: string; label: string }) {
+  const s = useStyles();
   const player = useVideoPlayer(uri, (p) => {
     p.loop = false;
     p.play();
   });
   return (
-    <Pressable
-      onPress={() => {
-        player.currentTime = 0;
-        player.play();
-      }}
-      accessibilityRole="button"
-      accessibilityLabel={`Play the take again, ${label}`}
-      style={styles.preview}
-      testID="take-preview"
-    >
-      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
-      <View style={styles.previewLabel}>
-        <Icon name="play" size={12} color={color.white} />
-        <Text variant="label" weight={600} tone="white">
-          {label}
-        </Text>
-      </View>
-    </Pressable>
+    <Animated.View entering={native ? previewIn : undefined} exiting={native && !prefersReducedMotion() ? previewOut : undefined}>
+      <Pressable
+        onPress={() => {
+          player.currentTime = 0;
+          player.play();
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`Play the take again, ${label}`}
+        style={s.preview}
+        testID="take-preview"
+      >
+        <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
+        <View style={s.previewLabel}>
+          <SymbolIcon name="play" size={11} color="#FFFFFF" />
+          <Text variant="label" weight={600} tone="white" tabular>
+            {label}
+          </Text>
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+});
+
+/** A 44pt glass circle over the camera (close, flip, Aa). */
+function CamButton({ icon, glyph, label, onPress, disabled, testID }: { icon?: IconName; glyph?: string; label: string; onPress: () => void; disabled?: boolean; testID?: string }) {
+  const s = useStyles();
+  return (
+    <PressableScale onPress={onPress} disabled={disabled} motion="icon" restingOpacity={disabled ? 0.5 : 1} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!disabled }} testID={testID}>
+      <Glass kind="button" appearance="dark" interactive style={s.circle}>
+        {icon ? (
+          <SymbolIcon name={icon} size={Platform.OS === 'ios' ? 17 : 20} strokeWidth={2.2} color="#FFFFFF" />
+        ) : (
+          <Text variant="body" weight={600} tone="white">
+            {glyph}
+          </Text>
+        )}
+      </Glass>
+    </PressableScale>
   );
 }
 
-// ---- Buttons ------------------------------------------------------------------------------
-
-function GlassButton({ icon, label, onPress, disabled, testID }: { icon: 'close' | 'flip'; label: string; onPress: () => void; disabled?: boolean; testID?: string }) {
+/**
+ * A 52pt circle with its label under it, inside the control panel (content on the panel's
+ * glass, never glass on glass). "Keep, next" is accent-filled when it can be pressed.
+ */
+function SideButton({ icon, label, tone, onPress, disabled, testID }: { icon: IconName; label: string; tone?: 'cut' | 'accent'; onPress: () => void; disabled?: boolean; testID?: string }) {
+  const s = useStyles();
+  const c = useColors();
+  const on = tone === 'accent' && !disabled;
+  const fg = tone === 'cut' ? c.cut : '#FFFFFF';
   return (
-    <Pressable onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityLabel={label} style={({ pressed }) => [styles.glassButton, (pressed || disabled) && { opacity: disabled ? 0.5 : 0.7 }]} testID={testID}>
-      <Icon name={icon} size={20} strokeWidth={2.2} />
-    </Pressable>
-  );
-}
-
-function SideButton({ icon, label, tone, onPress, disabled, testID }: { icon: 'trash' | 'check' | 'list'; label: string; tone: 'cut' | 'ink' | 'primary'; onPress: () => void; disabled?: boolean; testID?: string }) {
-  const primary = tone === 'primary';
-  const fg = primary ? color.white : tone === 'cut' ? color.cut : color.ink;
-  return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       disabled={disabled}
+      motion="icon"
+      haptic={false}
+      restingOpacity={disabled ? 0.4 : 1}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: !!disabled }}
-      style={({ pressed }) => [styles.side, primary ? shadow.gloss : styles.sideOutline, disabled && { opacity: 0.4 }, pressed && { opacity: 0.8 }]}
+      style={s.side}
       testID={testID}
     >
-      {primary ? <LinearGradient colors={accentGloss.colors} locations={accentGloss.locations} style={[StyleSheet.absoluteFill, { borderRadius: 20 }]} pointerEvents="none" /> : null}
-      <View style={styles.sideInner}>
-        <Icon name={icon} size={20} color={fg} strokeWidth={primary ? 2.4 : 2} />
-        <Text variant="secondary" weight={primary ? 600 : 500} style={{ color: fg }}>
-          {label}
-        </Text>
+      <View style={[s.sideCircle, on && s.sideOn]}>
+        <SymbolIcon name={icon} size={20} strokeWidth={2.4} color={fg} />
       </View>
-    </Pressable>
+      <Text variant="label" weight={500} style={{ color: tone === 'cut' ? c.cut : WHITE_70 }} numberOfLines={1}>
+        {label}
+      </Text>
+    </PressableScale>
   );
 }
 
-function RecordButton({ phase, onPress, again }: { phase: Phase; onPress: () => void; again: boolean }) {
-  const recording = phase === 'recording';
-  const label = recording ? 'Stop recording' : phase === 'countdown' ? 'Cancel countdown' : again ? 'Record this line again' : 'Record this line';
-  return (
-    <Pressable onPress={onPress} disabled={phase === 'saving'} accessibilityRole="button" accessibilityLabel={label} style={styles.record} testID="record">
-      {phase === 'saving' ? <ActivityIndicator color={color.record} /> : <View style={recording ? styles.recordStop : styles.recordDot} />}
-    </Pressable>
-  );
-}
-
-// ---- Permission gate --------------------------------------------------------------------
+// ---- Permission gate --------------------------------------------------------------------------
 
 function PermissionGate({ perms }: { perms: ReturnType<typeof useRecorderPermissions> }) {
+  const s = useStyles();
+  const c = useColors();
   const insets = useSafeAreaInsets();
   const checking = perms.camera === 'checking' || perms.microphone === 'checking';
   const denied = perms.camera === 'denied' || perms.microphone === 'denied';
   const unavailable = perms.camera === 'unavailable';
   const missing = [perms.camera !== 'granted' ? 'camera' : null, perms.microphone !== 'granted' ? 'microphone' : null].filter(Boolean).join(' and ');
   return (
-    <View style={[styles.root, { paddingTop: Math.max(insets.top, 20), paddingHorizontal: 20, justifyContent: 'center' }]} testID="permission-gate">
-      <View style={[styles.top, { position: 'absolute', top: Math.max(insets.top, 20), left: 0, right: 0, paddingTop: 0 }]}>
-        <GlassButton icon="close" label="Close camera" onPress={() => (router.canGoBack() ? router.back() : router.replace('/record'))} />
+    <View style={[styles.root, { paddingHorizontal: 20, justifyContent: 'center' }]} testID="permission-gate">
+      <View style={[s.top, { position: 'absolute', top: Math.max(insets.top, 12) + 8, left: 0, right: 0 }]}>
+        <CamButton icon="close" label="Close camera" onPress={() => (router.canGoBack() ? router.back() : router.replace('/record'))} />
       </View>
-      <Card gap={12} padding={24} style={{ backgroundColor: 'rgba(255,255,255,0.92)', alignItems: 'center' }}>
-        {checking ? (
-          <ActivityIndicator color={color.accent} />
-        ) : (
-          <>
-            <Icon name="camera" size={28} color={denied ? color.cut : color.accent} />
-            <Text variant="bodyLg" center>
-              {unavailable ? 'No camera here' : denied ? `Kilo can't use your ${missing}` : `Kilo needs your ${missing}`}
-            </Text>
-            <Text variant="secondary" tone="muted" center>
-              {unavailable
-                ? 'This device or browser has no camera Kilo can use. Record in your camera app and upload the clips instead.'
-                : denied
-                  ? perms.canOpenSettings
-                    ? `Turn on ${missing} access for Kilo in Settings, then come back.`
-                    : `Allow ${missing} for this site in your browser's site settings, then reload.`
-                  : 'You record yourself reading each line. Video and sound stay on this phone until you finish and upload.'}
-            </Text>
-            {denied && perms.canOpenSettings ? <PillButton label="Open Settings" height={52} onPress={perms.openSettings} testID="open-settings" /> : null}
-            {!denied && !unavailable ? <PillButton label={`Allow ${missing}`} height={52} onPress={() => void perms.request()} testID="allow-camera" /> : null}
-            <PillButton variant="text" label="Upload clips instead" onPress={() => router.replace('/new-batch')} />
-          </>
-        )}
-      </Card>
+      <ThemeScope appearance="light">
+        <Glass kind="panel" appearance="light" radius={28} style={s.card}>
+          {checking ? (
+            <ActivityIndicator color={c.accent} />
+          ) : (
+            <>
+              <SymbolIcon name="camera" size={28} color={denied ? c.cut : c.accent} />
+              <Text variant="bodyLg" center>
+                {unavailable ? 'No camera here' : denied ? `Kilo can't use your ${missing}` : `Kilo needs your ${missing}`}
+              </Text>
+              <Text variant="secondary" tone="muted" center>
+                {unavailable
+                  ? 'This device or browser has no camera Kilo can use. Record in your camera app and upload the clips instead.'
+                  : denied
+                    ? perms.canOpenSettings
+                      ? `Turn on ${missing} access for Kilo in Settings, then come back.`
+                      : `Allow ${missing} for this site in your browser's site settings, then reload.`
+                    : 'You record yourself reading each line. Video and sound stay on this phone until you finish and upload.'}
+              </Text>
+              {denied && perms.canOpenSettings ? <PillButton label="Open Settings" height={52} onPress={perms.openSettings} testID="open-settings" /> : null}
+              {!denied && !unavailable ? <PillButton label={`Allow ${missing}`} height={52} onPress={() => void perms.request()} testID="allow-camera" /> : null}
+              <PillButton variant="text" label="Upload clips instead" onPress={() => router.replace('/new-batch')} />
+            </>
+          )}
+        </Glass>
+      </ThemeScope>
     </View>
   );
 }
 
-// ---- Sheets -------------------------------------------------------------------------------
-
-function BottomSheet({ visible, title, onClose, children }: { visible: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.scrim} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
-      <View style={{ flex: 1, justifyContent: 'flex-end', padding: 12 }} pointerEvents="box-none">
-        <Card gap={14} style={{ backgroundColor: color.white, borderRadius: radius.card + 4, maxHeight: '80%' }}>
-          <Text variant="titleSm">{title}</Text>
-          {children}
-          <PillButton label="Done" height={52} onPress={onClose} testID="sheet-done" />
-        </Card>
-      </View>
-    </Modal>
-  );
-}
-
-function PrefsSheet({ visible, prefs, onChange, onClose }: { visible: boolean; prefs: RecorderPrefs; onChange: (p: Partial<RecorderPrefs>) => void; onClose: () => void }) {
-  return (
-    <BottomSheet visible={visible} title="Script and recording" onClose={onClose}>
-      <View style={{ gap: 6 }}>
-        <Text variant="secondary" tone="muted">
-          Text size
-        </Text>
-        <SegmentedControl
-          segments={[
-            { value: 'S', label: 'Small' },
-            { value: 'M', label: 'Medium' },
-            { value: 'L', label: 'Large' },
-          ]}
-          value={prefs.textSize}
-          onChange={(textSize) => onChange({ textSize })}
-          accessibilityLabel="Text size"
-        />
-      </View>
-      <View style={{ gap: 6 }}>
-        <Text variant="secondary" tone="muted">
-          Scroll long lines while recording
-        </Text>
-        <SegmentedControl
-          segments={[
-            { value: '0', label: 'Off' },
-            { value: '1', label: 'Slow' },
-            { value: '2', label: 'Medium' },
-            { value: '3', label: 'Fast' },
-          ]}
-          value={String(prefs.scrollSpeed) as '0' | '1' | '2' | '3'}
-          onChange={(v) => onChange({ scrollSpeed: Number(v) as RecorderPrefs['scrollSpeed'] })}
-          accessibilityLabel="Auto-scroll speed"
-        />
-      </View>
-      <View style={{ gap: 6 }}>
-        <Text variant="secondary" tone="muted">
-          Countdown before recording
-        </Text>
-        <SegmentedControl
-          segments={[
-            { value: '0', label: 'Off' },
-            { value: '3', label: '3 seconds' },
-          ]}
-          value={String(prefs.countdown) as '0' | '3'}
-          onChange={(v) => onChange({ countdown: Number(v) as RecorderPrefs['countdown'] })}
-          accessibilityLabel="Countdown"
-        />
-      </View>
-    </BottomSheet>
-  );
-}
-
-function LinesSheet({ visible, session, onPick, onClose }: { visible: boolean; session: RecorderSession; onPick: (i: number) => void; onClose: () => void }) {
-  const free = session.mode === 'free';
-  return (
-    <BottomSheet visible={visible} title={free ? 'Clips' : 'Lines'} onClose={onClose}>
-      <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ gap: 6 }}>
-        {session.lines.map((l, i) => {
-          const current = i === session.current;
-          return (
-            <Pressable
-              key={l.key}
-              onPress={() => onPick(i)}
-              disabled={current}
-              accessibilityRole="button"
-              accessibilityLabel={`${free ? 'Clip' : 'Line'} ${i + 1}${l.kept ? `, kept take ${l.kept.takeNumber}` : ''}${current ? ', recording now' : ''}`}
-              style={[styles.lineRow, current && { borderColor: color.ink }]}
-              testID={`jump-${i}`}
-            >
-              <View style={[styles.lineDot, { backgroundColor: l.kept ? color.accent : current ? color.ink : color.track }]} />
-              <Text variant="transcript" style={{ flex: 1 }} numberOfLines={2}>
-                {free ? `Clip ${i + 1}` : l.text}
-              </Text>
-              <Text variant="label" tone="muted">
-                {l.kept ? `Take ${l.kept.takeNumber}` : current ? 'Now' : ''}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-    </BottomSheet>
-  );
-}
-
-const glass = 'rgba(255,255,255,0.9)';
-
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.cameraScrim },
-  top: { paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  glassButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: glass, alignItems: 'center', justifyContent: 'center' },
-  badge: { height: 32, paddingHorizontal: 12, borderRadius: 16, backgroundColor: glass, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  recDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: color.record },
-  panel: {
-    marginTop: 16,
-    marginHorizontal: 20,
-    padding: 18,
-    borderRadius: radius.card,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    boxShadow: '0 12px 32px rgba(0,0,0,0.25)',
-    gap: 12,
-  },
-  freeChip: { marginTop: 16, alignSelf: 'center', flexDirection: 'row', gap: 8, height: 32, paddingHorizontal: 14, borderRadius: 16, backgroundColor: glass, alignItems: 'center' },
-  notice: { marginTop: 10, marginHorizontal: 32, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 12, backgroundColor: 'rgba(11,18,32,0.6)' },
-  middle: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
-  countdown: { fontSize: 96, lineHeight: 104, color: color.white, textShadowColor: 'rgba(0,0,0,0.35)', textShadowRadius: 12 },
-  errorCard: { backgroundColor: 'rgba(255,255,255,0.95)', alignSelf: 'stretch' },
-  preview: { position: 'absolute', right: 20, bottom: 16, width: 96, height: 170, borderRadius: radius.lg, overflow: 'hidden', borderWidth: 2, borderColor: color.white, backgroundColor: color.player },
-  previewLabel: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingVertical: 5, flexDirection: 'row', gap: 4, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(11,18,32,0.55)' },
-  sheet: { backgroundColor: color.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingTop: 16, paddingHorizontal: 20, gap: 18 },
-  segments: { flexDirection: 'row', gap: 5 },
-  segHit: { flex: 1, height: 20, justifyContent: 'center' },
-  seg: { height: 8, borderRadius: 4 },
-  counters: { flexDirection: 'row', justifyContent: 'space-between' },
-  controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  side: { width: 96, minHeight: 64, borderRadius: 20, alignItems: 'center', justifyContent: 'center', gap: 4, overflow: 'visible' },
-  sideInner: { alignItems: 'center', gap: 4 },
-  sideOutline: { borderWidth: 1, borderColor: color.outline, backgroundColor: color.white },
-  record: { width: 84, height: 84, borderRadius: 42, borderWidth: 4, borderColor: color.ink, padding: 6, alignItems: 'center', justifyContent: 'center' },
-  recordDot: { alignSelf: 'stretch', flex: 1, borderRadius: 40, backgroundColor: color.record },
-  recordStop: { width: 30, height: 30, borderRadius: 7, backgroundColor: color.record },
-  finish: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  scrim: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(11,18,32,0.45)' },
-  lineRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48, paddingHorizontal: 12, borderRadius: radius.row, borderWidth: 1, borderColor: color.hairline },
-  lineDot: { width: 10, height: 10, borderRadius: 5 },
+  root: { flex: 1, backgroundColor: '#0A0F1A' },
 });

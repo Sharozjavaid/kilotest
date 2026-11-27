@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import type { NativeStackNavigationOptions } from 'expo-router/native-stack';
 import { haptic } from './haptics';
 import { PressableScale } from './PressableScale';
@@ -54,9 +54,11 @@ export function useScreenHeader(header: ScreenHeaderConfig | undefined): ScreenH
   latest.current = header;
 
   const actionsKey =
-    header?.actions?.map((a) => `${a.label}|${a.icon}|${a.prominent ? 1 : 0}|${a.disabled ? 1 : 0}|${a.menu?.map((m) => `${m.label}/${m.subtitle ?? ''}/${m.disabled ? 1 : 0}`).join(';') ?? ''}`).join(',') ?? '';
-  const hasBack = !!header?.onBack;
+    header?.actions?.map((a) => `${a.label}|${a.icon}|${a.prominent ? 1 : 0}|${a.disabled ? 1 : 0}|${a.text ? 1 : 0}|${a.menu?.map((m) => `${m.label}/${m.subtitle ?? ''}/${m.disabled ? 1 : 0}`).join(';') ?? ''}`).join(',') ?? '';
+  const close = !!header?.close;
+  const hasBack = !!header?.onBack || close;
   const { title, meta, large, noBack } = header ?? {};
+  const searchPlaceholder = header?.search?.placeholder;
   const hasRight = !!header?.right;
   const [slot] = useState(() => {
     const s = createSlot();
@@ -75,22 +77,37 @@ export function useScreenHeader(header: ScreenHeaderConfig | undefined): ScreenH
       title,
       headerLargeTitle: !!large,
       headerBackVisible: !noBack && !hasBack,
-      gestureEnabled: !hasBack,
+      // A sheet's swipe-down is the same as its close button, so it stays on.
+      gestureEnabled: !hasBack || close,
       headerTintColor: t.color.ink,
       headerTitleStyle: { fontFamily: fontFamily[600], fontSize: 17, color: t.color.ink },
       headerLargeTitleStyle: { fontFamily: fontFamily[600], fontSize: 34, color: t.color.ink },
     };
+    if (searchPlaceholder !== undefined) {
+      opts.headerSearchBarOptions = {
+        placeholder: searchPlaceholder,
+        hideWhenScrolling: false,
+        tintColor: t.color.accent,
+        onChangeText: (e) => latest.current?.search?.onChangeText(e.nativeEvent.text),
+        onCancelButtonPress: () => latest.current?.search?.onChangeText(''),
+      };
+    }
     if (hasBack) {
       opts.headerLeft = () => (
         <PressableScale
-          onPress={() => latest.current?.onBack?.()}
+          onPress={() => {
+            const h = latest.current;
+            if (h?.onBack) h.onBack();
+            else if (router.canDismiss()) router.dismiss();
+            else if (router.canGoBack()) router.back();
+          }}
           motion="icon"
           accessibilityRole="button"
-          accessibilityLabel="Back"
+          accessibilityLabel={close ? 'Close' : 'Back'}
           hitSlop={4}
           style={{ width: size.touch, height: size.touch, alignItems: 'center', justifyContent: 'center' }}
         >
-          <SymbolIcon name="chevronLeft" size={20} strokeWidth={2.2} color={t.color.ink} />
+          <SymbolIcon name={close ? 'close' : 'chevronLeft'} size={close ? 17 : 20} strokeWidth={2.2} color={t.color.ink} />
         </PressableScale>
       );
     }
@@ -120,9 +137,11 @@ export function useScreenHeader(header: ScreenHeaderConfig | undefined): ScreenH
           const shared = {
             label: a.label,
             accessibilityLabel: a.label,
-            icon: { type: 'sfSymbol' as const, name: sfSymbolFor(a.icon) },
+            // A text item ("Save") shows its label in Inter 600, `accent`.
+            icon: a.text ? undefined : { type: 'sfSymbol' as const, name: sfSymbolFor(a.icon) },
+            labelStyle: a.text ? { fontFamily: fontFamily[600], fontSize: 17, color: a.prominent ? t.color.onAccent : t.color.accent } : undefined,
             variant: a.prominent ? ('prominent' as const) : ('plain' as const),
-            tintColor: a.prominent ? t.color.accent : undefined,
+            tintColor: a.prominent || a.text ? t.color.accent : undefined,
             disabled: a.disabled,
           };
           if (a.menu?.length) {
@@ -158,7 +177,7 @@ export function useScreenHeader(header: ScreenHeaderConfig | undefined): ScreenH
     return opts;
     // `actionsKey` stands for the actions' content; their handlers are read through the ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, meta, large, noBack, hasBack, hasRight, actionsKey, t, slot]);
+  }, [title, meta, large, noBack, hasBack, close, hasRight, actionsKey, searchPlaceholder, t, slot]);
 
   if (!options) return { native: false, element: null };
   return { native: true, element: <Stack.Screen options={options} /> };

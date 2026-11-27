@@ -4,33 +4,37 @@ import { View } from 'react-native';
 import { useAuth } from '@/auth/AuthProvider';
 import { useGoal } from '@/api/queries';
 import { goalSummary } from '@/goal/goalForm';
-import { useStyles } from '@/styles/useStyles';
+import { useStyles as useSavedStyles } from '@/styles/useStyles';
 import { plural } from '@/lib/format';
-import { Card, Header, Icon, PillButton, Row, Screen, Text, color } from '@/ui';
+import { Card, PillButton, Row, Screen, SymbolIcon, Text, makeStyles, useColors } from '@/ui';
 
-/** You: account, weekly goal, styles, app version and sign out. */
+/**
+ * You (design brief 4.11): large title, the account card, Weekly goal and Styles, sign out and
+ * the version line. Grouped content cards under the native bar's scroll-edge fade on iOS.
+ */
 export default function YouScreen() {
+  const s = useStyles();
+  const c = useColors();
   const auth = useAuth();
   const goal = useGoal();
-  const styles = useStyles();
+  const styles = useSavedStyles();
   const email = auth.session?.email;
   const who = email ?? 'dev account';
   const how = auth.mode === 'supabase' ? 'Signed in with email' : auth.mode === 'dev' ? `Local server · ${auth.session?.userId.slice(0, 8) ?? ''}` : 'Mock mode, nothing leaves this device';
   const version = Constants.expoConfig?.version ?? '1.0.0';
 
   return (
-    <Screen bottomInset={false} gap={12} testID="you">
-      <Header title="You" noBack />
+    <Screen appearance="auto" bottomInset={false} gap={16} testID="you" header={{ title: 'You', large: true, noBack: true }}>
       <Card padding={0} paddingHorizontal={16}>
         <Row
           left={
-            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: color.skyTint, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="user" size={20} color={color.accent} />
+            <View style={s.avatar}>
+              <SymbolIcon name="user" size={22} filled color={c.accent} />
             </View>
           }
           title={who}
           subtitle={how}
-          minHeight={64}
+          minHeight={68}
           testID="account"
         />
       </Card>
@@ -45,3 +49,7 @@ export default function YouScreen() {
     </Screen>
   );
 }
+
+const useStyles = makeStyles((t) => ({
+  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: t.color.chipOn, alignItems: 'center', justifyContent: 'center' },
+}));

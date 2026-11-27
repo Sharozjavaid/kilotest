@@ -78,6 +78,7 @@ export function xToTarget(layout: StripLayout, x: number): ScrubTarget | null {
 
 /** Playhead x for a proxy time. Prefers the block of `segmentId` when given (variants can reuse spans). */
 export function proxyToX(layout: StripLayout, proxyTime: number, segmentId?: string | null): number {
+  'worklet';
   const { blocks } = layout;
   if (blocks.length === 0) return 0;
   const preferred = segmentId ? blocks.find((b) => b.segmentId === segmentId) : undefined;

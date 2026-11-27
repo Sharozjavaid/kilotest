@@ -1,7 +1,8 @@
 import { Platform } from 'react-native';
 import { NativeTabs } from 'expo-router/native-tabs';
-import { DEFAULT_SCREEN_APPEARANCE, resolveScheme, themeFor, useSystemScheme } from '@/ui/theme';
+import { themeFor, useSystemScheme } from '@/ui/theme';
 import { tabSymbol } from '@/ui/symbols';
+import { hasLiquidGlass } from '@/ui/glass';
 import { UploadAccessory, useHasActiveUploads } from '@/ui/UploadAccessory';
 
 /**
@@ -10,13 +11,13 @@ import { UploadAccessory, useHasActiveUploads } from '@/ui/UploadAccessory';
  *
  * - iOS 26: the floating Liquid Glass `UITabBar`, SF Symbols, minimising on scroll down, and the
  *   uploads progress as the bottom accessory while files are on their way.
- * - iOS before 26: the standard `UITabBar` with its system blur.
+ * - iOS before 26: the standard `UITabBar` with its system blur; the uploads capsule floats above
+ *   it (`TabStack`), as on Android.
  * - Android: Material bottom navigation with Material Symbols and the `accent` indicator.
  */
 export default function TabsLayout() {
-  const system = useSystemScheme();
-  // The bar follows the screens' appearance (light until every screen reads the theme).
-  const t = themeFor(resolveScheme(DEFAULT_SCREEN_APPEARANCE, system));
+  // The bar follows the system appearance, as the three tab screens do.
+  const t = themeFor(useSystemScheme());
   const uploading = useHasActiveUploads();
   const android = Platform.OS === 'android';
 
@@ -30,20 +31,21 @@ export default function TabsLayout() {
       indicatorColor={android ? t.color.chipOn : undefined}
       labelVisibilityMode="labeled"
     >
-      {Platform.OS === 'ios' && uploading ? (
+      {/* iOS 26+ only (the system accessory); elsewhere `TabStack` floats the capsule. */}
+      {Platform.OS === 'ios' && hasLiquidGlass() && uploading ? (
         <NativeTabs.BottomAccessory>
           <Accessory />
         </NativeTabs.BottomAccessory>
       ) : null}
-      <NativeTabs.Trigger name="index">
+      <NativeTabs.Trigger name="(home)">
         <NativeTabs.Trigger.Label>Videos</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf={tabSymbol('videos')} md="video_library" />
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="styles">
+      <NativeTabs.Trigger name="(styles)">
         <NativeTabs.Trigger.Label>Styles</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf={tabSymbol('styles')} md="tune" />
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="you">
+      <NativeTabs.Trigger name="(you)">
         <NativeTabs.Trigger.Label>You</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf={tabSymbol('user')} md="account_circle" />
       </NativeTabs.Trigger>

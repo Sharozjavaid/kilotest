@@ -14,6 +14,8 @@ export interface HeaderAction {
   testID?: string;
   /** Makes the button open this menu instead of calling `onPress` (native header menu on iOS, Kilo's popover elsewhere). */
   menu?: MenuItem[];
+  /** iOS: a text bar button showing `label` ("Save", in `accent`) instead of the symbol. Elsewhere the icon button. */
+  text?: boolean;
 }
 
 /**
@@ -39,6 +41,17 @@ export interface ScreenHeaderConfig {
   onBack?: () => void;
   /** No back button (root screens). */
   noBack?: boolean;
+  /**
+   * iOS sheets: the leading button is a glass `xmark` (calling `onBack`, or dismissing), and
+   * swipe-to-dismiss stays on. Elsewhere the usual back button.
+   */
+  close?: boolean;
+  /**
+   * iOS: the native search field in the navigation bar (`headerSearchBarOptions`); the screen's
+   * scroll view needs `contentInsetAdjustmentBehavior="automatic"`. Elsewhere the screen draws
+   * its own field.
+   */
+  search?: { placeholder: string; onChangeText: (text: string) => void };
   /** iOS large title that collapses into the bar on scroll. Scrolling screens only. */
   large?: boolean;
   /** Title size of the in-content header (non-iOS). */

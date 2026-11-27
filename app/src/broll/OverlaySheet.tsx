@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Modal, TextInput, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { TEMPLATES, type BrollAssetView, type Overlay, type TemplateId } from '@kilo/edl';
-import { Card, Header, Icon, PillButton, Row, Screen, SectionLabel, Text, Thumb, Toggle, color, radius, typeStyle } from '@/ui';
+import { Card, Header, PillButton, PressableScale, Row, Screen, SymbolIcon, Text, Thumb, Toggle, makeStyles, radius, typeStyle, useColors, useLayoutMotion } from '@/ui';
+import { FOOTER_BUTTON } from '@/components/sizes';
+
+function SectionLabel({ children }: { children: string }) {
+  return (
+    <Text variant="secondary" weight={600} tone="muted" accessibilityRole="header">
+      {children}
+    </Text>
+  );
+}
 import { assetTitle, durationLimits, fmtSec, type OverlayContent, type OverlayProblem, type SpokenLine } from './overlays';
 import { TEMPLATE_FIELDS, charsLeft, formFromProps, limitText, prefillProps, propsFromForm, type FormValues, type TemplateField } from './templateForms';
 import { GraphicThumb } from './GraphicThumb';
@@ -99,11 +109,18 @@ export function OverlaySheet({ visible, line, overlay, assets, themeId, uploads,
   };
 
   const selectedTemplate = choice?.type === 'template' ? choice.id : null;
+  const styles = useStyles();
+  const c = useColors();
+  const m = useLayoutMotion();
 
+  // iOS: the native page sheet (swipe down to close).
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <Screen
+        appearance="auto"
+        sheet
         gap={14}
+        footerGlass
         footer={
           <>
             {problem ? (
@@ -111,7 +128,7 @@ export function OverlaySheet({ visible, line, overlay, assets, themeId, uploads,
                 {problem}
               </Text>
             ) : null}
-            <PillButton label={overlay ? 'Use this' : 'Add to this line'} onPress={apply} disabled={!choice} testID="overlay-apply" />
+            <PillButton label={overlay ? 'Use this' : 'Add to this line'} onPress={apply} disabled={!choice} height={FOOTER_BUTTON} testID="overlay-apply" />
             {overlay ? <PillButton variant="text" destructive label="Remove from this line" onPress={onRemove} testID="overlay-remove" /> : null}
           </>
         }
@@ -145,7 +162,7 @@ export function OverlaySheet({ visible, line, overlay, assets, themeId, uploads,
           <SectionLabel>Your clips</SectionLabel>
           <Card padding={0} paddingHorizontal={16}>
             {assets.length === 0 ? (
-              <Row title="No clips for this video yet" subtitle="Add product shots or cutaways and Kilo can place them." right={<PillButton variant="secondary" height={44} label="Add clips" onPress={onAddClips} />} />
+              <Row title="No clips for this video yet" subtitle="Add product shots or cutaways and Kilo can place them." right={<PillButton variant="secondary" surface="content" height={44} label="Add clips" onPress={onAddClips} />} />
             ) : (
               assets.map((a, i) => {
                 const ready = a.status === 'ready';
@@ -154,13 +171,13 @@ export function OverlaySheet({ visible, line, overlay, assets, themeId, uploads,
                   <Row
                     key={a.id}
                     divider={i > 0}
-                    left={<Thumb uri={a.thumbnailUrl} width={36} height={48} />}
+                    left={<Thumb uri={a.thumbnailUrl} cacheKey={a.id} width={36} height={48} />}
                     title={assetTitle(a)}
                     subtitle={assetStatus(a, uploads.get(a.id))}
                     onPress={ready ? () => pick({ type: 'asset', id: a.id }) : undefined}
                     accessibilityLabel={`${assetTitle(a)}, ${assetStatus(a, uploads.get(a.id))}${selected ? ', selected' : ''}`}
                     style={!ready ? { opacity: 0.55 } : undefined}
-                    right={selected ? <Icon name="check" size={20} color={color.accent} strokeWidth={2.4} /> : null}
+                    right={selected ? <SymbolIcon name="check" size={18} color={c.accent} strokeWidth={2.6} /> : null}
                     testID={`asset-${a.id}`}
                   />
                 );
@@ -183,11 +200,11 @@ export function OverlaySheet({ visible, line, overlay, assets, themeId, uploads,
                     subtitle={`${fmtSec(t.minDurationSec)} to ${fmtSec(t.maxDurationSec)}`}
                     onPress={() => pick({ type: 'template', id: t.id })}
                     accessibilityLabel={`${t.name}${selected ? ', selected' : ''}`}
-                    right={selected ? <Icon name="check" size={20} color={color.accent} strokeWidth={2.4} /> : null}
+                    right={selected ? <SymbolIcon name="check" size={18} color={c.accent} strokeWidth={2.6} /> : null}
                     testID={`template-${t.id}`}
                   />
                   {selected ? (
-                    <View style={styles.form}>
+                    <Animated.View entering={m.listInsert} style={styles.form}>
                       {TEMPLATE_FIELDS[t.id].map((f) => (
                         <FieldEditor
                           key={f.key}
@@ -197,7 +214,7 @@ export function OverlaySheet({ visible, line, overlay, assets, themeId, uploads,
                           onChange={(v) => setField(t.id, f.key, v)}
                         />
                       ))}
-                    </View>
+                    </Animated.View>
                   ) : null}
                 </View>
               );
@@ -245,6 +262,8 @@ export function assetStatus(a: BrollAssetView, uploadFraction?: number): string 
 }
 
 function FieldEditor({ field, value, error, onChange }: { field: TemplateField; value: string | string[]; error?: string; onChange: (v: string | string[]) => void }) {
+  const styles = useStyles();
+  const c = useColors();
   if (field.kind === 'list') {
     const items = Array.isArray(value) ? value : [];
     return (
@@ -268,12 +287,12 @@ function FieldEditor({ field, value, error, onChange }: { field: TemplateField; 
               maxLength={field.maxLength + 10}
               accessibilityLabel={`${field.label} ${i + 1}`}
               style={[styles.input, { flex: 1 }, charsLeft(field, item) < 0 && styles.inputError]}
-              placeholderTextColor={color.muted}
+              placeholderTextColor={c.muted}
               testID={`field-${field.key}-${i}`}
             />
-            <Pressable onPress={() => onChange(items.filter((_, k) => k !== i))} accessibilityRole="button" accessibilityLabel={`Remove ${field.label.toLowerCase()} ${i + 1}`} style={styles.iconHit}>
-              <Icon name="close" size={16} color={color.muted} />
-            </Pressable>
+            <PressableScale onPress={() => onChange(items.filter((_, k) => k !== i))} motion="icon" accessibilityRole="button" accessibilityLabel={`Remove ${field.label.toLowerCase()} ${i + 1}`} style={styles.iconHit}>
+              <SymbolIcon name="close" size={14} color={c.muted} />
+            </PressableScale>
           </View>
         ))}
         {items.length < (field.maxItems ?? 5) ? (
@@ -306,7 +325,7 @@ function FieldEditor({ field, value, error, onChange }: { field: TemplateField; 
         maxLength={field.maxLength + 10}
         accessibilityLabel={`${field.label}, ${limitText(field)}`}
         style={[styles.input, (left < 0 || !!error) && styles.inputError]}
-        placeholderTextColor={color.muted}
+        placeholderTextColor={c.muted}
         testID={`field-${field.key}`}
       />
       {error ? (
@@ -320,11 +339,12 @@ function FieldEditor({ field, value, error, onChange }: { field: TemplateField; 
 
 /** − 1.6 s + in steps of 0.2 s. */
 export function DurationStepper({ value, min, max, onChange }: { value: number; min: number; max: number; onChange: (v: number) => void }) {
+  const styles = useStyles();
   const step = (d: number) => onChange(Math.round(Math.min(max, Math.max(min, value + d)) * 10) / 10);
   return (
     <View style={styles.stepper} accessibilityRole="adjustable" accessibilityLabel="Time on screen" accessibilityValue={{ text: fmtSec(value) }}>
       <StepButton glyph="−" label="Shorter" disabled={value <= min + 1e-3} onPress={() => step(-0.2)} />
-      <Text variant="body" weight={600} center style={{ minWidth: 42 }}>
+      <Text variant="body" weight={600} center style={{ minWidth: 42 }} tabular>
         {value.toFixed(1)}s
       </Text>
       <StepButton glyph="+" label="Longer" disabled={value >= max - 1e-3} onPress={() => step(0.2)} />
@@ -333,31 +353,32 @@ export function DurationStepper({ value, min, max, onChange }: { value: number; 
 }
 
 function StepButton({ glyph, label, disabled, onPress }: { glyph: string; label: string; disabled: boolean; onPress: () => void }) {
+  const styles = useStyles();
   return (
-    <Pressable onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} style={({ pressed }) => [styles.stepButton, (disabled || pressed) && { opacity: disabled ? 0.4 : 0.7 }]}>
+    <PressableScale onPress={onPress} disabled={disabled} motion="icon" haptic="selection" restingOpacity={disabled ? 0.4 : 1} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} style={styles.stepButton}>
       <Text variant="body" style={{ fontSize: 20, lineHeight: 22 }}>
         {glyph}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 
-const styles = StyleSheet.create({
-  divider: { borderTopWidth: 1, borderTopColor: color.hairline },
+const useStyles = makeStyles((t) => ({
+  divider: { borderTopWidth: 1, borderTopColor: t.color.hairline },
   form: { gap: 12, paddingBottom: 14 },
   fieldHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   listRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   input: {
     ...typeStyle('body'),
-    color: color.ink,
+    color: t.color.ink,
     minHeight: 44,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: color.outline,
-    backgroundColor: color.white,
+    borderColor: t.color.outline,
+    backgroundColor: t.color.fill,
     paddingHorizontal: 12,
   },
-  inputError: { borderColor: color.cut },
+  inputError: { borderColor: t.color.cut },
   iconHit: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   stepButton: {
@@ -365,9 +386,9 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: color.outline,
-    backgroundColor: color.white,
+    borderColor: t.color.outline,
+    backgroundColor: t.color.fill,
     alignItems: 'center',
     justifyContent: 'center',
   },
-});
+}));

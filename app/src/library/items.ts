@@ -1,5 +1,6 @@
 import type { VideoSummary } from '@kilo/edl';
 import { finishedSubtitle, reviewSubtitle, statusLabel } from '@/lib/format';
+import { VIDEO_ROW_HEIGHT } from '@/components/sizes';
 
 /**
  * The library's rows, pure so it is unit-tested: videos in batch order with a header
@@ -7,7 +8,8 @@ import { finishedSubtitle, reviewSubtitle, statusLabel } from '@/lib/format';
  * measuring, and where a tap goes.
  */
 
-export const ROW_HEIGHT = 68;
+/** A video row (`VideoRow`, 76 high, design brief 5.8). */
+export const ROW_HEIGHT = VIDEO_ROW_HEIGHT;
 export const HEADER_HEIGHT = 44;
 
 export type LibraryItem =
@@ -67,4 +69,36 @@ export function batchHeading(createdAt: string, locale?: string): string {
   const day = d.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
   const time = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
   return `Batch started ${day}, ${time}`;
+}
+
+export type LibraryFilterValue = 'all' | 'review' | 'progress' | 'finished' | 'failed';
+
+/** The filter chips (design brief 4.3). */
+export const LIBRARY_FILTERS: readonly { value: LibraryFilterValue; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'review', label: 'To review' },
+  { value: 'progress', label: 'Editing' },
+  { value: 'finished', label: 'Finished' },
+  { value: 'failed', label: 'Failed' },
+];
+
+/**
+ * What an empty list says (design brief 4.3): a search with no match names the words; an empty
+ * filter says so and offers "Show all"; an empty library says where videos come from.
+ */
+export function libraryEmpty(filter: LibraryFilterValue, q: string): { title: string; body: string; showAll: boolean } {
+  const words = q.trim();
+  if (words) return { title: `No videos called “${words}”`, body: 'Try fewer or different words.', showAll: filter !== 'all' };
+  switch (filter) {
+    case 'review':
+      return { title: 'No videos to review', body: 'Videos land here once Kilo has edited them.', showAll: true };
+    case 'progress':
+      return { title: 'Nothing editing right now', body: 'Videos you upload show here while Kilo edits them.', showAll: true };
+    case 'finished':
+      return { title: 'No finished videos yet', body: 'Videos show here once you tap Looks good.', showAll: true };
+    case 'failed':
+      return { title: 'No failed videos', body: 'Every video was edited.', showAll: true };
+    case 'all':
+      return { title: 'No videos yet', body: 'Videos you edit show up here.', showAll: false };
+  }
 }

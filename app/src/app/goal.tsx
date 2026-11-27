@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Platform, View } from 'react-native';
+import Animated from 'react-native-reanimated';
+import { router } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { GoalView } from '@kilo/edl';
 import { getApi } from '@/api/client';
@@ -8,31 +10,51 @@ import { keys, useGoal } from '@/api/queries';
 import { deviceTimeZone, formatHour, goalFormFrom, goalHeadline, isDirty, streakLine, toUpdateRequest, withHour, withPerWeek, type GoalForm } from '@/goal/goalForm';
 import { getNotificationPermission, openNotificationSettings, requestNotificationPermission, type NotificationPermission } from '@/push/permission';
 import { getPushToken } from '@/push/PushManager';
-import { Card, ErrorState, Header, Icon, LoadingBlock, PillButton, Row, Screen, StepBar, Stepper, Text, Toggle, color } from '@/ui';
+import { Card, ErrorState, LoadingBlock, PillButton, PressableScale, Row, Screen, StepBar, Stepper, SymbolIcon, Text, Toggle, makeStyles, useColors, useLayoutMotion, type ScreenProps } from '@/ui';
+import { SheetHeader } from '@/components/SheetHeader';
+import { FOOTER_BUTTON } from '@/components/sizes';
+
+const ios = Platform.OS === 'ios';
+
+const close = () => (router.canGoBack() ? router.back() : router.replace('/'));
+
+/**
+ * The goal's frame. iOS: a form sheet (medium and large detents) on the system glass, with its own
+ * title row and a glass close button (brief 4.12, 5.9). Elsewhere a pushed screen with the usual header.
+ */
+function GoalScreenFrame({ children, ...props }: Omit<ScreenProps, 'appearance' | 'header' | 'sheet' | 'ground'> & { children: ReactNode }) {
+  return (
+    <Screen appearance="auto" sheet ground="none" header={ios ? undefined : { title: 'Weekly goal' }} {...props}>
+      {ios ? <SheetHeader title="Weekly goal" onClose={close} /> : null}
+      {children}
+    </Screen>
+  );
+}
 
 /** Weekly goal and reminder (GET/PUT /v1/goal). */
 export default function GoalScreen() {
   const goal = useGoal();
   if (goal.isPending) {
     return (
-      <Screen>
-        <Header title="Weekly goal" />
+      <GoalScreenFrame>
         <LoadingBlock />
-      </Screen>
+      </GoalScreenFrame>
     );
   }
   if (!goal.data) {
     return (
-      <Screen>
-        <Header title="Weekly goal" />
+      <GoalScreenFrame>
         <ErrorState error={goal.error} onRetry={() => void goal.refetch()} />
-      </Screen>
+      </GoalScreenFrame>
     );
   }
   return <GoalBody view={goal.data} />;
 }
 
 function GoalBody({ view }: { view: GoalView }) {
+  const styles = useStyles();
+  const c = useColors();
+  const m = useLayoutMotion();
   const qc = useQueryClient();
   const tz = useMemo(deviceTimeZone, []);
   const [form, setForm] = useState<GoalForm>(() => goalFormFrom(view));
@@ -77,8 +99,9 @@ function GoalBody({ view }: { view: GoalView }) {
   const blocked = perm === 'denied' || perm === 'unavailable';
 
   return (
-    <Screen
+    <GoalScreenFrame
       gap={12}
+      footerGlass
       footer={
         <>
           {save.isError ? (
@@ -86,11 +109,10 @@ function GoalBody({ view }: { view: GoalView }) {
               {errorMessage(save.error)}
             </Text>
           ) : null}
-          <PillButton label={dirty ? 'Save' : save.isSuccess ? 'Saved' : 'Save'} onPress={() => save.mutate(form)} disabled={!dirty} loading={save.isPending} testID="save-goal" />
+          <PillButton label={dirty ? 'Save' : save.isSuccess ? 'Saved' : 'Save'} onPress={() => save.mutate(form)} disabled={!dirty} loading={save.isPending} height={FOOTER_BUTTON} testID="save-goal" />
         </>
       }
     >
-      <Header title="Weekly goal" />
 
       <Card gap={12} testID="goal-progress">
         <View style={styles.spread}>
@@ -101,7 +123,9 @@ function GoalBody({ view }: { view: GoalView }) {
             {streakLine(view.streakWeeks)}
           </Text>
         </View>
-        <Text variant="goal">{goalHeadline(view)}</Text>
+        <Text variant="goal" tabular>
+          {goalHeadline(view)}
+        </Text>
         {view.videosPerWeek > 0 ? <StepBar done={view.postedThisWeek} total={view.videosPerWeek} accessibilityLabel={goalHeadline(view)} /> : null}
         <Text variant="label" tone="muted">
           A video counts once it is posted. The week starts Monday.
@@ -124,21 +148,23 @@ function GoalBody({ view }: { view: GoalView }) {
           right={<Toggle value={form.reminderEnabled} onValueChange={(v) => void setReminder(v)} disabled={off || asking} accessibilityLabel="Remind me" testID="reminder-toggle" />}
         />
         {form.reminderEnabled && !off ? (
-          <Row
-            divider
-            minHeight={60}
-            title={`At ${formatHour(form.hour)}`}
-            subtitle={`Your time, ${tz.replace(/_/g, ' ')}`}
-            right={<HourStepper hour={form.hour} onChange={(h) => setForm(withHour(form, h))} />}
-            testID="reminder-hour"
-          />
+          <Animated.View entering={m.listInsert} exiting={m.listRemove}>
+            <Row
+              divider
+              minHeight={60}
+              title={`At ${formatHour(form.hour)}`}
+              subtitle={`Your time, ${tz.replace(/_/g, ' ')}`}
+              right={<HourStepper hour={form.hour} onChange={(h) => setForm(withHour(form, h))} />}
+              testID="reminder-hour"
+            />
+          </Animated.View>
         ) : null}
       </Card>
 
       {blocked && !off ? (
         <Card gap={10} testID="notifications-off">
           <View style={styles.spread}>
-            <Icon name="bell" size={22} color={color.cut} />
+            <SymbolIcon name="bell" size={20} color={c.cut} />
             <Text variant="body" weight={600} style={{ flex: 1 }}>
               Notifications are off for Kilo
             </Text>
@@ -150,21 +176,22 @@ function GoalBody({ view }: { view: GoalView }) {
                 ? 'Allow notifications for this site in your browser settings, then turn the reminder on.'
                 : 'Turn them on in Settings, then come back and turn the reminder on.'}
           </Text>
-          {Platform.OS !== 'web' && perm === 'denied' ? <PillButton variant="secondary" height={44} label="Open Settings" onPress={openNotificationSettings} /> : null}
+          {Platform.OS !== 'web' && perm === 'denied' ? <PillButton variant="secondary" surface="content" height={44} label="Open Settings" onPress={openNotificationSettings} /> : null}
         </Card>
       ) : null}
-    </Screen>
+    </GoalScreenFrame>
   );
 }
 
-/** − 6 pm + : steps an hour, wrapping around midnight. */
+/** − 6 pm + : steps an hour, wrapping around midnight; the `selection` haptic per step. */
 function HourStepper({ hour, onChange }: { hour: number; onChange: (h: number) => void }) {
+  const styles = useStyles();
   const btn = (glyph: string, label: string, d: number) => (
-    <Pressable onPress={() => onChange(hour + d)} accessibilityRole="button" accessibilityLabel={label} style={({ pressed }) => [styles.stepButton, pressed && { opacity: 0.7 }]} testID={d < 0 ? 'hour-earlier' : 'hour-later'}>
+    <PressableScale onPress={() => onChange(hour + d)} motion="icon" haptic="selection" accessibilityRole="button" accessibilityLabel={label} style={styles.stepButton} testID={d < 0 ? 'hour-earlier' : 'hour-later'}>
       <Text variant="body" style={{ fontSize: 20, lineHeight: 22 }}>
         {glyph}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
   return (
     <View style={styles.stepper} accessibilityRole="adjustable" accessibilityLabel="Reminder time" accessibilityValue={{ text: formatHour(hour) }}>
@@ -174,8 +201,8 @@ function HourStepper({ hour, onChange }: { hour: number; onChange: (h: number) =
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  stepButton: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: color.outline, backgroundColor: color.white, alignItems: 'center', justifyContent: 'center' },
+  stepButton: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: t.color.outline, backgroundColor: t.color.fill, alignItems: 'center', justifyContent: 'center' },
   spread: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-});
+}));

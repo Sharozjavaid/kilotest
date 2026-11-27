@@ -1,11 +1,13 @@
-import { useContext, type ReactNode } from 'react';
-import { Platform, RefreshControl, ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
+import { useContext, useState, type ReactNode } from 'react';
+import { Platform, RefreshControl, ScrollView, StyleSheet, View, type LayoutChangeEvent, type ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HeaderHeightContext } from 'expo-router/react-navigation';
 import { space } from './tokens';
 import { OfflineBanner } from './OfflineBanner';
+import { Glass } from './Glass';
+import { useToastInset } from './Toast';
 import { DEFAULT_SCREEN_APPEARANCE, ThemeScope, useTheme, type Appearance } from './theme';
 import { useScreenHeader } from './ScreenHeader';
 import type { ScreenHeaderConfig } from './ScreenHeader.types';
@@ -33,9 +35,25 @@ export interface ScreenProps {
   header?: ScreenHeaderConfig;
   /**
    * `auto` follows the system appearance; `light` / `dark` force one (the recorder is `dark`).
-   * Default `DEFAULT_SCREEN_APPEARANCE` (`light` until every screen reads the theme).
+   * Default `DEFAULT_SCREEN_APPEARANCE` (`auto`).
    */
   appearance?: Appearance;
+  /**
+   * The footer floats over the body in a glass bar (inset 12 from the sides, above the home
+   * indicator) and the body scrolls under it, as the brief's footers do (iOS and Android).
+   * Toasts are lifted above it. Web keeps the footer in the flow, as before.
+   */
+  footerGlass?: boolean;
+  /**
+   * The route is a sheet (iOS): the top padding is the sheet's own (12, under the grabber), not
+   * the status bar's. Elsewhere sheets are pushed screens and this does nothing.
+   */
+  sheet?: boolean;
+  /**
+   * `none`: no ground of its own on iOS, so a form sheet's glass material shows through (brief
+   * 5.9). Elsewhere, and by default, the sky-tint ground.
+   */
+  ground?: 'sky' | 'none';
 }
 
 /** The sky-tint gradient ground with safe areas and the 20pt gutter of the mock-up. Theme-aware. */
@@ -47,7 +65,24 @@ export function Screen({ appearance = DEFAULT_SCREEN_APPEARANCE, ...props }: Scr
   );
 }
 
-function ScreenBody({ children, scroll = true, refreshing, onRefresh, footer, gap = space.xl, bottomInset = true, contentStyle, testID, header }: Omit<ScreenProps, 'appearance'>) {
+const ios = Platform.OS === 'ios';
+const web = Platform.OS === 'web';
+
+function ScreenBody({
+  children,
+  scroll = true,
+  refreshing,
+  onRefresh,
+  footer,
+  gap = space.xl,
+  bottomInset = true,
+  contentStyle,
+  testID,
+  header,
+  footerGlass,
+  sheet,
+  ground: groundKind = 'sky',
+}: Omit<ScreenProps, 'appearance'>) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const nav = useScreenHeader(header);
@@ -56,10 +91,21 @@ function ScreenBody({ children, scroll = true, refreshing, onRefresh, footer, ga
   const bottom = bottomInset ? Math.max(insets.bottom, space.gutter) : space.gutter;
   const body: ViewStyle = { gap, paddingHorizontal: space.gutter };
   const g = t.groundGradient;
+  const noGround = groundKind === 'none' && ios;
+
+  // A floating glass footer: measured, so the body can scroll clear of it.
+  const floating = !!footer && !!footerGlass && !web;
+  const [footerH, setFooterH] = useState(0);
+  const footerBottom = Math.max(insets.bottom, space.lg);
+  const onFooterLayout = (e: LayoutChangeEvent) => {
+    const h = Math.round(e.nativeEvent.layout.height);
+    if (h !== footerH) setFooterH(h);
+  };
+  const clearFooter = floating ? footerH + space.xl : 0;
 
   // With the native bar the scroll view must be the screen's first view, so UIKit finds it for
   // the large title and the scroll-edge effect: the ground is a background image, not a view.
-  const ground: ViewStyle | null = Platform.OS === 'web' ? null : { backgroundImage: `linear-gradient(180deg, ${g.colors[0]} 0%, ${g.colors[1]} 36%, ${g.colors[2]} 100%)` };
+  const ground: ViewStyle | null = web || noGround ? null : { backgroundImage: `linear-gradient(180deg, ${g.colors[0]} 0%, ${g.colors[1]} 36%, ${g.colors[2]} 100%)` };
 
   const inline = nativeHeader ? null : nav.element;
   const banner = <OfflineBanner />;
@@ -73,7 +119,7 @@ function ScreenBody({ children, scroll = true, refreshing, onRefresh, footer, ga
           body,
           nativeHeader ? { paddingTop: space.xs } : null,
           // With the native bar, the scroll view's automatic insets already clear the home indicator.
-          { paddingBottom: footer ? space.xl : nativeHeader ? space.gutter : bottom },
+          { paddingBottom: floating ? clearFooter + (nativeHeader ? 0 : footerBottom) : footer ? space.xl : nativeHeader ? space.gutter : bottom },
           contentStyle,
         ]}
         contentInsetAdjustmentBehavior={nativeHeader ? 'automatic' : undefined}
@@ -87,7 +133,7 @@ function ScreenBody({ children, scroll = true, refreshing, onRefresh, footer, ga
     );
   } else {
     main = (
-      <View style={[styles.flex, body, nativeHeader ? { paddingTop: headerHeight } : null, { paddingBottom: footer ? 0 : bottom }, contentStyle]}>
+      <View style={[styles.flex, body, nativeHeader ? { paddingTop: headerHeight } : null, { paddingBottom: floating ? clearFooter + footerBottom : footer ? 0 : bottom }, contentStyle]}>
         {nativeHeader ? <View style={styles.bannerInContent}>{banner}</View> : null}
         {inline}
         {children}
@@ -95,21 +141,42 @@ function ScreenBody({ children, scroll = true, refreshing, onRefresh, footer, ga
     );
   }
 
-  const top = insets.top > 0 ? insets.top + space.xs : space.gutter;
+  const top = sheet && ios ? space.lg : insets.top > 0 ? insets.top + space.xs : space.gutter;
   return (
-    <View style={[styles.root, { backgroundColor: t.color.ground }, ground]} testID={testID}>
+    <View style={[styles.root, { backgroundColor: noGround ? 'transparent' : t.color.ground }, ground]} testID={testID}>
       {nav.element && nativeHeader ? nav.element : null}
       <StatusBar style={t.statusBar} />
-      {Platform.OS === 'web' ? <LinearGradient colors={g.colors} locations={g.locations} style={StyleSheet.absoluteFill} pointerEvents="none" /> : null}
+      {web ? <LinearGradient colors={g.colors} locations={g.locations} style={StyleSheet.absoluteFill} pointerEvents="none" /> : null}
       {nativeHeader ? null : <View style={{ paddingTop: top }}>{banner}</View>}
       {main}
-      {footer ? <View style={{ paddingHorizontal: space.gutter, paddingTop: space.md, paddingBottom: bottom, gap: 10 }}>{footer}</View> : null}
+      {floating ? (
+        <View pointerEvents="box-none" style={[styles.floating, { bottom: footerBottom }]} onLayout={onFooterLayout}>
+          <Glass kind="bar" style={styles.footerBar}>
+            {footer}
+          </Glass>
+          <FooterToastInset height={footerH + footerBottom} />
+        </View>
+      ) : footer ? (
+        <View style={{ paddingHorizontal: space.gutter, paddingTop: space.md, paddingBottom: bottom, gap: 10 }} onLayout={footerGlass ? onFooterLayout : undefined}>
+          {footer}
+          {/* Toasts sit above this footer too (web keeps it in the flow). */}
+          {footerGlass ? <FooterToastInset height={footerH} /> : null}
+        </View>
+      ) : null}
     </View>
   );
+}
+
+/** Lifts toasts above the floating footer while this screen is in front. */
+function FooterToastInset({ height }: { height: number }) {
+  useToastInset(height);
+  return null;
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
   bannerInContent: { marginHorizontal: -space.gutter },
+  floating: { position: 'absolute', left: space.lg, right: space.lg },
+  footerBar: { gap: space.md },
 });

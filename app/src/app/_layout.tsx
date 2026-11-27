@@ -15,6 +15,7 @@ import { fontFamily } from '@/ui/tokens';
 import { useInter } from '@/ui/fonts';
 import { DEFAULT_SCREEN_APPEARANCE, ThemeProvider, resolveScheme, themeFor, useSystemScheme } from '@/ui/theme';
 import { sheet } from '@/ui/sheets';
+import { ToastProvider } from '@/ui/Toast';
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 wireOnlineManager();
@@ -29,9 +30,11 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
-            <AuthProvider>
-              <Navigator />
-            </AuthProvider>
+            <ToastProvider>
+              <AuthProvider>
+                <Navigator />
+              </AuthProvider>
+            </ToastProvider>
           </ThemeProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
@@ -78,7 +81,7 @@ function Navigator() {
       >
         <Stack.Protected guard={signedIn}>
           <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="new-batch" />
+          <Stack.Screen name="new-batch" options={sheet.page()} />
           <Stack.Screen name="batch/[id]" />
           <Stack.Screen name="videos" />
           <Stack.Screen name="review/[id]" />

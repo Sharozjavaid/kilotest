@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, ScrollView, View } from 'react-native';
 import type { EditSettings } from '@kilo/edl';
-import { Icon, Text, color, radius, size } from '@/ui';
+import { Card, Chip, PillButton, Row, Text, makeStyles, space } from '@/ui';
 import { matchingStyle, nextStyleName, startingSettings, toSaveRequest } from './styleForm';
 import { useSaveStyle, useStyles } from './useStyles';
+import { StyleMenu } from './StyleMenu';
 
 /**
  * Loads the default style into `setSettings` once styles arrive, unless the creator
@@ -23,70 +24,70 @@ export function useStartingSettings(setSettings: (s: EditSettings) => void): () 
   };
 }
 
-/** A row of style chips: tap one to load its settings; "Save as style" keeps the current settings. */
+const useChooserStyles = makeStyles(() => ({
+  row: { gap: 8, paddingHorizontal: space.gutter, paddingVertical: 2 },
+  scroll: { marginHorizontal: -space.gutter },
+}));
+
+/**
+ * The batch's style. iOS: a "Style" row whose value is a native menu of the saved styles (design
+ * brief 4.4). Android and web: a row of style chips. Picking one loads its settings; "Save as
+ * style" keeps settings that match none.
+ */
 export function StyleChooser({ settings, onPick }: { settings: EditSettings; onPick: (s: EditSettings) => void }) {
+  const s = useChooserStyles();
   const styles = useStyles();
   const save = useSaveStyle();
   const list = styles.data ?? [];
   const current = matchingStyle(list, settings);
 
   const saveCurrent = () => {
+    if (save.isPending) return;
     save.mutate({ body: toSaveRequest({ name: nextStyleName(list), settings, isDefault: list.length === 0 }) });
   };
 
   if (!styles.data) return null;
+
+  if (Platform.OS === 'ios') {
+    return (
+      <Card padding={0} paddingHorizontal={16}>
+        <Row
+          title="Style"
+          subtitle={current ? undefined : 'These settings are your own'}
+          right={list.length ? <StyleMenu styles={list} currentId={current?.id ?? null} onPick={(id) => {
+            const st = list.find((x) => x.id === id);
+            if (st) onPick(st.settings);
+          }} /> : <Text variant="body" tone="muted">None saved</Text>}
+        />
+        {!current ? (
+          <View style={{ alignItems: 'flex-start', marginLeft: -16 }}>
+            <PillButton variant="text" icon="plus" label={save.isPending ? 'Saving…' : 'Save as style'} onPress={saveCurrent} disabled={save.isPending} accessibilityLabel="Save these settings as a style" testID="save-as-style" />
+          </View>
+        ) : null}
+      </Card>
+    );
+  }
+
   return (
     <View style={{ gap: 6 }}>
       <Text variant="secondary" tone="muted">
         Style
       </Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.row} accessibilityRole="radiogroup" accessibilityLabel="Style">
-        {list.map((st) => {
-          const selected = current?.id === st.id;
-          return (
-            <Pressable
-              key={st.id}
-              onPress={() => onPick(st.settings)}
-              accessibilityRole="radio"
-              accessibilityState={{ checked: selected }}
-            aria-checked={selected}
-              accessibilityLabel={`${st.name}${st.isDefault ? ', default' : ''}`}
-              style={({ pressed }) => [s.chip, selected && s.chipOn, pressed && { opacity: 0.7 }]}
-              testID={`style-chip-${st.id}`}
-            >
-              <Text variant="secondary" weight={selected ? 600 : 500} tone={selected ? 'white' : 'ink'} numberOfLines={1}>
-                {st.name}
-              </Text>
-            </Pressable>
-          );
-        })}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.scroll} contentContainerStyle={s.row} accessibilityLabel="Style">
+        {list.map((st) => (
+          <Chip
+            key={st.id}
+            label={st.name}
+            selected={current?.id === st.id}
+            onPress={() => onPick(st.settings)}
+            accessibilityLabel={`${st.name}${st.isDefault ? ', default' : ''}`}
+            testID={`style-chip-${st.id}`}
+          />
+        ))}
         {!current ? (
-          <Pressable onPress={saveCurrent} disabled={save.isPending} accessibilityRole="button" accessibilityLabel="Save these settings as a style" style={({ pressed }) => [s.chip, s.chipGhost, pressed && { opacity: 0.7 }]} testID="save-as-style">
-            <Icon name="plus" size={16} color={color.accent} />
-            <Text variant="secondary" weight={600} tone="accent">
-              {save.isPending ? 'Saving…' : 'Save as style'}
-            </Text>
-          </Pressable>
+          <Chip label={save.isPending ? 'Saving…' : 'Save as style'} icon="plus" onPress={saveCurrent} accessibilityLabel="Save these settings as a style" testID="save-as-style" />
         ) : null}
       </ScrollView>
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  row: { gap: 8, paddingRight: 4 },
-  chip: {
-    minHeight: size.touch,
-    paddingHorizontal: 16,
-    borderRadius: size.touch / 2,
-    borderWidth: 1,
-    borderColor: color.hairline,
-    backgroundColor: color.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    maxWidth: 200,
-  },
-  chipOn: { backgroundColor: color.ink, borderColor: color.ink },
-  chipGhost: { borderStyle: 'dashed', borderColor: color.dropBorder, backgroundColor: color.dropFill, borderRadius: radius.card },
-});

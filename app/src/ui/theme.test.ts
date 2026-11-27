@@ -12,8 +12,8 @@ describe('theme', () => {
     expect(resolveScheme('dark', 'light')).toBe('dark');
   });
 
-  it('keeps unconverted screens light until the default flips', () => {
-    expect(DEFAULT_SCREEN_APPEARANCE).toBe('light');
+  it('follows the system by default, now that every screen reads the theme', () => {
+    expect(DEFAULT_SCREEN_APPEARANCE).toBe('auto');
   });
 
   it('returns one frozen object per scheme and contrast, so contexts and styles are stable', () => {

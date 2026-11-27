@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { size } from '@/ui/tokens';
-import { DEFAULT_SCREEN_APPEARANCE, resolveScheme, themeFor, useSystemScheme } from '@/ui/theme';
+import { themeFor, useSystemScheme } from '@/ui/theme';
 import { Icon, type IconName } from '@/ui/Icon';
 import { Text } from '@/ui/type';
 
@@ -12,19 +12,21 @@ interface TabBarProps {
   navigateToTab: (routeKey: string) => void;
 }
 
+/** By tab group (each tab is a group with its own stack). */
 const TABS: Record<string, { label: string; icon: IconName }> = {
-  index: { label: 'Videos', icon: 'videos' },
-  styles: { label: 'Styles', icon: 'styles' },
-  you: { label: 'You', icon: 'user' },
+  '(home)': { label: 'Videos', icon: 'videos' },
+  '(styles)': { label: 'Styles', icon: 'styles' },
+  '(you)': { label: 'You', icon: 'user' },
 };
 
 /**
  * 72pt glass tab bar from the mock-up: icon over a 12pt label, accent when active. Web only
- * (iOS and Android use the native tab bar). Follows the screens' appearance.
+ * (iOS and Android use the native tab bar). Follows the system appearance, as the tab screens
+ * do; the uploads capsule floats above it (`TabStack`).
  */
 export function KiloTabBar({ state, emitter, navigateToTab }: TabBarProps) {
   const insets = useSafeAreaInsets();
-  const color = themeFor(resolveScheme(DEFAULT_SCREEN_APPEARANCE, useSystemScheme())).color;
+  const color = themeFor(useSystemScheme()).color;
   return (
     <View
       style={[styles.bar, { height: size.tabBar + insets.bottom, paddingBottom: insets.bottom, backgroundColor: color.surfaceStrong, borderTopColor: color.hairline }]}

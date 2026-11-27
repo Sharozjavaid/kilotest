@@ -7,9 +7,10 @@ import { useShimmer } from './motion';
 import { distances } from './motionPresets';
 import { router } from 'expo-router';
 import { errorMessage, isKiloApiError } from '@/api/errors';
-import { color, radius, space } from './tokens';
+import { radius, space } from './tokens';
 import { Text } from './type';
 import { Icon, type IconName } from './Icon';
+import { SymbolIcon } from './SymbolIcon';
 import { PillButton } from './PillButton';
 import { Card } from './Card';
 
@@ -53,6 +54,7 @@ function SkeletonShimmer({ width = '100%', height = 16, radius: r = radius.sm, s
 }
 
 function SkeletonPulse({ width = '100%', height = 16, radius: r = radius.sm, style }: SkeletonProps) {
+  const c = useColors();
   const opacity = useRef(new Animated.Value(0.6)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -64,16 +66,16 @@ function SkeletonPulse({ width = '100%', height = 16, radius: r = radius.sm, sty
     loop.start();
     return () => loop.stop();
   }, [opacity]);
-  return <Animated.View style={[{ width, height, borderRadius: r, backgroundColor: color.track, opacity }, style]} />;
+  return <Animated.View style={[{ width, height, borderRadius: r, backgroundColor: c.track, opacity }, style]} />;
 }
 
-/** Skeleton for a list of video rows. */
+/** Skeleton for a list of video rows: shaped like `VideoRow` (36 x 64 thumb, title, line), 76 high. */
 export function SkeletonRows({ count = 3 }: { count?: number }) {
   return (
-    <View accessibilityLabel="Loading" accessibilityRole="progressbar" style={{ gap: 12 }}>
+    <View accessibilityLabel="Loading" accessibilityRole="progressbar">
       {Array.from({ length: count }, (_, i) => (
         <View key={i} style={styles.skelRow}>
-          <Skeleton width={40} height={56} />
+          <Skeleton width={36} height={64} radius={radius.sm} />
           <View style={{ flex: 1, gap: 8 }}>
             <Skeleton width="70%" height={14} />
             <Skeleton width="45%" height={12} />
@@ -108,32 +110,37 @@ export function ErrorState({ error, onRetry, title = "Couldn't load this" }: { e
   );
 }
 
-/** Friendly empty state with an optional action. */
+/**
+ * Empty state (design brief 5.11): a 28pt glyph in a 64 `skyTint` circle, a 20/600 title, one
+ * line of 15 muted body, and one primary action only when the screen has no obvious one already.
+ */
 export function EmptyState({
   icon,
   title,
   body,
   action,
+  testID,
 }: {
   icon: IconName;
   title: string;
   body: string;
-  action?: { label: string; onPress: () => void };
+  action?: { label: string; onPress: () => void; testID?: string };
+  testID?: string;
 }) {
   const c = useColors();
   return (
-    <Card gap={10} padding={24} style={styles.center}>
+    <View style={styles.empty} testID={testID}>
       <View style={[styles.emptyIcon, { backgroundColor: c.chipOn }]}>
-        <Icon name={icon} size={24} color={c.accent} />
+        <SymbolIcon name={icon} size={28} color={c.accent} />
       </View>
-      <Text variant="bodyLg" center>
+      <Text variant="titleSm" center style={{ marginTop: 8 }} accessibilityRole="header">
         {title}
       </Text>
-      <Text variant="secondary" tone="muted" center>
+      <Text variant="body" tone="muted" center style={{ marginTop: 6 }}>
         {body}
       </Text>
-      {action ? <PillButton variant="secondary" label={action.label} onPress={action.onPress} height={44} /> : null}
-    </Card>
+      {action ? <PillButton label={action.label} onPress={action.onPress} height={52} style={{ marginTop: 20, alignSelf: 'stretch' }} testID={action.testID} /> : null}
+    </View>
   );
 }
 
@@ -152,12 +159,12 @@ export function LoadingBlock({ label = 'Loading' }: { label?: string }) {
 
 const styles = StyleSheet.create({
   center: { alignItems: 'center' },
-  skelRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64 },
+  skelRow: { flexDirection: 'row', alignItems: 'center', gap: 12, height: 76, paddingVertical: 6 },
+  empty: { alignItems: 'center', alignSelf: 'center', maxWidth: 300, width: '100%', paddingVertical: 24 },
   emptyIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: color.skyTint,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },

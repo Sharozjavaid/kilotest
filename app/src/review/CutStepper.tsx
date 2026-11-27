@@ -1,16 +1,27 @@
-import { Pressable, StyleSheet, View } from 'react-native';
-import { Icon } from '@/ui/Icon';
-import { color, size } from '@/ui/tokens';
+import { memo } from 'react';
+import { Platform, View } from 'react-native';
+import { PressableScale } from '@/ui/PressableScale';
+import { SymbolIcon } from '@/ui/SymbolIcon';
+import { motionHaptics } from '@/ui/motionPresets';
+import { makeStyles, useColors } from '@/ui/theme';
+import { size } from '@/ui/tokens';
 import { Text } from '@/ui/type';
 import type { CutLine } from './cuts';
 
+const useStyles = makeStyles((t) => ({
+  // A capsule inside the glass toolbar: it shares the bar's material (never glass on glass), so it is a faint fill.
+  bar: { flexDirection: 'row', alignItems: 'center', height: 48, borderRadius: 24, backgroundColor: t.color.segTrack },
+  step: { width: size.touch, height: 48, alignItems: 'center', justifyContent: 'center' },
+  label: { minWidth: 56, alignItems: 'center' },
+}));
+
 /**
- * "6 cuts" between previous and next: steps through only the cut lines, playing each with
- * a moment either side so the creator hears whether it should go; the line itself (why it
- * was cut, Keep both) is scrolled to and highlighted. No timeline: a label and two buttons
- * beside the captions chip.
+ * "6 cuts" between previous and next (design brief 4.6, in the floating toolbar): steps
+ * through only the cut lines, playing each with a moment either side so the creator hears
+ * whether it should go; the screen scrolls to the line and flashes its outline. Each half is a
+ * 44pt target; a step plays the `selection` haptic.
  */
-export function CutStepper({
+export const CutStepper = memo(function CutStepper({
   lines,
   current,
   summary,
@@ -23,47 +34,40 @@ export function CutStepper({
   summary: string;
   onStep: (dir: 1 | -1) => void;
 }) {
+  const s = useStyles();
   const index = current ? lines.findIndex((l) => l.segmentId === current) : -1;
   const n = lines.length;
   const title = index >= 0 ? `Cut ${index + 1} of ${n}` : n === 1 ? '1 cut' : `${n} cuts`;
   return (
-    <View style={styles.bar} testID="cut-stepper">
+    <View style={s.bar} testID="cut-stepper">
       <StepButton icon="chevronLeft" label="Previous cut" disabled={!n} onPress={() => onStep(-1)} testID="cut-prev" />
-      <View accessible accessibilityLabel={index >= 0 ? `${title}: ${lines[index]!.why}` : summary} accessibilityLiveRegion="polite">
-        <Text variant="secondary" weight={600} tone={index >= 0 ? 'cut' : 'ink'} testID="cut-summary" numberOfLines={1}>
+      <View style={s.label} accessible accessibilityLabel={index >= 0 ? `${title}: ${lines[index]!.why}` : summary} accessibilityLiveRegion="polite">
+        <Text variant="body" weight={600} tone={index >= 0 ? 'cut' : 'ink'} testID="cut-summary" numberOfLines={1} tabular>
           {title}
         </Text>
       </View>
       <StepButton icon="chevronRight" label="Next cut" disabled={!n} onPress={() => onStep(1)} testID="cut-next" />
     </View>
   );
-}
+});
 
 function StepButton({ icon, label, disabled, onPress, testID }: { icon: 'chevronLeft' | 'chevronRight'; label: string; disabled: boolean; onPress: () => void; testID: string }) {
+  const s = useStyles();
+  const c = useColors();
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       disabled={disabled}
+      motion="icon"
+      haptic={motionHaptics.select}
+      restingOpacity={disabled ? 0.4 : 1}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
-      style={({ pressed }) => [styles.step, disabled && { opacity: 0.4 }, pressed && { opacity: 0.6 }]}
+      style={s.step}
       testID={testID}
     >
-      <Icon name={icon} size={18} color={color.ink} />
-    </Pressable>
+      <SymbolIcon name={icon} size={Platform.OS === 'ios' ? 15 : 18} strokeWidth={2.2} color={c.ink} />
+    </PressableScale>
   );
 }
-
-const styles = StyleSheet.create({
-  bar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    borderRadius: size.touch / 2,
-    borderWidth: 1,
-    borderColor: color.hairline,
-    backgroundColor: color.surfaceStrong,
-  },
-  step: { width: size.touch, height: size.touch, borderRadius: size.touch / 2, alignItems: 'center', justifyContent: 'center' },
-});

@@ -8,7 +8,8 @@ import { useCallback, useRef, useState } from 'react';
 const remembered = new Map<string, string>();
 const REMEMBER_MAX = 2000;
 
-function remember(key: string, url: string): void {
+/** Remembers the link shown for `key` (exported for tests). */
+export function remember(key: string, url: string): void {
   remembered.delete(key);
   remembered.set(key, url);
   if (remembered.size > REMEMBER_MAX) remembered.delete(remembered.keys().next().value!);
@@ -28,12 +29,31 @@ export function forgetStableUrls(): void {
  * With a `key` (a video id) the URL in use is also remembered across unmounts, so a row
  * that scrolls out of a virtualised list and back shows the same picture without loading it again.
  */
+export interface StableState {
+  key: string | undefined;
+  url: string | null;
+}
+
+/**
+ * The link a component should show for `key`, given what it showed before. A recycled list cell
+ * (FlashList) keeps its state when it is handed another item: for a new key this starts over
+ * (that key's remembered link, else the latest) rather than show, and remember, the previous
+ * item's link. Returns `state` itself when nothing changes. Pure apart from reading the memory.
+ */
+export function stableStateFor(state: StableState | null, key: string | undefined, latest: string | null): StableState {
+  if (state && state.key === key) return state;
+  return { key, url: key ? remembered.get(key) ?? latest : latest };
+}
+
 export function useStableUrl(latest: string | null, key?: string): { url: string | null; renew: () => boolean } {
-  const [url, setUrlState] = useState(() => (key ? remembered.get(key) ?? latest : latest));
+  const [state, setState] = useState(() => stableStateFor(null, key, latest));
+  const current = stableStateFor(state, key, latest);
+  if (current !== state) setState(current);
+  const url = current.url;
   const setUrl = useCallback(
     (next: string | null) => {
       if (key && next) remember(key, next);
-      setUrlState(next);
+      setState({ key, url: next });
     },
     [key],
   );

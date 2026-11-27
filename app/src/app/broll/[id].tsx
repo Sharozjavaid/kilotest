@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Platform, View } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { BrollAssetView, Edl, Overlay, VideoDetail } from '@kilo/edl';
@@ -25,21 +26,28 @@ import { OverlaySheet, assetStatus } from '@/broll/OverlaySheet';
 import { versionsHiding } from '@/review/variantOverlays';
 import { GraphicThumb } from '@/broll/GraphicThumb';
 import { plural } from '@/lib/format';
+import { FOOTER_BUTTON } from '@/components/sizes';
 import {
   Card,
+  EmptyState,
   ErrorState,
-  Header,
-  Icon,
   LoadingBlock,
   PillButton,
+  PressableScale,
   ProgressBar,
   Screen,
-  SectionLabel,
+  SymbolIcon,
   Text,
   Thumb,
-  color,
+  makeStyles,
   radius,
+  useColors,
+  useLayoutMotion,
+  type ScreenHeaderConfig,
 } from '@/ui';
+
+const native = Platform.OS !== 'web';
+const swapFade = native ? FadeIn.duration(160) : undefined;
 
 function confirmThen(title: string, message: string, onYes: () => void) {
   if (Platform.OS === 'web') {
@@ -57,34 +65,37 @@ function notify(title: string, message: string) {
   else Alert.alert(title, message);
 }
 
-/** B-roll for one video (mock-up `Broll`). Param `id` is the video id. */
+const closeHeader = (meta?: string): ScreenHeaderConfig => ({ title: 'B-roll', meta, close: true });
+
+/**
+ * B-roll for one video (design brief 4.8; a page sheet over Review on iOS, so the creator lands
+ * back on the same line). Param `id` is the video id.
+ */
 export default function BrollScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const video = useVideo(id);
   const v = video.data;
+  const c = useColors();
 
   if (video.isPending) {
     return (
-      <Screen>
-        <Header title="B-roll" />
+      <Screen appearance="auto" header={closeHeader()}>
         <LoadingBlock />
       </Screen>
     );
   }
   if (!v) {
     return (
-      <Screen>
-        <Header title="B-roll" />
+      <Screen appearance="auto" header={closeHeader()}>
         <ErrorState error={video.error} onRetry={() => void video.refetch()} />
       </Screen>
     );
   }
   if (!v.edl) {
     return (
-      <Screen>
-        <Header title="B-roll" />
+      <Screen appearance="auto" header={closeHeader()}>
         <Card gap={10} padding={24} style={{ alignItems: 'center' }}>
-          <Icon name="sparkle" size={28} color={color.accent} />
+          <SymbolIcon name="sparkle" size={28} color={c.accent} />
           <Text variant="bodyLg" center>
             Kilo is still editing this video
           </Text>
@@ -102,6 +113,14 @@ export default function BrollScreen() {
 }
 
 function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refetch: () => void }) {
+  const st = useStyles();
+  const m = useLayoutMotion();
+  // Cards already there when the sheet opens just show; placements arriving later use `listInsert`.
+  const opened = useRef(false);
+  useEffect(() => {
+    opened.current = true;
+  }, []);
+  const arrive = opened.current ? m.listInsert : undefined;
   const qc = useQueryClient();
   const { saver, state } = useEdlSaver(video.id, video.edl);
   const edl = state?.local ?? video.edl;
@@ -236,20 +255,26 @@ function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refe
 
   return (
     <Screen
+      appearance="auto"
       gap={14}
+      header={{ ...closeHeader(`${plural(assets.length, 'clip')} added · ${placed} placed`), onBack: () => void done() }}
+      footerGlass
       footer={
-        <View style={styles.actions}>
-          <PillButton variant="secondary" label="Add clips" style={{ flex: 1 }} onPress={addClips} loading={adding} disabled={!canEdit && !busy} testID="add-clips" />
-          <PillButton label="Done" height={52} style={{ flex: 2 }} onPress={done} testID="broll-done" />
+        <View style={st.actions}>
+          <PillButton variant="secondary" surface="content" label="Add clips" height={FOOTER_BUTTON} style={{ flex: 1 }} onPress={addClips} loading={adding} disabled={!canEdit && !busy} testID="add-clips" />
+          <PillButton label="Done" height={FOOTER_BUTTON} style={{ flex: 2 }} onPress={done} testID="broll-done" />
         </View>
       }
     >
-      <Header title="B-roll" meta={`${plural(assets.length, 'clip')} added · ${placed} placed`} />
-      <Text variant="transcript" tone="muted" style={{ lineHeight: 20 }}>
+      <Text variant="body" tone="muted">
         Placed against your script. Your voice keeps playing underneath. Swap or remove any of them.
       </Text>
 
       <SaveLine saving={!!state?.saving} error={state?.error} onRetry={() => void saver?.retry()} />
+
+      {assets.length === 0 && edl.overlays.length === 0 && canEdit ? (
+        <EmptyState icon="broll" title="No B-roll yet" body="Add your own clips. Kilo places them on the lines they fit." />
+      ) : null}
 
       {moving.length ? (
         <Card gap={4} padding={0} paddingHorizontal={16} testID="adding-clips">
@@ -271,36 +296,44 @@ function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refe
       ) : null}
 
       {busy ? (
-        <Card gap={10} testID="replanning">
-          <Text variant="body" weight={500}>
-            Placing your clips and graphics…
-          </Text>
-          <ProgressBar value={video.progress ?? 0} accessibilityLabel="Placing" />
-          <Text variant="label" tone="muted">
-            Your cuts stay as they are. This page updates by itself.
-          </Text>
-        </Card>
+        <Animated.View entering={m.listInsert} exiting={m.listRemove}>
+          <Card gap={10} testID="replanning">
+            <Text variant="body" weight={500}>
+              Placing your clips…
+            </Text>
+            <ProgressBar value={video.progress ?? 0} accessibilityLabel="Placing" />
+            <Text variant="label" tone="muted">
+              Your cuts stay as they are. This page updates by itself.
+            </Text>
+          </Card>
+        </Animated.View>
       ) : null}
 
-      {lines.map((line) =>
-        line.overlays.length ? (
-          line.overlays.map((o) => (
-            <LineCard
-              key={o.id}
-              line={line}
-              overlay={o}
-              assets={assets}
-              themeId={themeId}
-              hiddenIn={versionsHiding(edl, o.id)}
-              disabled={!canEdit}
-              onSwap={() => setSheet({ line, overlay: o })}
-              onRemove={() => remove(o)}
-            />
-          ))
-        ) : (
-          <EmptyLineCard key={line.segment.id} line={line} disabled={!canEdit} onAdd={() => setSheet({ line, overlay: null })} />
-        ),
-      )}
+      {/* While Kilo replans, the line cards wait at half opacity. */}
+      <View style={[st.lines, busy && st.dim]} pointerEvents={busy ? 'none' : 'auto'}>
+        {lines.map((line) =>
+          line.overlays.length ? (
+            line.overlays.map((o) => (
+              <Animated.View key={o.id} entering={arrive} exiting={m.listRemove} layout={m.listLayout}>
+                <LineCard
+                  line={line}
+                  overlay={o}
+                  assets={assets}
+                  themeId={themeId}
+                  hiddenIn={versionsHiding(edl, o.id)}
+                  disabled={!canEdit}
+                  onSwap={() => setSheet({ line, overlay: o })}
+                  onRemove={() => remove(o)}
+                />
+              </Animated.View>
+            ))
+          ) : (
+            <Animated.View key={line.segment.id} entering={arrive} exiting={m.listRemove} layout={m.listLayout}>
+              <EmptyLineCard line={line} disabled={!canEdit} onAdd={() => setSheet({ line, overlay: null })} />
+            </Animated.View>
+          ),
+        )}
+      </View>
 
       {actionError ? (
         <Text variant="secondary" tone="cut" testID="broll-error">
@@ -328,10 +361,14 @@ function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refe
 
       {assets.length > 0 ? (
         <View style={{ gap: 6 }}>
-          <SectionLabel>Your clips</SectionLabel>
+          <Text variant="secondary" weight={600} tone="muted" accessibilityRole="header">
+            Your clips
+          </Text>
           <Card padding={0} paddingHorizontal={16}>
             {assets.map((a, i) => (
-              <AssetRow key={a.id} asset={a} divider={i > 0} upload={uploads.get(a.id)} canRemove={canEdit} onRemove={() => void deleteAsset(a)} />
+              <Animated.View key={a.id} entering={arrive} exiting={m.listRemove} layout={m.listLayout}>
+                <AssetRow asset={a} divider={i > 0} upload={uploads.get(a.id)} canRemove={canEdit} onRemove={() => void deleteAsset(a)} />
+              </Animated.View>
             ))}
           </Card>
         </View>
@@ -373,11 +410,11 @@ function BrollBody({ video, refetch }: { video: VideoDetail & { edl: Edl }; refe
 function SaveLine({ saving, error, onRetry }: { saving: boolean; error: unknown; onRetry: () => void }) {
   if (error) {
     return (
-      <Pressable onPress={onRetry} accessibilityRole="button" accessibilityLabel="Couldn't save. Tap to try again" testID="broll-save-error">
+      <PressableScale onPress={onRetry} motion="row" accessibilityRole="button" accessibilityLabel="Couldn't save. Tap to try again" testID="broll-save-error">
         <Text variant="secondary" tone="cut">
           Couldn't save: {errorMessage(error)} Tap to retry.
         </Text>
-      </Pressable>
+      </PressableScale>
     );
   }
   if (!saving) return null;
@@ -408,29 +445,29 @@ function LineCard({
   onSwap: () => void;
   onRemove: () => void;
 }) {
+  const s = useStyles();
   const t = overlayCardText(overlay, assets);
   const asset = overlay.type === 'broll' ? assets.find((a) => a.id === overlay.assetId) : undefined;
+  // Swapping cross-fades the thumb (160 ms): it is keyed by what it shows.
+  const contentKey = overlay.type === 'broll' ? `a:${overlay.assetId}` : `g:${overlay.template}`;
   return (
     <Card padding={14} gap={12} testID={`line-${line.segment.id}`}>
-      <View style={styles.quoteRow}>
-        <Text variant="body" style={styles.quote}>
-          “{line.segment.text}”
-        </Text>
-        <Pressable onPress={onRemove} disabled={disabled} accessibilityRole="button" accessibilityLabel={`Remove ${t.title} from this line`} hitSlop={6} style={[styles.remove, disabled && { opacity: 0.4 }]} testID={`remove-${overlay.id}`}>
-          <Icon name="close" size={16} color={color.muted} />
-        </Pressable>
-      </View>
-      <View style={styles.row}>
-        {overlay.type === 'graphic' ? (
-          <GraphicThumb template={overlay.template} props={overlay.props} themeId={themeId} />
-        ) : (
-          <Thumb uri={asset?.thumbnailUrl} width={54} height={72} r={10} />
-        )}
-        <View style={styles.text}>
+      <Text variant="body" style={s.quote}>
+        “{line.segment.text}”
+      </Text>
+      <View style={s.row}>
+        <Animated.View key={contentKey} entering={swapFade}>
+          {overlay.type === 'graphic' ? (
+            <GraphicThumb template={overlay.template} props={overlay.props} themeId={themeId} width={44} height={78} />
+          ) : (
+            <Thumb uri={asset?.thumbnailUrl} cacheKey={asset?.id} width={44} height={78} r={8} />
+          )}
+        </Animated.View>
+        <View style={s.text}>
           <Text variant="label" weight={600} tone="accent">
             {t.kind}
           </Text>
-          <Text variant="transcript" weight={500} numberOfLines={2}>
+          <Text variant="secondary" weight={500} numberOfLines={2}>
             {t.title}
           </Text>
           <Text variant="label" tone="muted" numberOfLines={2}>
@@ -442,19 +479,23 @@ function LineCard({
             </Text>
           ) : null}
         </View>
-        <PillButton variant="secondary" label="Swap" height={44} onPress={onSwap} disabled={disabled} style={styles.swap} accessibilityLabel={`Swap ${t.title}`} testID={`swap-${overlay.id}`} />
+      </View>
+      <View style={s.buttons}>
+        <PillButton variant="secondary" surface="content" label="Swap" height={44} onPress={onSwap} disabled={disabled} style={s.flex} accessibilityLabel={`Swap ${t.title}`} testID={`swap-${overlay.id}`} />
+        <PillButton variant="secondary" surface="content" destructive label="Remove" height={44} onPress={onRemove} disabled={disabled} style={s.flex} accessibilityLabel={`Remove ${t.title} from this line`} testID={`remove-${overlay.id}`} />
       </View>
     </Card>
   );
 }
 
 function EmptyLineCard({ line, disabled, onAdd }: { line: SpokenLine; disabled: boolean; onAdd: () => void }) {
+  const s = useStyles();
   return (
-    <View style={styles.empty} testID={`line-${line.segment.id}`}>
-      <Text variant="body" tone="muted" style={[styles.quote, { flex: 1 }]}>
+    <View style={s.empty} testID={`line-${line.segment.id}`}>
+      <Text variant="body" tone="muted" style={[s.quote, { flex: 1 }]}>
         “{line.segment.text}”
       </Text>
-      <PillButton variant="secondary" label="Add" height={44} onPress={onAdd} disabled={disabled} style={styles.add} accessibilityLabel={`Add B-roll or a graphic to “${line.segment.text}”`} testID={`add-${line.segment.id}`} />
+      <PillButton variant="secondary" surface="content" label="Add" icon="plus" height={44} onPress={onAdd} disabled={disabled} style={s.add} accessibilityLabel={`Add B-roll or a graphic to “${line.segment.text}”`} testID={`add-${line.segment.id}`} />
     </View>
   );
 }
@@ -474,45 +515,48 @@ function AssetRow({
   onRemove: () => void;
   stuck?: { canRetry: boolean; onRetry: () => void };
 }) {
+  const s = useStyles();
+  const c = useColors();
   const status = stuck ? (stuck.canRetry ? 'Upload stopped' : 'Not uploaded from this phone') : assetStatus(asset, upload);
   return (
-    <View style={[styles.assetRow, divider && styles.divider]} testID={`bin-${asset.id}`}>
-      <Thumb uri={asset.status === 'ready' ? asset.thumbnailUrl : null} width={36} height={48} />
+    <View style={[s.assetRow, divider && s.divider]} testID={`bin-${asset.id}`}>
+      <Thumb uri={asset.status === 'ready' ? asset.thumbnailUrl : null} cacheKey={asset.id} width={36} height={48} />
       <View style={{ flex: 1, gap: 4 }}>
         <Text variant="secondary" weight={500} numberOfLines={1}>
           {assetTitle(asset)}
         </Text>
-        <Text variant="label" tone={asset.status === 'failed' ? 'cut' : 'muted'}>
+        <Text variant="label" tone={asset.status === 'failed' ? 'cut' : 'muted'} tabular>
           {status}
         </Text>
         {asset.status === 'uploading' && upload !== undefined && !stuck ? <ProgressBar value={upload} height={3} accessibilityLabel={`${asset.filename} ${status}`} /> : null}
       </View>
       {stuck?.canRetry ? (
-        <PillButton variant="secondary" height={44} label="Retry" onPress={stuck.onRetry} accessibilityLabel={`Retry uploading ${assetTitle(asset)}`} testID={`retry-${asset.id}`} />
+        <PillButton variant="secondary" surface="content" height={44} label="Retry" onPress={stuck.onRetry} accessibilityLabel={`Retry uploading ${assetTitle(asset)}`} testID={`retry-${asset.id}`} />
       ) : null}
       {canRemove ? (
-        <Pressable onPress={onRemove} accessibilityRole="button" accessibilityLabel={`Delete ${assetTitle(asset)}`} style={styles.iconHit} testID={`delete-${asset.id}`}>
-          <Icon name="close" size={16} color={color.muted} />
-        </Pressable>
+        <PressableScale onPress={onRemove} motion="icon" accessibilityRole="button" accessibilityLabel={`Delete ${assetTitle(asset)}`} style={s.iconHit} testID={`delete-${asset.id}`}>
+          <SymbolIcon name="trash" size={17} color={c.muted} />
+        </PressableScale>
       ) : null}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  actions: { flexDirection: 'row', gap: 10 },
-  quoteRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  quote: { lineHeight: 20 },
-  remove: { width: 28, height: 28, marginTop: -4, marginRight: -6, alignItems: 'center', justifyContent: 'center' },
+const useStyles = makeStyles((t) => ({
+  actions: { flexDirection: 'row', gap: 8 },
+  lines: { gap: 14 },
+  dim: { opacity: 0.5 },
+  quote: { lineHeight: 21 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   text: { flex: 1, gap: 3 },
-  swap: { minWidth: 64, paddingHorizontal: 14 },
+  buttons: { flexDirection: 'row', gap: 8 },
+  flex: { flex: 1 },
   add: { flexShrink: 0, paddingHorizontal: 16 },
   empty: {
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    borderColor: color.dropBorder,
-    backgroundColor: color.dropFill,
+    borderColor: t.color.dropBorder,
+    backgroundColor: t.color.dropFill,
     borderRadius: radius.card,
     padding: 14,
     flexDirection: 'row',
@@ -521,6 +565,6 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   assetRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64, paddingVertical: 8 },
-  divider: { borderTopWidth: 1, borderTopColor: color.hairline },
+  divider: { borderTopWidth: 1, borderTopColor: t.color.hairline },
   iconHit: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-});
+}));

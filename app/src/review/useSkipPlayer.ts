@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEvent } from 'expo';
 import { useVideoPlayer, type VideoPlayer } from 'expo-video';
+import { useSharedValue, type SharedValue } from 'react-native-reanimated';
 import type { PlaybackRange } from '@kilo/edl';
-import { PlaybackController, type PlaybackSnapshot } from './playback';
+import { PlaybackController, snapshotChangesUi, type PlaybackSnapshot } from './playback';
 
-/** How often the UI (playhead, active row, time) re-renders while playing. */
-const UI_INTERVAL_MS = 80;
+/**
+ * While playing, the screen re-renders only when what it shows changes (the line, an
+ * audition, the end), and otherwise this often, for the time read to screen readers. The
+ * playhead follows `time`, a shared value written every frame.
+ */
+const UI_INTERVAL_MS = 500;
 
 export interface SkipPlayer {
   player: VideoPlayer;
   playing: boolean;
   snapshot: PlaybackSnapshot;
+  /** The proxy time under the playhead, every frame (for the scrub strip's playhead on the UI thread). */
+  time: SharedValue<number>;
   play: () => void;
   pause: () => void;
   toggle: () => void;
@@ -34,13 +41,25 @@ export function useSkipPlayer(url: string | null, ranges: PlaybackRange[], opts:
   const controllerRef = useRef<PlaybackController | null>(null);
   if (!controllerRef.current) controllerRef.current = new PlaybackController(ranges);
   const controller = controllerRef.current;
-  const [snapshot, setSnapshot] = useState<PlaybackSnapshot>(() => controller.snapshot());
+  const [snapshot, setSnapshotState] = useState<PlaybackSnapshot>(() => controller.snapshot());
+  const time = useSharedValue(0);
+  const shown = useRef(snapshot);
+  // Every update moves the playhead; React hears of it only when `force` or the UI changes.
+  const setSnapshot = useCallback(
+    (next: PlaybackSnapshot, force = true) => {
+      time.value = next.proxyTime;
+      if (!force && !snapshotChangesUi(shown.current, next)) return;
+      shown.current = next;
+      setSnapshotState(next);
+    },
+    [time],
+  );
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
 
   useEffect(() => {
     controller.setRanges(ranges);
     setSnapshot(controller.snapshot());
-  }, [controller, ranges]);
+  }, [controller, ranges, setSnapshot]);
 
   // Start the paused player on the first kept frame, not on the cut opening.
   const { status } = useEvent(player, 'statusChange', { status: player.status });
@@ -72,7 +91,7 @@ export function useSkipPlayer(url: string | null, ranges: PlaybackRange[], opts:
         setSnapshot(controller.snapshot());
       }
     }
-  }, [status, controller, player]);
+  }, [status, controller, player, setSnapshot]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -88,32 +107,32 @@ export function useSkipPlayer(url: string | null, ranges: PlaybackRange[], opts:
       } else if (cmd.type === 'pause') {
         player.pause();
       }
-      if (ts - lastUi > UI_INTERVAL_MS || cmd.type !== 'none') {
-        lastUi = ts;
-        setSnapshot(controller.snapshot());
-      }
+      const due = ts - lastUi > UI_INTERVAL_MS || cmd.type !== 'none';
+      if (due) lastUi = ts;
+      setSnapshot(controller.snapshot(), due);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [isPlaying, controller, player]);
+  }, [isPlaying, controller, player, setSnapshot]);
 
   const play = useCallback(() => {
     const t = controller.startPosition();
     if (Math.abs(player.currentTime - t) > 0.05) player.currentTime = t;
     player.play();
     setSnapshot(controller.snapshot());
-  }, [controller, player]);
+  }, [controller, player, setSnapshot]);
 
   const pause = useCallback(() => {
     player.pause();
     setSnapshot(controller.snapshot());
-  }, [controller, player]);
+  }, [controller, player, setSnapshot]);
 
   return {
     player,
     playing: isPlaying,
     snapshot,
+    time,
     play,
     pause,
     toggle: () => (isPlaying ? pause() : play()),

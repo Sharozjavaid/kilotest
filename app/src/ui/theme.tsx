@@ -40,11 +40,11 @@ export interface Theme {
 }
 
 /**
- * Appearance of a `Screen` that does not set one. `light` while screens move to the theme: a
- * screen not yet converted still has light-only colours in its own styles, so it stays light
- * even in dark mode. Set to `auto` once every screen reads its colours from the theme.
+ * Appearance of a `Screen` that does not set one: `auto`, following the system. Every screen
+ * reads its colours from the theme (and passes `appearance` itself; the recorder forces `dark`),
+ * so the app is light or dark as the phone is.
  */
-export const DEFAULT_SCREEN_APPEARANCE: Appearance = 'light';
+export const DEFAULT_SCREEN_APPEARANCE: Appearance = 'auto';
 
 function build(scheme: Scheme, highContrast: boolean): Theme {
   const base = scheme === 'dark' ? darkColors : lightColors;

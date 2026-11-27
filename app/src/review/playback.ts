@@ -51,6 +51,15 @@ export interface PlaybackSnapshot {
   ended: boolean;
 }
 
+/**
+ * Whether a new snapshot changes what the screen shows besides the playhead (which follows a
+ * shared value every frame): the range, the segment, an audition starting or ending, the end.
+ * The view re-renders only then (and now and then for the time read to screen readers).
+ */
+export function snapshotChangesUi(a: PlaybackSnapshot, b: PlaybackSnapshot): boolean {
+  return a.index !== b.index || a.segmentId !== b.segmentId || a.ended !== b.ended || (a.audition?.segmentId ?? null) !== (b.audition?.segmentId ?? null) || (a.audition?.pauseAfter ?? false) !== (b.audition?.pauseAfter ?? false);
+}
+
 export class PlaybackController {
   private ranges: PlaybackRange[] = [];
   private index = 0;

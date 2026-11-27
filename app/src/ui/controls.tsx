@@ -1,14 +1,26 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Platform, View } from 'react-native';
-import Animated, { Easing, cancelAnimation, interpolateColor, useAnimatedProps, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
-import { useReducedMotionSetting } from './a11y';
+import Animated, {
+  Easing,
+  ReduceMotion,
+  cancelAnimation,
+  interpolateColor,
+  useAnimatedProps,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withTiming,
+  type EntryExitAnimationFunction,
+} from 'react-native-reanimated';
+import { prefersReducedMotion, useReducedMotionSetting } from './a11y';
 import Svg, { Circle } from 'react-native-svg';
 import { size } from './tokens';
 import { Text } from './type';
 import { PressableScale } from './PressableScale';
 import { makeStyles, useColors } from './theme';
-import { useMotionValue } from './motion';
-import { motionHaptics } from './motionPresets';
+import { animateTo, useMotionValue } from './motion';
+import { motionConfig, motionHaptics } from './motionPresets';
 
 export { SegmentedControl, type Segment, type SegmentedControlProps } from './SegmentedControl';
 
@@ -113,10 +125,51 @@ export function Stepper({ value, min, max, onChange, noun }: StepperProps) {
   return (
     <View style={s.stepper} accessibilityRole="adjustable" accessibilityLabel={noun} accessibilityValue={{ min, max, now: value }}>
       <StepButton label={`Fewer ${noun}`} glyph="−" disabled={value <= min} onPress={() => onChange(Math.max(min, value - 1))} />
-      <Text variant="button" weight={600} style={s.stepValue} center tabular>
-        {value}
-      </Text>
+      {native ? (
+        <RollingValue value={value} style={s.stepValue} />
+      ) : (
+        <Text variant="button" weight={600} style={s.stepValue} center tabular>
+          {value}
+        </Text>
+      )}
       <StepButton label={`More ${noun}`} glyph="+" disabled={value >= max} onPress={() => onChange(Math.min(max, value + 1))} />
+    </View>
+  );
+}
+
+/** A number roll for a discrete change: the new value slides in 8pt from the side it came from and fades in, 200 ms on the UI thread. */
+function roll(fromY: number): EntryExitAnimationFunction {
+  return () => {
+    'worklet';
+    const t = { duration: 200, easing: Easing.bezier(0.2, 0.8, 0.2, 1), reduceMotion: ReduceMotion.System };
+    return {
+      initialValues: { opacity: 0, transform: [{ translateY: fromY }] },
+      animations: { opacity: withTiming(1, t), transform: [{ translateY: withTiming(0, t) }] },
+    };
+  };
+}
+const rollUp = roll(8);
+const rollDown = roll(-8);
+
+/**
+ * A changing number that rolls to its new value (brief 4.12: "numeric roll, 200 ms"). Re-keyed
+ * per value, so only the digits move; under Reduce Motion it simply changes.
+ */
+export function RollingValue({ value, style }: { value: number | string; style?: object }) {
+  const reduced = useReducedMotionSetting();
+  const prev = useRef(value);
+  const up = Number(value) >= Number(prev.current);
+  const first = prev.current === value;
+  useEffect(() => {
+    prev.current = value;
+  }, [value]);
+  return (
+    <View style={[{ overflow: 'hidden', alignItems: 'center' }, style]}>
+      <Animated.View key={String(value)} entering={first || reduced ? undefined : up ? rollUp : rollDown}>
+        <Text variant="button" weight={600} center tabular>
+          {value}
+        </Text>
+      </Animated.View>
     </View>
   );
 }
@@ -255,11 +308,19 @@ function useSpin(on: boolean) {
   return useAnimatedStyle(() => ({ transform: [{ rotate: `${-90 + turn.value * 360}deg` }] }));
 }
 
-/** One pill per step, filled up to `done` (the weekly goal bar). */
+/**
+ * One pill per step, filled up to `done` (the weekly goal bar). On native the pills fill step by
+ * step (`progress`, 60 ms apart); a lower count shows at once (progress never runs backwards).
+ */
 export function StepBar({ done, total, accessibilityLabel }: { done: number; total: number; accessibilityLabel: string }) {
   const s = useStyles();
   const c = useColors();
   const steps = Math.max(1, total);
+  const prev = useRef(native ? 0 : done);
+  const from = prev.current;
+  useEffect(() => {
+    prev.current = done;
+  }, [done]);
   return (
     <View
       style={s.stepBar}
@@ -267,9 +328,35 @@ export function StepBar({ done, total, accessibilityLabel }: { done: number; tot
       accessibilityLabel={accessibilityLabel}
       accessibilityValue={{ min: 0, max: steps, now: Math.min(done, steps) }}
     >
-      {Array.from({ length: steps }, (_, i) => (
-        <View key={i} style={[s.stepPill, { backgroundColor: i < done ? c.accent : c.track }]} />
-      ))}
+      {Array.from({ length: steps }, (_, i) =>
+        native ? (
+          <StepPill key={i} on={i < done} delay={Math.max(0, i - from) * 60} />
+        ) : (
+          <View key={i} style={[s.stepPill, { backgroundColor: i < done ? c.accent : c.track }]} />
+        ),
+      )}
+    </View>
+  );
+}
+
+function StepPill({ on, delay }: { on: boolean; delay: number }) {
+  const s = useStyles();
+  const c = useColors();
+  const fill = useSharedValue(0);
+  useEffect(() => {
+    if (!on) {
+      cancelAnimation(fill);
+      fill.value = 0;
+      return;
+    }
+    const reduced = prefersReducedMotion();
+    const config = motionConfig('progress', reduced);
+    fill.value = withDelay(reduced ? 0 : delay, animateTo(1, config, reduced ? ReduceMotion.Never : ReduceMotion.System));
+  }, [on, delay, fill]);
+  const style = useAnimatedStyle(() => ({ transform: [{ scaleX: fill.value }] }));
+  return (
+    <View style={[s.stepPill, { backgroundColor: c.track, overflow: 'hidden' }]}>
+      <Animated.View style={[{ flex: 1, backgroundColor: c.accent, transformOrigin: 'left' }, style]} />
     </View>
   );
 }

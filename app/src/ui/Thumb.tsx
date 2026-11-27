@@ -35,7 +35,7 @@ export function Thumb({
   const color = useColors();
   return (
     <View style={[{ width, height, borderRadius: r, backgroundColor: color.track, overflow: 'hidden', flexShrink: 0 }, style]}>
-      {stable.url ? <Image source={{ uri: stable.url }} style={{ width, height }} contentFit="cover" onError={() => {
+      {stable.url ? <Image source={{ uri: stable.url }} recyclingKey={cacheKey} style={{ width, height }} contentFit="cover" onError={() => {
             if (!stable.renew()) onStale?.();
           }} accessibilityIgnoresInvertColors /> : null}
     </View>

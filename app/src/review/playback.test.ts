@@ -122,3 +122,17 @@ describe('PlaybackController', () => {
     expect(c.seekToOutput(9999)).toBeLessThanOrEqual(base[base.length - 1]!.proxyEnd);
   });
 });
+
+describe('snapshotChangesUi', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { snapshotChangesUi } = require('./playback') as typeof import('./playback');
+  const base = { index: 0, audition: null, segmentId: 's1', outTime: 1, proxyTime: 1, ended: false };
+  it('ignores time moving within a segment (the playhead follows a shared value)', () => {
+    expect(snapshotChangesUi(base, { ...base, outTime: 1.4, proxyTime: 1.4 })).toBe(false);
+  });
+  it('notices a new segment, an audition and the end', () => {
+    expect(snapshotChangesUi(base, { ...base, index: 1, segmentId: 's2' })).toBe(true);
+    expect(snapshotChangesUi(base, { ...base, index: -1, audition: { segmentId: 'c1', proxyStart: 0, proxyEnd: 1 }, segmentId: 'c1' })).toBe(true);
+    expect(snapshotChangesUi(base, { ...base, ended: true, index: -1, segmentId: null })).toBe(true);
+  });
+});

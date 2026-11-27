@@ -105,3 +105,15 @@ describe('Home at scale', () => {
     api.dispose();
   });
 });
+
+describe('libraryEmpty', () => {
+  const { libraryEmpty } = jest.requireActual('./items') as typeof import('./items');
+  it('names the words of a search with no match', () => {
+    expect(libraryEmpty('all', ' unbox ')).toEqual({ title: 'No videos called “unbox”', body: 'Try fewer or different words.', showAll: false });
+    expect(libraryEmpty('review', 'unbox').showAll).toBe(true);
+  });
+  it('offers Show all for an empty filter only', () => {
+    expect(libraryEmpty('review', '')).toMatchObject({ title: 'No videos to review', showAll: true });
+    expect(libraryEmpty('all', '').showAll).toBe(false);
+  });
+});

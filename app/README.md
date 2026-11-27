@@ -267,7 +267,7 @@ The phone must reach `EXPO_PUBLIC_API_URL`: same Wi-Fi as the computer for a LAN
 ## Layout
 
 ```
-src/app/          routes (expo-router)
+src/app/          routes (expo-router); each tab is a group with its own stack: (tabs)/(home), (styles), (you)
 src/api/          API client, query hooks, in-memory mock (mock/)
 src/ui/           design tokens and shared controls
 src/recorder/     recording session (pure), draft store, camera (.native / .web)
