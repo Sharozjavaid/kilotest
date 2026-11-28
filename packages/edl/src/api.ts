@@ -245,6 +245,42 @@ export type SaveEdlRequest = z.infer<typeof SaveEdlRequest>;
 export const SaveEdlResponse = z.object({ edl: Edl });
 export type SaveEdlResponse = z.infer<typeof SaveEdlResponse>;
 
+/** Who made a revision: the first automatic edit, the creator, a replan, or the server (B-roll removal, a restore's clean-up). */
+export const EdlAuthor = z.enum(['decider', 'user', 'replan', 'system']);
+export type EdlAuthor = z.infer<typeof EdlAuthor>;
+
+/** One saved revision of a video's edit, for the version list. Newest first in the list. */
+export const EdlVersionSummary = z.object({
+  revision: z.number().int().nonnegative(),
+  author: EdlAuthor,
+  createdAt: z.string(),
+  /** Set when this revision brought back an earlier one: the revision it restored. */
+  restoredFrom: z.number().int().nonnegative().nullable().default(null),
+  /** Base cut length, seconds. */
+  durationSec: z.number().nonnegative(),
+  /** summarizeChanges(diffEdl(previous revision, this one)); "First edit" for revision 0. */
+  summary: z.string(),
+});
+export type EdlVersionSummary = z.infer<typeof EdlVersionSummary>;
+
+export const ListEdlVersionsResponse = z.object({
+  versions: z.array(EdlVersionSummary),
+  /** The revision the video's current edit is at. */
+  current: z.number().int().nonnegative(),
+});
+export type ListEdlVersionsResponse = z.infer<typeof ListEdlVersionsResponse>;
+
+export const EdlVersionResponse = z.object({ version: EdlVersionSummary, edl: Edl });
+export type EdlVersionResponse = z.infer<typeof EdlVersionResponse>;
+
+/** Brings back an earlier revision's edit as a new revision. History only moves forward. */
+export const RestoreEdlRequest = z.object({
+  revision: z.number().int().nonnegative(),
+  /** The current revision the client is looking at; 409 revision_conflict if it has moved on. */
+  baseRevision: z.number().int().nonnegative(),
+});
+export type RestoreEdlRequest = z.infer<typeof RestoreEdlRequest>;
+
 export const AddBrollRequest = z.object({ assets: z.array(NewBrollAsset).min(1).max(30) });
 export type AddBrollRequest = z.infer<typeof AddBrollRequest>;
 

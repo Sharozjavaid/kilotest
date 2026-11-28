@@ -39,6 +39,10 @@ If you need a change to `@kilo/edl`, do not edit it. Work around it locally and 
 - Graphic overlay `props` must satisfy `TemplatePropsSchemas[template]`.
 - `validateEdl(edl, clips)` must return no issues for anything a decider emits or the server stores.
 
+### Versions
+
+Every save, replan and restore stores a new revision; none is ever changed or removed (they go with the video). `diffEdl(older, newer, variantId?)` in `packages/edl/src/versions.ts` is the one definition of what changed between two revisions: cuts, lines kept again, trims, zooms, transitions, B-roll and graphics added, changed or removed, captions, hook text, order and settings. Each change carries its place on the newer version's output timeline (a cut is a moment there). `mapTime(from, to, t, variantId?)` maps a moment of one revision onto another through the source footage, so two versions can play side by side in step; `gone` says the footage was cut there. Both are exact because segment ids and source times survive revisions, so nothing is logged at edit time.
+
 ## 4. Pipeline
 
 `packages/edl/src/pipeline.ts` has the exact function signatures and media specs. `ingestClip` and `ingestBroll` write fixed file names, so every call needs a `workDir` of its own.
@@ -101,6 +105,9 @@ Base path `/v1`. JSON in and out. Bodies are the zod schemas in `packages/edl/sr
 | `DELETE /v1/videos/:id` | | 204 | |
 | `POST /v1/videos/:id/retry` | | `VideoSummary` | Only from `failed`. |
 | `PUT /v1/videos/:id/edl` | `SaveEdlRequest` | `SaveEdlResponse` | 409 `revision_conflict` when `baseRevision` is stale. Stores `revision + 1`. A video that was `done` returns to `ready_for_review`. |
+| `GET /v1/videos/:id/edl/versions` | | `ListEdlVersionsResponse` | Every saved revision, newest first, with who made it and `summary`: `summarizeChanges(diffEdl(previous, this))` for the base cut ("First edit" for the first). |
+| `GET /v1/videos/:id/edl/versions/:revision` | | `EdlVersionResponse` | That revision's EDL exactly as saved. 404 for a revision the video doesn't have. |
+| `POST /v1/videos/:id/edl/restore` | `RestoreEdlRequest` | `SaveEdlResponse` | Stores the chosen revision's edit as a new revision (`revision + 1`, author `user`, `restoredFrom` set); history only moves forward. 409 `revision_conflict` when `baseRevision` is stale; 400 for the current revision. Overlays whose B-roll asset has since been deleted are dropped, and the result must pass `validateEdl`. A video that was `done` returns to `ready_for_review`. |
 | `POST /v1/videos/:id/broll` | `AddBrollRequest` | `AddBrollResponse` | Files added after analysis are ingested on `uploads/complete`; placement waits for a replan. |
 | `DELETE /v1/videos/:id/broll/:assetId` | | 204 | Also removes overlays that use it. |
 | `POST /v1/videos/:id/replan` | `ReplanRequest` | `VideoSummary` | Status goes to `analyzing`, then back to `ready_for_review`. |
