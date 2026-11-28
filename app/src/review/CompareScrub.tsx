@@ -100,7 +100,8 @@ export const CompareScrub = memo(function CompareScrub({
           {width
             ? spans.map((sp) => <View key={sp.key} style={[s.span, { left: sp.from * width, width: Math.max(3, (sp.to - sp.from) * width) }]} testID="compare-span" />)
             : null}
-          {width ? marks.map((m) => <View key={m.key} style={[s.mark, m.tone === 'cut' ? s.markCut : s.markAccent, { left: m.frac * width }]} testID={`compare-mark-${m.tone}`} />) : null}
+          {/* Cuts last, so a removed overlay at the same moment never hides one. */}
+          {width ? [...marks].sort((a, b) => Number(a.tone === 'cut') - Number(b.tone === 'cut')).map((m) => <View key={m.key} style={[s.mark, m.tone === 'cut' ? s.markCut : s.markAccent, { left: m.frac * width }]} testID={`compare-mark-${m.tone}`} />) : null}
           {width ? (
             <Animated.View style={[s.playhead, head]}>
               <Animated.View style={[s.knob, knob]} />

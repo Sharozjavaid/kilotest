@@ -35,7 +35,7 @@ const WEB_PORT = await freePort(Number(process.env.E2E_WEB_PORT ?? 8792));
 const API_URL = `http://localhost:${API_PORT}`;
 const DB_NAME = 'kilo_e2e';
 
-const FLOWS = ['upload', 'review', 'broll', 'export', 'recorder', 'styles', 'failures'];
+const FLOWS = ['upload', 'review', 'versions', 'broll', 'export', 'recorder', 'styles', 'failures'];
 // Long flows that run only when named in E2E_ONLY, after the default ones.
 const OPT_IN = ['batch30'];
 const only = process.env.E2E_ONLY ? process.env.E2E_ONLY.split(',').map((s) => s.trim()) : FLOWS;

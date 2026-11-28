@@ -67,7 +67,9 @@ function VersionList({ videoId, variant, list, refreshing, onRefresh }: { videoI
   const open = (revision: number) => {
     const target = compareTargetFor(revision, list);
     if (!target) return;
-    const q = new URLSearchParams({ rev: String(target.rev), vs: String(target.vs) });
+    // Against the current edit, Compare follows whatever is current (after a 409 it moves on).
+    const q = new URLSearchParams({ rev: String(target.rev) });
+    if (target.vs !== list.current) q.set('vs', String(target.vs));
     if (variant) q.set('variant', variant);
     router.push(`/compare/${videoId}?${q.toString()}`);
   };

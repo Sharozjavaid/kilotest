@@ -33,7 +33,7 @@ With no `EXPO_PUBLIC_SUPABASE_URL` the app signs in with dev auth (`dev:<user id
 ## End-to-end against the real server
 
 ```sh
-npm run e2e                       # everything: database, server, web export, seven flows
+npm run e2e                       # everything: database, server, web export, eight flows
 E2E_ONLY=upload,review npm run e2e
 E2E_SKIP_BUILD=1 npm run e2e      # reuse the last web export
 npm run e2e:batch30               # the 30-video run (opt-in, 30 to 60 minutes; E2E_ONLY=batch30)
@@ -43,8 +43,8 @@ npm run e2e:batch30               # the 30-video run (opt-in, 30 to 60 minutes; 
 database, the server in dev mode with the real pipeline (fixture transcriber, heuristic
 decider, local storage, dev auth, 120 s signed links), exports the app for web without mock
 mode, serves it, and drives it with Playwright at 390x844 through `e2e/flows/`: upload,
-review, broll, export, recorder (Chromium's fake camera), styles (with the weekly goal) and
-failures. Later flows use what the upload flow made. Logs, downloads and server output go
+review, versions (history, compare and restore), broll, export, recorder (Chromium's fake
+camera), styles (with the weekly goal) and failures. Later flows use what the upload flow made. Logs, downloads and server output go
 to `.work/e2e/`; screenshots of every main screen with real data to `.work/shots-real/`.
 
 ### The 30-video run
@@ -114,6 +114,12 @@ finding go to `.work/e2e/batch30/report.json`; the EDLs before and after review 
   sheet ("Shown in") and Export's tiles follow the same rules (`src/review/variantOverlays.ts`).
   Cut rows say why in plain words (`src/review/cuts.ts`), a cut retake offers Keep both, and
   "N cuts" with previous and next plays each cut with 1.5 s either side, then stops.
+- **Versions** (Review's menu, `src/app/versions/`, `src/app/compare/`, `src/review/versions.ts`):
+  every saved revision, newest first, with who made it. Tapping one compares it with the current
+  edit: two skip players on the same proxy, the newer leading and the older following through
+  `mapTime` (re-seeked only past 0.3 s of drift, held still where it cut the footage, "Cut here"
+  on the player that lost it), one play and one scrub bar, and `diffEdl`'s change list. Restore
+  brings a version back as a new revision; a 409 reloads and says the edit changed.
 - **New batch**: each video in the editor can have its own kind of video and hooks; it follows
   the batch until changed, and only what differs is sent as `NewVideo.settings`.
 - **Mock** (`src/api/mock/`): follows the server's rules; `src/api/conformance/scenarios.ts`
