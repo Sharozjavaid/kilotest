@@ -38,7 +38,15 @@ export type IconName =
   | 'list'
   | 'bell'
   | 'search'
-  | 'more';
+  | 'more'
+  | 'history'
+  | 'scissors'
+  | 'restore'
+  | 'zoom'
+  | 'swap'
+  | 'textformat'
+  | 'captions'
+  | 'reorder';
 
 export interface IconProps {
   name: IconName;
@@ -181,6 +189,38 @@ function renderIcon(name: IconName, c: Common, fill: string) {
           <Circle cx={18.5} cy={12} r={1.6} fill={fill} stroke="none" />
         </>
       );
+    case 'history':
+      return <Path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4M12 8v4l3 2" {...c} />;
+    case 'scissors':
+      return (
+        <>
+          <Circle cx={6} cy={7} r={2.5} {...c} />
+          <Circle cx={6} cy={17} r={2.5} {...c} />
+          <Path d="M8.2 8.3L20 18M8.2 15.7L20 6" {...c} />
+        </>
+      );
+    case 'restore':
+      return <Path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" {...c} />;
+    case 'zoom':
+      return (
+        <>
+          <Circle cx={11} cy={11} r={6.5} {...c} />
+          <Path d="M16 16l4.5 4.5M11 8.5v5M8.5 11h5" {...c} />
+        </>
+      );
+    case 'swap':
+      return <Path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4" {...c} />;
+    case 'textformat':
+      return <Path d="M4 18l5-12 5 12M5.7 14h6.6M16 18v-5.5a2.5 2.5 0 0 1 5 0V18M16 15.5h5" {...c} />;
+    case 'captions':
+      return (
+        <>
+          <Rect x={3} y={5} width={18} height={14} rx={3} {...c} />
+          <Path d="M7 12h4M13 12h4M7 15.5h7" {...c} />
+        </>
+      );
+    case 'reorder':
+      return <Path d="M8 20V4M4 8l4-4 4 4M16 4v16M12 16l4 4 4-4" {...c} />;
     case 'bell':
       return <Path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0" {...c} />;
     case 'mail':

@@ -25,6 +25,8 @@ export function useEdlSaver(videoId: string, edl: Edl | null) {
         // Saving can move a finished video back to review on the server; refetch its status.
         void qc.invalidateQueries({ queryKey: keys.video(videoId) });
         void qc.invalidateQueries({ queryKey: keys.home });
+        // Every save is a new version.
+        void qc.invalidateQueries({ queryKey: keys.edlVersions(videoId) });
         return res.edl;
       },
       fetchLatest: async () => {

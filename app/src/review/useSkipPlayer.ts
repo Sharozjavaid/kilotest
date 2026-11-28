@@ -18,6 +18,10 @@ export interface SkipPlayer {
   snapshot: PlaybackSnapshot;
   /** The proxy time under the playhead, every frame (for the scrub strip's playhead on the UI thread). */
   time: SharedValue<number>;
+  /** The position on the finished video under the playhead, every frame (the compare scrub bar). */
+  outputTime: SharedValue<number>;
+  /** The controller's snapshot right now, between renders (keeping a second player in step). */
+  now: () => PlaybackSnapshot;
   play: () => void;
   pause: () => void;
   toggle: () => void;
@@ -43,16 +47,18 @@ export function useSkipPlayer(url: string | null, ranges: PlaybackRange[], opts:
   const controller = controllerRef.current;
   const [snapshot, setSnapshotState] = useState<PlaybackSnapshot>(() => controller.snapshot());
   const time = useSharedValue(0);
+  const outputTime = useSharedValue(0);
   const shown = useRef(snapshot);
   // Every update moves the playhead; React hears of it only when `force` or the UI changes.
   const setSnapshot = useCallback(
     (next: PlaybackSnapshot, force = true) => {
       time.value = next.proxyTime;
+      outputTime.value = next.outTime;
       if (!force && !snapshotChangesUi(shown.current, next)) return;
       shown.current = next;
       setSnapshotState(next);
     },
-    [time],
+    [time, outputTime],
   );
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
 
@@ -133,6 +139,8 @@ export function useSkipPlayer(url: string | null, ranges: PlaybackRange[], opts:
     playing: isPlaying,
     snapshot,
     time,
+    outputTime,
+    now: () => controller.snapshot(),
     play,
     pause,
     toggle: () => (isPlaying ? pause() : play()),

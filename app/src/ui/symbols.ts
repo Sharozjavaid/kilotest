@@ -43,6 +43,14 @@ export const SF_SYMBOLS: Record<IconName, { sf: SFSymbol; fill?: SFSymbol }> = {
   more: { sf: 'ellipsis' },
   bell: { sf: 'bell', fill: 'bell.fill' },
   search: { sf: 'magnifyingglass' },
+  history: { sf: 'clock.arrow.circlepath' },
+  scissors: { sf: 'scissors' },
+  restore: { sf: 'arrow.uturn.backward' },
+  zoom: { sf: 'plus.magnifyingglass' },
+  swap: { sf: 'rectangle.2.swap' },
+  textformat: { sf: 'textformat' },
+  captions: { sf: 'captions.bubble', fill: 'captions.bubble.fill' },
+  reorder: { sf: 'arrow.up.arrow.down' },
 };
 
 /** The SF Symbol for an icon, filled when asked and one exists. */

@@ -92,6 +92,9 @@ function Navigator() {
           {/* Sheets of the design brief, iOS only (Android and web push them as before). */}
           <Stack.Screen name="broll/[id]" options={sheet.page()} />
           <Stack.Screen name="goal" options={sheet.form(['medium', 'large'])} />
+          {/* Review's version history (a form sheet), and Compare over it (a page sheet). */}
+          <Stack.Screen name="versions/[id]" options={sheet.form(['medium', 'large'])} />
+          <Stack.Screen name="compare/[id]" options={sheet.page()} />
           <Stack.Screen name="style/[id]" options={({ route }) => ((route.params as { id?: string } | undefined)?.id === 'new' ? sheet.page() : {})} />
         </Stack.Protected>
         {/* In mock mode the welcome screen stays reachable for review and screenshots. */}

@@ -451,6 +451,7 @@ function ReviewBody({ video, position }: { video: ReadyVideo; position?: string 
   const menu = useMemo<MenuItem[]>(
     () => [
       { label: 'Preview with effects', icon: 'sparkle', onPress: () => openPreviewRef.current() },
+      { label: 'Versions', subtitle: 'Compare or bring back an earlier edit', icon: 'history', onPress: () => void openVersionsRef.current(), testID: 'menu-versions' },
       { label: 'Edit B-roll', icon: 'broll', onPress: () => router.push(`/broll/${video.id}`) },
       {
         label: 'Redo the edit',
@@ -487,6 +488,17 @@ function ReviewBody({ video, position }: { video: ReadyVideo; position?: string 
   );
   const openPreviewRef = useRef(openPreview);
   openPreviewRef.current = openPreview;
+
+  // Versions lists what the server has: save the last taps first, so the list ends with them.
+  const openVersions = async () => {
+    sp.pause();
+    if (saver && !(await saver.flush())) {
+      toast.error("Your last changes aren't saved yet. Versions shows the saved ones.", { action: { label: 'Retry', onPress: () => void saver.retry() } });
+    }
+    router.push(activeVariant ? `/versions/${video.id}?variant=${encodeURIComponent(activeVariant)}` : `/versions/${video.id}`);
+  };
+  const openVersionsRef = useRef(openVersions);
+  openVersionsRef.current = openVersions;
 
   const onCaptions = useCallback((captions: Edl['captions']) => saver?.edit({ type: 'captions', captions }), [saver]);
   const brollCount = edl.overlays.filter((o) => o.type === 'broll').length;
