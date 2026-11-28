@@ -143,10 +143,15 @@ function segmentsForClip(clip: ClipInfo, transcript: Transcript | undefined, man
 function placeBroll(segments: Segment[], broll: BrollAsset[]): BrollOverlay[] {
   const kept = segments.filter((s) => s.keep);
   if (!kept.length) return [];
-  return broll.map((asset, i) => {
-    const anchor = kept[Math.min(kept.length - 1, i + 1)]!;
+  // Each file on its own kept segment (from the second on), never longer than it, so overlays never
+  // overlap: the server refuses an EDL that breaks checkOverlayRules.
+  const free = kept.slice(1).filter((s) => s.end - s.start >= 0.5);
+  if (!free.length) free.push(kept[kept.length - 1]!);
+  return broll.flatMap((asset, i) => {
+    const anchor = free[i];
+    if (!anchor) return [];
     const len = anchor.end - anchor.start;
-    const durationSec = round(Math.max(0.5, Math.min(2, len, asset.durationSec ?? 2)));
+    const durationSec = Math.floor(Math.min(2, len, Math.max(0.5, asset.durationSec ?? 2)) * 1000) / 1000;
     const overlay: BrollOverlay = {
       id: `ov-broll-${asset.id}`,
       type: 'broll',
@@ -157,7 +162,7 @@ function placeBroll(segments: Segment[], broll: BrollAsset[]): BrollOverlay[] {
       sourceStartSec: 0,
     };
     if (asset.kind === 'image') overlay.kenBurns = { fromScale: 1, toScale: 1.1, fromX: 0, fromY: 0, toX: 0.1, toY: 0 };
-    return overlay;
+    return [overlay];
   });
 }
 

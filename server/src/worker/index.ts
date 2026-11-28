@@ -9,6 +9,7 @@ import type PgBoss from 'pg-boss';
 import {
   Edl,
   validateEdl,
+  checkOverlayRules,
   type BrollAsset,
   type ClipInfo,
   type DecideInput,
@@ -715,7 +716,8 @@ export class Worker {
     }
     const before = new Map(current.edl.segments.map((s) => [s.id, s.keep]));
     const keepChanged = edl.segments.length !== before.size || edl.segments.some((s) => before.get(s.id) !== s.keep);
-    const issues = validateEdl(edl, input.clips);
+    // A replan's result must also be savable as is: a later save or restore checks the same rules.
+    const issues = [...validateEdl(edl, input.clips), ...checkOverlayRules(edl)];
     if (keepChanged || issues.length || edl.videoId !== videoId) {
       this.deps.log.error('replan returned an unusable EDL', { videoId, keepChanged, issues });
       throw new UserFacingError(MSG.replan);
