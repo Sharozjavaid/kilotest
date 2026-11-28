@@ -76,4 +76,12 @@ describe('diffEdl', () => {
     expect(removed).toMatchObject([{ kind: 'graphic', type: 'removed', at: 2, until: 2 }]);
     expect(resolveTimeline(withOv).overlays).toHaveLength(1);
   });
+
+  it('ignores key order', () => {
+    const ov = { id: 'o1', type: 'graphic', template: 'bold-title', anchorSegmentId: 'c', offsetSec: 0, durationSec: 1, props: { a: 1, b: 2 } };
+    const reordered = { props: { b: 2, a: 1 }, durationSec: 1, offsetSec: 0, anchorSegmentId: 'c', template: 'bold-title', type: 'graphic', id: 'o1' };
+    const x = edl([seg('a', 0, 2)], { overlays: [ov] });
+    const y = { ...x, overlays: [reordered] } as unknown as Edl;
+    expect(diffEdl(x, y)).toEqual([]);
+  });
 });

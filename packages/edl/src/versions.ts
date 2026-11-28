@@ -104,8 +104,15 @@ function overlayLabel(o: Overlay): string {
   return o.type === 'broll' ? 'B-roll' : `Graphic ${o.template}`;
 }
 
+/** JSON with object keys sorted, so equal values compare equal whatever order their keys were written in. */
+function stable(x: unknown): string {
+  return JSON.stringify(x, (_k, v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v,
+  );
+}
+
 function sameOverlay(a: Overlay, b: Overlay): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return stable(a) === stable(b);
 }
 
 /**
@@ -170,7 +177,7 @@ export function diffEdl(older: Edl, newer: Edl, variantId?: string | null): EdlC
   }
 
   // Whole-video changes.
-  if (JSON.stringify(older.captions) !== JSON.stringify(newer.captions)) {
+  if (stable(older.captions) !== stable(newer.captions)) {
     const text = older.captions.enabled !== newer.captions.enabled ? (newer.captions.enabled ? 'Captions on' : 'Captions off') : 'Caption style changed';
     changes.push({ kind: 'captions', type: 'changed', at: 0, until: dur, text });
   }
@@ -182,7 +189,7 @@ export function diffEdl(older: Edl, newer: Edl, variantId?: string | null): EdlC
   const orderOld = a.items.map((i) => i.segment.id).filter((id) => keptNew.has(id));
   const orderNew = b.items.map((i) => i.segment.id).filter((id) => keptOld.has(id));
   if (orderOld.join() !== orderNew.join()) changes.push({ kind: 'order', type: 'changed', at: 0, until: dur, text: 'Lines reordered' });
-  if (JSON.stringify(older.settings) !== JSON.stringify(newer.settings)) changes.push({ kind: 'settings', type: 'changed', at: 0, until: dur, text: 'Edit settings changed' });
+  if (stable(older.settings) !== stable(newer.settings)) changes.push({ kind: 'settings', type: 'changed', at: 0, until: dur, text: 'Edit settings changed' });
 
   const whole = (c: EdlChange) => c.kind === 'captions' || c.kind === 'order' || c.kind === 'settings';
   return changes.sort((x, y) => Number(whole(x)) - Number(whole(y)) || x.at - y.at);

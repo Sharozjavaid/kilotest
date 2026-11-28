@@ -5,8 +5,10 @@ import type {
   CreateBatchResponse,
   CreateRenderResponse,
   Edl,
+  EdlVersionResponse,
   EditSettings,
   GoalView,
+  ListEdlVersionsResponse,
   ReissueUploadsResponse,
   RenderView,
   SaveEdlResponse,
@@ -33,6 +35,9 @@ export interface ConformanceApi {
   getVideo(videoId: string): Promise<VideoDetail>;
   retryVideo(videoId: string): Promise<VideoSummary>;
   saveEdl(videoId: string, body: { edl: Edl; baseRevision: number }): Promise<SaveEdlResponse>;
+  listEdlVersions(videoId: string): Promise<ListEdlVersionsResponse>;
+  getEdlVersion(videoId: string, revision: number): Promise<EdlVersionResponse>;
+  restoreEdl(videoId: string, body: { revision: number; baseRevision: number }): Promise<SaveEdlResponse>;
   addBroll(videoId: string, body: { assets: { filename: string; contentType: string; sizeBytes: number; kind: 'video' | 'image' }[] }): Promise<AddBrollResponse>;
   createRenders(videoId: string, body: { quality: 'preview' | 'final'; variantIds?: (string | null)[] }): Promise<CreateRenderResponse>;
   getRender(renderId: string): Promise<RenderView>;
@@ -297,6 +302,50 @@ export const scenarios: Scenario[] = [
       check(v.edl!.variants.length === 3, `three openings for this video (got ${v.edl!.variants.length})`);
       const plain = await h.readyVideo();
       check(plain.edl!.settings.mode === 'general' && plain.edl!.settings.hookVariations === 2, 'a video without its own settings uses the batch settings');
+    },
+  },
+  {
+    name: 'the version list has every revision newest first; a revision reads back exactly as saved (404 missing, 400 malformed)',
+    async run(h) {
+      const v = await h.readyVideo();
+      const first = v.edl!;
+      const saved = (await h.api.saveEdl(v.id, { edl: { ...first, captions: { ...first.captions, enabled: !first.captions.enabled } }, baseRevision: first.revision })).edl;
+      const list = await h.api.listEdlVersions(v.id);
+      check(list.current === saved.revision, `current is the saved revision (got ${list.current})`);
+      check(same(list.versions.map((x) => x.revision), [saved.revision, first.revision]), `newest first (got ${JSON.stringify(list.versions.map((x) => x.revision))})`);
+      check(same(list.versions.map((x) => x.author), ['user', 'decider']), `authors (got ${JSON.stringify(list.versions.map((x) => x.author))})`);
+      check(list.versions[1]!.summary === 'First edit', `the first revision is "First edit" (got ${list.versions[1]!.summary})`);
+      check(/captions/.test(list.versions[0]!.summary), `the save's summary names captions (got ${list.versions[0]!.summary})`);
+      check(list.versions.every((x) => x.restoredFrom === null && x.durationSec > 0 && new Date(x.createdAt).toISOString() === x.createdAt), 'restoredFrom null, a length, an ISO time');
+      const one = await h.api.getEdlVersion(v.id, first.revision);
+      check(same(one.edl, first), 'revision 0 reads back as it was stored');
+      check(one.version.revision === first.revision && one.version.summary === 'First edit', 'with its list row');
+      await refused(h.api.getEdlVersion(v.id, saved.revision + 1), 404, 'not_found', 'a revision the video does not have');
+      await refused(h.api.getEdlVersion(v.id, -1), 400, 'invalid_request', 'a negative revision');
+      await refused(h.api.getEdlVersion(v.id, 1.5), 400, 'invalid_request', 'a fractional revision');
+    },
+  },
+  {
+    name: 'a restore stores the chosen edit as revision + 1 (409 stale base, 400 current, 404 missing) and takes a done video back to review',
+    async run(h) {
+      const { videoId } = await h.uploadingVideo();
+      await refused(h.api.restoreEdl(videoId, { revision: 0, baseRevision: 0 }), 409, 'invalid_state', 'restoring a video with no edit');
+      const v = await h.readyVideo();
+      const first = v.edl!;
+      const saved = (await h.api.saveEdl(v.id, { edl: { ...first, captions: { ...first.captions, enabled: !first.captions.enabled } }, baseRevision: first.revision })).edl;
+      await refused(h.api.restoreEdl(v.id, { revision: first.revision, baseRevision: first.revision }), 409, 'revision_conflict', 'a stale base');
+      await refused(h.api.restoreEdl(v.id, { revision: saved.revision, baseRevision: saved.revision }), 400, 'invalid_request', 'the current revision');
+      await refused(h.api.restoreEdl(v.id, { revision: saved.revision + 5, baseRevision: saved.revision }), 404, 'not_found', 'a revision the video does not have');
+      const restored = (await h.api.restoreEdl(v.id, { revision: first.revision, baseRevision: saved.revision })).edl;
+      check(restored.revision === saved.revision + 1, `revision + 1 (got ${restored.revision})`);
+      check(same(restored.captions, first.captions) && same(restored.segments, first.segments) && same(restored.overlays, first.overlays), "the first revision's edit is back");
+      const list = await h.api.listEdlVersions(v.id);
+      const top = list.versions[0]!;
+      check(list.current === restored.revision && top.revision === restored.revision && top.author === 'user' && top.restoredFrom === first.revision, `the new row (got ${JSON.stringify(top)})`);
+      check(same(list.versions.map((x) => x.revision), [restored.revision, saved.revision, first.revision]), 'history only moves forward');
+      await finalRenderDone(h, v);
+      await h.api.restoreEdl(v.id, { revision: saved.revision, baseRevision: restored.revision });
+      check((await h.api.getVideo(v.id)).status === 'ready_for_review', 'a done video goes back to review');
     },
   },
 ];

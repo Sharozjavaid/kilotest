@@ -22,6 +22,27 @@ describe('HTTP API client', () => {
     expect((init!.headers as Record<string, string>).Authorization).toBe('Bearer dev:u1');
   });
 
+  it('calls the version routes with their paths, bodies and response schemas', async () => {
+    const version = { revision: 0, author: 'decider', createdAt: '2026-11-28T10:00:00.000Z', durationSec: 12.5, summary: 'First edit' };
+    const list = fakeFetch(200, { versions: [version], current: 0 });
+    const res = await createHttpApi({ baseUrl: 'http://x', getToken: () => null, fetch: list }).listEdlVersions('v 1');
+    expect(list.mock.calls[0]![0]).toBe('http://x/v1/videos/v%201/edl/versions');
+    // restoredFrom defaults to null when the server leaves it out.
+    expect(res.versions[0]).toEqual({ ...version, restoredFrom: null });
+    const one = fakeFetch(200, { version, edl: { nope: true } });
+    await expect(createHttpApi({ baseUrl: 'http://x', getToken: () => null, fetch: one }).getEdlVersion('v1', 3)).rejects.toMatchObject({ code: 'invalid_response' });
+    expect(one.mock.calls[0]![0]).toBe('http://x/v1/videos/v1/edl/versions/3');
+    const restore = fakeFetch(409, { error: { code: 'revision_conflict', message: 'stale' } });
+    const api = createHttpApi({ baseUrl: 'http://x', getToken: () => null, fetch: restore });
+    await expect(api.restoreEdl('v1', { revision: 1, baseRevision: 2 })).rejects.toMatchObject({ status: 409, code: 'revision_conflict' });
+    const [url, init] = restore.mock.calls[0]!;
+    expect(url).toBe('http://x/v1/videos/v1/edl/restore');
+    expect(init!.method).toBe('POST');
+    expect(JSON.parse(String(init!.body))).toEqual({ revision: 1, baseRevision: 2 });
+    await expect(api.restoreEdl('v1', { revision: -1, baseRevision: 2 })).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(restore).toHaveBeenCalledTimes(1);
+  });
+
   it('turns ApiError bodies into typed errors', async () => {
     const api = createHttpApi({ baseUrl: 'http://x', getToken: () => null, fetch: fakeFetch(409, { error: { code: 'revision_conflict', message: 'stale' } }) });
     const err = await api.getVideo('v1').catch((e) => e);

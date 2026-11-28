@@ -8,8 +8,10 @@ import type {
   CreateBatchResponse,
   CreateRenderRequest,
   CreateRenderResponse,
+  EdlVersionResponse,
   GoalView,
   HomeResponse,
+  ListEdlVersionsResponse,
   ListStylesResponse,
   ListVideosResponse,
   MarkPostedRequest,
@@ -18,6 +20,7 @@ import type {
   ReissueUploadsResponse,
   RenderView,
   ReplanRequest,
+  RestoreEdlRequest,
   SaveEdlRequest,
   SaveEdlResponse,
   SaveStyleRequest,
@@ -51,6 +54,12 @@ export interface KiloApi {
   deleteVideo(videoId: string): Promise<void>;
   retryVideo(videoId: string): Promise<VideoSummary>;
   saveEdl(videoId: string, body: SaveEdlRequest): Promise<SaveEdlResponse>;
+  /** Every saved revision of the video's edit, newest first. */
+  listEdlVersions(videoId: string): Promise<ListEdlVersionsResponse>;
+  /** One revision's EDL exactly as saved. */
+  getEdlVersion(videoId: string, revision: number): Promise<EdlVersionResponse>;
+  /** Stores an earlier revision's edit as a new revision (current + 1). */
+  restoreEdl(videoId: string, body: RestoreEdlRequest): Promise<SaveEdlResponse>;
   addBroll(videoId: string, body: AddBrollRequest): Promise<AddBrollResponse>;
   deleteBroll(videoId: string, assetId: string): Promise<void>;
   replan(videoId: string, body: ReplanRequest): Promise<VideoSummary>;

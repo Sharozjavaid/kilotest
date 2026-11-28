@@ -29,7 +29,7 @@ describe('migrations and row-level security', () => {
 
   it('skips the Supabase-only migrations on plain Postgres; once an auth schema exists the client roles can reach no table', async () => {
     const first = await migrate(sql);
-    expect(first).toEqual({ applied: ['001_init.sql', '003_progress.sql', '004_hardening.sql'], skipped: ['002_rls.sql', '005_lockdown.sql'] });
+    expect(first).toEqual({ applied: ['001_init.sql', '003_progress.sql', '004_hardening.sql', '006_versions.sql'], skipped: ['002_rls.sql', '005_lockdown.sql'] });
     expect(await migrate(sql)).toEqual({ applied: [], skipped: ['002_rls.sql', '005_lockdown.sql'] });
 
     // Imitate Supabase: an auth schema with auth.uid(), the anon and authenticated roles, and the grants

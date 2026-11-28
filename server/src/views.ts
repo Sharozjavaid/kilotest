@@ -3,9 +3,14 @@ import {
   Edl,
   EditSettings,
   Transcript,
+  diffEdl,
   edlStats,
+  resolveTimeline,
+  summarizeChanges,
   type BatchSummary,
   type BrollAssetView,
+  type EdlAuthor,
+  type EdlVersionSummary,
   type GoalView,
   type RenderView,
   type Style,
@@ -215,6 +220,30 @@ export async function currentEdl(db: Db, videoId: string): Promise<{ edl: Edl; r
     select e.edl, e.revision from edls e join videos v on v.id = e.video_id and v.user_id = e.user_id
     where e.video_id = ${videoId} order by e.revision desc limit 1`;
   return row ?? null;
+}
+
+/** A row of `edls`, as the version routes read it. */
+export interface EdlRevisionRow {
+  revision: number;
+  author: EdlAuthor;
+  created_at: Date;
+  restored_from: number | null;
+  edl: Edl;
+}
+
+/**
+ * A version list row. `prev` is the revision stored before this one, or null for the first, whose
+ * summary is "First edit"; otherwise the base cut's changes from `prev` (diffEdl, summarizeChanges).
+ */
+export function edlVersionSummary(row: EdlRevisionRow, prev: EdlRevisionRow | null): EdlVersionSummary {
+  return {
+    revision: row.revision,
+    author: row.author,
+    createdAt: iso(row.created_at),
+    restoredFrom: row.restored_from,
+    durationSec: resolveTimeline(row.edl).durationSec,
+    summary: prev ? summarizeChanges(diffEdl(prev.edl, row.edl)) : 'First edit',
+  };
 }
 
 export async function videoDetail(db: Db, storage: StorageDriver, userId: string, videoId: string): Promise<VideoDetail | null> {

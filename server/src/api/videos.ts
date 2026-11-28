@@ -5,6 +5,7 @@ import {
   CreateRenderRequest,
   MarkPostedRequest,
   ReplanRequest,
+  RestoreEdlRequest,
   SaveEdlRequest,
   TemplatePropsSchemas,
   VideoStatus,
@@ -13,6 +14,8 @@ import {
   type AddBrollResponse,
   type CreateRenderResponse,
   type Edl,
+  type EdlVersionResponse,
+  type ListEdlVersionsResponse,
   type ListVideosResponse,
   type SaveEdlResponse,
 } from '@kilo/edl';
@@ -25,12 +28,14 @@ import { DEFAULT_MAX_UPLOAD_BYTES, uploadLimit } from '../uploads.js';
 import { keys, mediaExtension } from '../storage/types.js';
 import {
   currentEdl,
+  edlVersionSummary,
   renderView,
   videoDetail,
   videoSummaries,
   videoSummary,
   type BrollRow,
   type ClipRow,
+  type EdlRevisionRow,
   type RenderRow,
   type VideoRow,
 } from '../views.js';
@@ -103,14 +108,33 @@ export function mergeClientEdl(stored: Edl, client: Edl): { edl: Edl; problems: 
   return { edl, problems };
 }
 
-/** Removes every overlay (base and per-variant) that shows the given B-roll asset, and every variant's mention of it. */
-export function withoutAsset(edl: Edl, assetId: string): Edl {
-  const keep = (o: Edl['overlays'][number]) => !(o.type === 'broll' && o.assetId === assetId);
+/**
+ * Removes every overlay (base and per-variant) whose B-roll asset `drop` names, and every variant's
+ * mention of a base overlay that went (pruneHiddenOverlays).
+ */
+export function withoutBroll(edl: Edl, drop: (assetId: string) => boolean): Edl {
+  const keep = (o: Edl['overlays'][number]) => !(o.type === 'broll' && drop(o.assetId));
   return pruneHiddenOverlays({
     ...edl,
     overlays: edl.overlays.filter(keep),
     variants: edl.variants.map((v) => ({ ...v, overlays: v.overlays.filter(keep) })),
   });
+}
+
+/** Removes every overlay (base and per-variant) that shows the given B-roll asset, and every variant's mention of it. */
+export function withoutAsset(edl: Edl, assetId: string): Edl {
+  return withoutBroll(edl, (id) => id === assetId);
+}
+
+/** Largest value of the `edls.revision` column (integer). */
+const MAX_REVISION = 2_147_483_647;
+
+/** A `:revision` path parameter: a whole number, 0 or more (400 otherwise). One past what a revision can be is a 404. */
+function revisionParam(raw: string | undefined): number {
+  if (!raw || !/^\d{1,12}$/.test(raw)) throw invalidRequest('revision: a whole number, 0 or more');
+  const n = Number(raw);
+  if (n > MAX_REVISION) throw notFound('Revision');
+  return n;
 }
 
 /** Checks an EDL from the app against the stored video. Returns problems as strings. */
@@ -269,6 +293,93 @@ export function videoRoutes(deps: AppDeps): Hono<Env> {
       if (problems.length) throw invalidRequest(problems.slice(0, 5).join('; '));
       const edl: Edl = { ...merged.edl, revision: current.revision + 1 };
       await tx`insert into edls (video_id, revision, user_id, edl, author) values (${id}, ${edl.revision}, ${userId}, ${tx.json(edl as never)}, 'user')`;
+      await tx`
+        update videos set updated_at = now(),
+          status = case when status = 'done' then 'ready_for_review' else status end
+        where id = ${id}`;
+      return edl;
+    });
+    const body: SaveEdlResponse = { edl: saved };
+    return c.json(body);
+  });
+
+  /**
+   * Every stored revision of the video's edit, newest first, in one query. Each summary is the
+   * base cut's changes from the revision before it, computed here (diffEdl), "First edit" for the first.
+   */
+  app.get('/videos/:id/edl/versions', async (c) => {
+    const userId = c.get('userId');
+    const id = pathId(c, 'id', 'Video');
+    // The video joined to its revisions, so one round trip tells "no such video" from "no edit yet".
+    const rows = await db<(EdlRevisionRow | { revision: null })[]>`
+      select e.revision, e.author, e.created_at, e.restored_from, e.edl
+      from videos v left join edls e on e.video_id = v.id and e.user_id = v.user_id
+      where v.id = ${id} and v.user_id = ${userId}
+      order by e.revision asc`;
+    if (!rows.length) throw notFound('Video');
+    const revisions = rows.filter((r): r is EdlRevisionRow => r.revision !== null);
+    if (!revisions.length) throw invalidState('The video has no edit yet');
+    const versions = revisions.map((r, i) => edlVersionSummary(r, i > 0 ? revisions[i - 1]! : null)).reverse();
+    const body: ListEdlVersionsResponse = { versions, current: revisions[revisions.length - 1]!.revision };
+    return c.json(body);
+  });
+
+  /** One revision's EDL exactly as stored, with its list row (summarised against the revision before it). */
+  app.get('/videos/:id/edl/versions/:revision', async (c) => {
+    const userId = c.get('userId');
+    const id = pathId(c, 'id', 'Video');
+    const revision = revisionParam(c.req.param('revision'));
+    const rows = await db<(EdlRevisionRow | { revision: null })[]>`
+      select e.revision, e.author, e.created_at, e.restored_from, e.edl
+      from videos v left join lateral (
+        select * from edls e where e.video_id = v.id and e.user_id = v.user_id and e.revision <= ${revision}
+        order by e.revision desc limit 2
+      ) e on true
+      where v.id = ${id} and v.user_id = ${userId}
+      order by e.revision desc`;
+    if (!rows.length) throw notFound('Video');
+    const [row, prev] = rows.filter((r): r is EdlRevisionRow => r.revision !== null);
+    if (!row || row.revision !== revision) throw notFound('Revision');
+    const body: EdlVersionResponse = { version: edlVersionSummary(row, prev ?? null), edl: row.edl };
+    return c.json(body);
+  });
+
+  /**
+   * Brings back an earlier revision's edit as revision current + 1 (author `user`, `restored_from` set);
+   * history only moves forward. Locks and checks like the save: state, then revision, then which revision.
+   * Overlays whose B-roll is gone or not ready are dropped, then the edit must pass the save's checks.
+   */
+  app.post('/videos/:id/edl/restore', async (c) => {
+    const userId = c.get('userId');
+    const id = pathId(c, 'id', 'Video');
+    const req = await parseBody(c, RestoreEdlRequest);
+    const saved = await db.begin(async (tx) => {
+      const video = await own(tx, userId, id, true);
+      if (video.status !== 'ready_for_review' && video.status !== 'done') {
+        throw invalidState(`The edit cannot be restored while the video is ${video.status}`);
+      }
+      const current = await currentEdl(tx, id);
+      if (!current) throw invalidState('The video has no edit yet');
+      if (req.baseRevision !== current.revision) {
+        throw new HttpError(409, 'revision_conflict', `The edit has changed since revision ${req.baseRevision}; reload it`);
+      }
+      if (req.revision === current.revision) throw invalidRequest(`Revision ${current.revision} is already the current edit`);
+      // Revisions only go up to the current one: anything past it does not exist (and may not fit the column).
+      const [chosen] =
+        req.revision < current.revision
+          ? await tx<{ edl: Edl }[]>`select edl from edls where video_id = ${id} and user_id = ${userId} and revision = ${req.revision}`
+          : [];
+      if (!chosen) throw notFound('Revision');
+      const ready = new Set(
+        (await tx<{ id: string }[]>`select id from broll_assets where video_id = ${id} and user_id = ${userId} and status = 'ready'`).map((r) => r.id),
+      );
+      const restored = withoutBroll(chosen.edl, (assetId) => !ready.has(assetId));
+      const problems = await edlProblems(tx, id, restored);
+      if (problems.length) throw invalidRequest(`Revision ${req.revision} cannot be restored: ${problems.slice(0, 5).join('; ')}`);
+      const edl: Edl = { ...restored, revision: current.revision + 1 };
+      await tx`
+        insert into edls (video_id, revision, user_id, edl, author, restored_from)
+        values (${id}, ${edl.revision}, ${userId}, ${tx.json(edl as never)}, 'user', ${req.revision})`;
       await tx`
         update videos set updated_at = now(),
           status = case when status = 'done' then 'ready_for_review' else status end

@@ -3,8 +3,10 @@ import {
   CreateBatchResponse,
   CreateRenderResponse,
   DEFAULT_SETTINGS,
+  EdlVersionResponse,
   GoalView,
   HomeResponse,
+  ListEdlVersionsResponse,
   ListStylesResponse,
   ListVideosResponse,
   MODE_PRESETS,
@@ -14,9 +16,13 @@ import {
   TemplatePropsSchemas,
   VideoDetail,
   VideoSummary,
+  diffEdl,
   playbackRanges,
+  resolveTimeline,
+  summarizeChanges,
   toggleSegment,
   validateEdl,
+  type Edl,
   type TemplateId,
 } from '@kilo/edl';
 import { KiloApiError } from '../errors';
@@ -280,6 +286,130 @@ describe('MockKiloApi', () => {
     expect(home).toMatchObject({ activeBatches: [], readyToReview: [], recent: [] });
     const res = await api.createBatch({ settings: MODE_PRESETS.tiktok_shop.settings, videos: [{ title: 'x', source: 'upload', clips: [{ filename: 'a.mov', contentType: 'video/quicktime', sizeBytes: 1 }] }] });
     expect(res.batch.settings.mode).toBe('tiktok_shop');
+    api.dispose();
+  });
+});
+
+describe('MockKiloApi edit versions (GET /edl/versions, GET /edl/versions/:revision, POST /edl/restore)', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  const readyId = async (api: MockKiloApi, title = 'Morning routine') => (await api.home()).readyToReview.find((v) => v.title === title)!.id;
+  const brollAssets = (edl: Edl) => [...edl.overlays, ...edl.variants.flatMap((v) => v.overlays)].flatMap((o) => (o.type === 'broll' ? [o.assetId] : []));
+
+  it('keeps every revision: a save, a replan and a restore are listed newest first with their authors and changes', async () => {
+    const api = new MockKiloApi({ media });
+    const id = await readyId(api);
+    const d0 = await api.getVideo(id);
+    expect(d0.edl!.revision).toBe(0);
+    const r1 = (await api.saveEdl(id, { edl: toggleSegment(d0.edl!, 's5'), baseRevision: 0 })).edl;
+    await api.replan(id, { passes: ['graphics'] });
+    await jest.advanceTimersByTimeAsync(MOCK_TIMINGS.replan);
+    const r2 = (await api.getVideo(id)).edl!;
+    expect(r2.revision).toBe(2);
+    // Kept as returned: diffEdl compares overlays by their JSON, so a re-parse (which orders keys) would read as a change.
+    const r3 = (await api.restoreEdl(id, { revision: 0, baseRevision: 2 })).edl;
+    strictParse(SaveEdlResponse, { edl: r3 });
+    expect(r3.revision).toBe(3);
+    const edls = [d0.edl!, r1, r2, r3];
+
+    const list = strictParse(ListEdlVersionsResponse, await api.listEdlVersions(id));
+    expect(list.current).toBe(3);
+    expect(list.versions.map((v) => [v.revision, v.author, v.restoredFrom])).toEqual([
+      [3, 'user', 0],
+      [2, 'replan', null],
+      [1, 'user', null],
+      [0, 'decider', null],
+    ]);
+    for (const v of list.versions) {
+      expect(v.summary).toBe(v.revision === 0 ? 'First edit' : summarizeChanges(diffEdl(edls[v.revision - 1]!, edls[v.revision]!)));
+      expect(v.durationSec).toBe(resolveTimeline(edls[v.revision]!).durationSec);
+      expect(new Date(v.createdAt).toISOString()).toBe(v.createdAt);
+    }
+    expect(list.versions.find((v) => v.revision === 1)!.summary).toMatch(/cut|kept/);
+    // The restore brought back revision 0's cut points: segment s5 is as the decider left it.
+    expect(r3.segments).toEqual(d0.edl!.segments);
+    expect((await api.getVideo(id)).edl).toEqual(r3);
+    api.dispose();
+  });
+
+  it('reads one revision exactly as saved; 404 for a revision the video does not have, 400 for one that is not a whole number', async () => {
+    const api = new MockKiloApi({ media });
+    const id = await readyId(api);
+    const d0 = await api.getVideo(id);
+    const saved = (await api.saveEdl(id, { edl: toggleSegment(d0.edl!, 's5'), baseRevision: 0 })).edl;
+    const zero = strictParse(EdlVersionResponse, await api.getEdlVersion(id, 0));
+    expect(zero.edl).toEqual(d0.edl);
+    expect(zero.version).toMatchObject({ revision: 0, author: 'decider', summary: 'First edit', restoredFrom: null });
+    const one = strictParse(EdlVersionResponse, await api.getEdlVersion(id, 1));
+    expect(one.edl).toEqual(saved);
+    expect(one.version.summary).toBe(summarizeChanges(diffEdl(d0.edl!, saved)));
+    // What comes back is a copy: changing it changes nothing stored.
+    one.edl.segments[0]!.keep = !one.edl.segments[0]!.keep;
+    expect((await api.getEdlVersion(id, 1)).edl).toEqual(saved);
+    await expect(api.getEdlVersion(id, 2)).rejects.toMatchObject({ status: 404, code: 'not_found' });
+    for (const bad of [-1, 1.5, Number.NaN]) await expect(api.getEdlVersion(id, bad)).rejects.toMatchObject({ status: 400, code: 'invalid_request' });
+    await expect(api.listEdlVersions('video-nope')).rejects.toMatchObject({ status: 404 });
+    await expect(api.getEdlVersion('video-nope', 0)).rejects.toMatchObject({ status: 404 });
+    api.dispose();
+  });
+
+  it('refuses a restore like the server: current revision 400, stale base 409, missing 404, while analysing 409, bad body 400', async () => {
+    const api = new MockKiloApi({ media });
+    const id = await readyId(api);
+    const d0 = await api.getVideo(id);
+    await expect(api.restoreEdl(id, { revision: 0, baseRevision: 0 })).rejects.toMatchObject({ status: 400, code: 'invalid_request' });
+    await api.saveEdl(id, { edl: toggleSegment(d0.edl!, 's5'), baseRevision: 0 });
+    await expect(api.restoreEdl(id, { revision: 0, baseRevision: 0 })).rejects.toMatchObject({ status: 409, code: 'revision_conflict' });
+    await expect(api.restoreEdl(id, { revision: 0, baseRevision: 0 })).rejects.toBeInstanceOf(KiloApiError);
+    await expect(api.restoreEdl(id, { revision: 6, baseRevision: 1 })).rejects.toMatchObject({ status: 404, code: 'not_found' });
+    await expect(api.restoreEdl(id, { revision: -1, baseRevision: 1 })).rejects.toMatchObject({ status: 400, code: 'invalid_request' });
+    await expect(api.restoreEdl(id, { revision: 0 } as never)).rejects.toMatchObject({ status: 400, code: 'invalid_request' });
+    await expect(api.restoreEdl('video-nope', { revision: 0, baseRevision: 1 })).rejects.toMatchObject({ status: 404 });
+    await api.replan(id, { passes: ['graphics'] });
+    await expect(api.restoreEdl(id, { revision: 0, baseRevision: 1 })).rejects.toMatchObject({ status: 409, code: 'invalid_state' });
+    await jest.advanceTimersByTimeAsync(MOCK_TIMINGS.replan);
+    // Nothing refused was stored.
+    expect((await api.listEdlVersions(id)).versions.map((v) => v.revision)).toEqual([2, 1, 0]);
+    api.dispose();
+  });
+
+  it('drops overlays whose B-roll was deleted since, and the hidden ids that named them', async () => {
+    const api = new MockKiloApi({ media });
+    const id = await readyId(api);
+    const d0 = await api.getVideo(id);
+    const overlay = d0.edl!.overlays.find((o) => o.type === 'broll')!;
+    const gone = (overlay as { assetId: string }).assetId;
+    expect(d0.edl!.variants.length).toBeGreaterThanOrEqual(1);
+    const hiding = { ...d0.edl!, variants: d0.edl!.variants.map((v, i) => (i === 0 ? { ...v, hiddenOverlayIds: [overlay.id] } : v)) };
+    const r1 = (await api.saveEdl(id, { edl: hiding, baseRevision: 0 })).edl;
+    expect(r1.variants[0]!.hiddenOverlayIds).toEqual([overlay.id]);
+    await api.deleteBroll(id, gone);
+    const list = await api.listEdlVersions(id);
+    expect(list.versions[0]).toMatchObject({ revision: 2, author: 'system' });
+    expect(list.versions[0]!.summary).toMatch(/B-roll/);
+
+    const restored = (await api.restoreEdl(id, { revision: 1, baseRevision: 2 })).edl;
+    expect(restored.revision).toBe(3);
+    expect(brollAssets(restored)).not.toContain(gone);
+    expect(restored.overlays).toEqual(r1.overlays.filter((o) => o.id !== overlay.id));
+    expect(restored.variants.every((v) => !v.hiddenOverlayIds.includes(overlay.id))).toBe(true);
+    // The stored revision 1 still has it: history is never changed.
+    expect((await api.getEdlVersion(id, 1)).edl).toEqual(r1);
+    checkVideo(await api.getVideo(id));
+    api.dispose();
+  });
+
+  it('a restore takes a done video back to ready_for_review', async () => {
+    const api = new MockKiloApi({ media });
+    const done = (await api.listVideos({ status: 'done' })).videos[0]!;
+    api.bumpRevision(done.id);
+    expect((await api.getVideo(done.id)).status).toBe('done');
+    const res = await api.restoreEdl(done.id, { revision: 0, baseRevision: 1 });
+    expect(res.edl.revision).toBe(2);
+    const after = await api.getVideo(done.id);
+    expect(after.status).toBe('ready_for_review');
+    checkVideo(after);
     api.dispose();
   });
 });

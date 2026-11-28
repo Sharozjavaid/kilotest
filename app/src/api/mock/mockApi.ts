@@ -3,17 +3,25 @@ import {
   EditSettings as EditSettingsSchema,
   Edl as EdlSchema,
   MODE_PRESETS,
+  RestoreEdlRequest,
   TemplatePropsSchemas,
+  diffEdl,
   edlStats,
   getTemplate,
   checkOverlayRules,
+  resolveTimeline,
+  summarizeChanges,
   validateEdl,
   type BatchDetail,
   type BatchSummary,
   type BrollAssetView,
   type ClipInfo,
   type Edl,
+  type EdlAuthor,
+  type EdlVersionResponse,
+  type EdlVersionSummary,
   type EditSettings,
+  type ListEdlVersionsResponse,
   type GoalView,
   type ReplanPass,
   type RenderView,
@@ -72,6 +80,8 @@ interface MockVideo {
   transcripts: Transcript[];
   clipOffsets: Record<string, number> | null;
   edl: Edl | null;
+  /** Every stored revision, oldest first (server: the edls table). `edl` is always the last one. */
+  history: MockRevision[];
   broll: BrollAssetView[];
   renders: RenderView[];
   /** Fail the next analysis with this message. */
@@ -81,6 +91,15 @@ interface MockVideo {
   /** While analysing: when the progress clock started and how long it runs (ms). */
   progressFrom?: number;
   progressFor?: number;
+}
+
+/** One stored revision of a video's edit (server: a row of `edls`). */
+interface MockRevision {
+  revision: number;
+  author: EdlAuthor;
+  createdAt: string;
+  restoredFrom: number | null;
+  edl: Edl;
 }
 
 interface MockBatch {
@@ -146,7 +165,7 @@ export class MockKiloApi implements KiloApi {
   /** Test hook: pretend another device saved this video's EDL, so the next save conflicts. */
   bumpRevision(videoId: string): void {
     const v = this.mustVideo(videoId);
-    if (v.edl) v.edl = { ...v.edl, revision: v.edl.revision + 1 };
+    if (v.edl) this.commit(v, { ...v.edl, revision: v.edl.revision + 1 }, 'user');
   }
 
   // ---- KiloApi ----------------------------------------------------------------
@@ -201,6 +220,7 @@ export class MockKiloApi implements KiloApi {
         transcripts: [],
         clipOffsets: null,
         edl: null,
+        history: [],
         broll: broll.map(({ assetId, b }) => this.newBroll(assetId, b.kind, b.filename)),
         renders: [],
         clipMeta: Object.fromEntries(
@@ -381,11 +401,71 @@ export class MockKiloApi implements KiloApi {
     }
     problems.push(...checkOverlayRules(next).map((i) => i.message));
     if (problems.length) throw new KiloApiError(400, 'invalid_request', problems.slice(0, 5).join('; '));
-    v.edl = { ...next, revision: v.edl.revision + 1 };
+    this.commit(v, { ...next, revision: v.edl.revision + 1 }, 'user');
     this.applyStats(v);
     if (v.summary.status === 'done') this.setStatus(v, 'ready_for_review');
     else v.summary.updatedAt = this.iso();
-    return clone({ edl: v.edl });
+    return clone({ edl: v.edl! });
+  }
+
+  /** As the server's GET /edl/versions: every revision newest first, each summarised against the one before it. */
+  async listEdlVersions(videoId: string): Promise<ListEdlVersionsResponse> {
+    await this.delay();
+    const v = this.mustVideo(videoId);
+    if (!v.edl || !v.history.length) throw new KiloApiError(409, 'invalid_state', 'The video has no edit yet');
+    const versions = v.history.map((h, i) => versionSummary(h, i > 0 ? v.history[i - 1]! : null));
+    return clone({ versions: versions.reverse(), current: v.edl.revision });
+  }
+
+  /** As the server's GET /edl/versions/:revision: 400 for a revision that is not a whole number, 404 for one the video doesn't have. */
+  async getEdlVersion(videoId: string, revision: number): Promise<EdlVersionResponse> {
+    await this.delay();
+    if (!Number.isSafeInteger(revision) || revision < 0) throw new KiloApiError(400, 'invalid_request', 'revision: a whole number, 0 or more');
+    const v = this.mustVideo(videoId);
+    const i = v.history.findIndex((h) => h.revision === revision);
+    if (i < 0) throw notFound('revision');
+    const h = v.history[i]!;
+    return clone({ version: versionSummary(h, i > 0 ? v.history[i - 1]! : null), edl: h.edl });
+  }
+
+  /**
+   * Mirrors the server's POST /edl/restore: state, then revision, then which revision, then the
+   * restored edit's soundness. Overlays whose B-roll is gone (or not ready) are dropped first.
+   */
+  async restoreEdl(videoId: string, body: { revision: number; baseRevision: number }) {
+    await this.delay();
+    const parsed = RestoreEdlRequest.safeParse(body);
+    if (!parsed.success) throw new KiloApiError(400, 'invalid_request', parsed.error.message);
+    const req = parsed.data;
+    const v = this.mustVideo(videoId);
+    if (v.summary.status !== 'ready_for_review' && v.summary.status !== 'done') {
+      throw new KiloApiError(409, 'invalid_state', `The edit cannot be restored while the video is ${v.summary.status}`);
+    }
+    if (!v.edl) throw new KiloApiError(409, 'invalid_state', 'The video has no edit yet');
+    const current = v.edl.revision;
+    if (req.baseRevision !== current) {
+      throw new KiloApiError(409, 'revision_conflict', `The edit has changed since revision ${req.baseRevision}; reload it`);
+    }
+    if (req.revision === current) throw new KiloApiError(400, 'invalid_request', `Revision ${current} is already the current edit`);
+    const chosen = req.revision < current ? v.history.find((h) => h.revision === req.revision) : undefined;
+    if (!chosen) throw notFound('revision');
+    const ready = new Set(v.broll.filter((b) => b.status === 'ready').map((b) => b.id));
+    const next = withReadyBroll(clone(chosen.edl), ready);
+    const problems: string[] = [];
+    if (next.videoId !== videoId) problems.push('edl.videoId does not match the video');
+    problems.push(...validateEdl(next, v.clips).map((i) => i.message));
+    for (const o of [...next.overlays, ...next.variants.flatMap((x) => x.overlays)]) {
+      if (o.type === 'graphic' && !TemplatePropsSchemas[o.template].safeParse(o.props).success) {
+        problems.push(`Overlay ${o.id} has invalid props for ${o.template}`);
+      }
+    }
+    problems.push(...checkOverlayRules(next).map((i) => i.message));
+    if (problems.length) throw new KiloApiError(400, 'invalid_request', `Revision ${req.revision} cannot be restored: ${problems.slice(0, 5).join('; ')}`);
+    this.commit(v, { ...next, revision: current + 1 }, 'user', req.revision);
+    this.applyStats(v);
+    if (v.summary.status === 'done') this.setStatus(v, 'ready_for_review');
+    else v.summary.updatedAt = this.iso();
+    return clone({ edl: v.edl! });
   }
 
   async addBroll(videoId: string, body: Parameters<KiloApi['addBroll']>[1]) {
@@ -421,7 +501,7 @@ export class MockKiloApi implements KiloApi {
       // As the server: a removal that changed the edit is stored as the next revision.
       const changed = next.overlays.length !== v.edl.overlays.length || next.variants.some((x, i) => x.overlays.length !== v.edl!.variants[i]!.overlays.length);
       if (changed) {
-        v.edl = { ...next, revision: v.edl.revision + 1 };
+        this.commit(v, { ...next, revision: v.edl.revision + 1 }, 'system');
         this.applyStats(v);
       }
     }
@@ -466,7 +546,7 @@ export class MockKiloApi implements KiloApi {
         }
       }
       if (passes.has('variants')) edl = { ...edl, variants: fresh.edl.variants };
-      v.edl = pruneHiddenOverlays(edl);
+      this.commit(v, pruneHiddenOverlays(edl), 'replan');
       this.applyStats(v);
       this.setStatus(v, 'ready_for_review');
     });
@@ -622,7 +702,8 @@ export class MockKiloApi implements KiloApi {
     v.clips = a.clips.map((c) => ({ ...c, ...(v.clipMeta?.[c.id] ?? {}) }));
     v.transcripts = a.transcripts;
     v.clipOffsets = a.clipOffsets;
-    v.edl = a.edl;
+    // As the server: the decider's edit is revision 0 and stored once; a re-run (a retry) keeps the edit there is.
+    if (!v.history.length) this.commit(v, a.edl, 'decider');
     v.summary.thumbnailUrl = this.media.thumbnailUrl;
     v.summary.totalSec = a.totalSec;
     this.applyStats(v);
@@ -646,6 +727,12 @@ export class MockKiloApi implements KiloApi {
       this.later(MOCK_TIMINGS.renderTick, tick);
     };
     this.later(MOCK_TIMINGS.renderQueued, tick);
+  }
+
+  /** Stores `edl` as the video's newest revision (server: an insert into `edls`). */
+  private commit(v: MockVideo, edl: Edl, author: EdlAuthor, restoredFrom: number | null = null): void {
+    v.edl = edl;
+    v.history.push({ revision: edl.revision, author, createdAt: this.iso(), restoredFrom, edl: clone(edl) });
   }
 
   private applyStats(v: MockVideo): void {
@@ -801,6 +888,7 @@ export class MockKiloApi implements KiloApi {
         transcripts: [],
         clipOffsets: null,
         edl: null,
+        history: [],
         broll: Array.from({ length: opts.broll ?? 0 }, (_, i) => this.newBroll(this.id('asset'), 'image', i ? 'stopwatch.jpg' : 'bathroom-shelf.jpg', i ? 'stock' : 'user')),
         renders: [],
       };
@@ -861,6 +949,24 @@ export class MockKiloApi implements KiloApi {
       error: "We couldn't hear any speech in this clip. Check the microphone wasn't covered, then try again.",
     });
   }
+}
+
+/** A version list row: `prev` is the revision before it, null for the first (server versionSummary). */
+function versionSummary(h: MockRevision, prev: MockRevision | null): EdlVersionSummary {
+  return {
+    revision: h.revision,
+    author: h.author,
+    createdAt: h.createdAt,
+    restoredFrom: h.restoredFrom,
+    durationSec: resolveTimeline(h.edl).durationSec,
+    summary: prev ? summarizeChanges(diffEdl(prev.edl, h.edl)) : 'First edit',
+  };
+}
+
+/** Drops overlays (base and variant) whose B-roll is not in `ready`, then hidden ids left naming nothing (server withoutBroll). */
+function withReadyBroll(edl: Edl, ready: ReadonlySet<string>): Edl {
+  const keep = (o: Edl['overlays'][number]) => o.type !== 'broll' || ready.has(o.assetId);
+  return pruneHiddenOverlays({ ...edl, overlays: edl.overlays.filter(keep), variants: edl.variants.map((x) => ({ ...x, overlays: x.overlays.filter(keep) })) });
 }
 
 function byNewest(a: { createdAt: string }, b: { createdAt: string }): number {

@@ -1,6 +1,6 @@
 import { QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useIsFocused } from 'expo-router';
-import type { BatchDetail, HomeResponse, RenderView, VideoDetail, VideoSummary } from '@kilo/edl';
+import type { BatchDetail, HomeResponse, RenderView, RestoreEdlRequest, SaveEdlResponse, VideoDetail, VideoSummary } from '@kilo/edl';
 import { getApi } from './client';
 import { isKiloApiError } from './errors';
 import { isBusy, type ListVideosQuery } from './types';
@@ -15,6 +15,10 @@ export const keys = {
   render: (id: string) => ['render', id] as const,
   goal: ['goal'] as const,
   styles: ['styles'] as const,
+  /** GET /videos/:id/edl/versions. */
+  edlVersions: (videoId: string) => ['edlVersions', videoId] as const,
+  /** GET /videos/:id/edl/versions/:revision. A revision never changes once saved. */
+  edlVersion: (videoId: string, revision: number) => ['edlVersion', videoId, revision] as const,
 };
 
 /** How often to poll while something is still moving on the server. */
@@ -202,6 +206,50 @@ export function useMarkPosted() {
     onSuccess: (v) => {
       invalidate(v.id, v.batchId);
       void qc.invalidateQueries({ queryKey: keys.goal });
+    },
+  });
+}
+
+/**
+ * The video's saved revisions, newest first, with `current`. Refetched when a save, replan or
+ * restore is invalidated through `keys.edlVersions`; never polls on its own.
+ */
+export function useEdlVersions(videoId: string | undefined) {
+  const focused = useScreenFocused();
+  return useQuery({
+    queryKey: keys.edlVersions(videoId ?? ''),
+    queryFn: () => getApi().listEdlVersions(videoId!),
+    enabled: !!videoId,
+    subscribed: focused,
+  });
+}
+
+/** One revision's EDL exactly as saved. Revisions never change, so it is never stale. */
+export function useEdlVersion(videoId: string | undefined, revision: number | null | undefined) {
+  return useQuery({
+    queryKey: keys.edlVersion(videoId ?? '', revision ?? -1),
+    queryFn: () => getApi().getEdlVersion(videoId!, revision!),
+    enabled: !!videoId && revision != null && revision >= 0,
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * POST /videos/:id/edl/restore: `mutate({ revision, baseRevision })` brings back `revision` as a
+ * new revision. On success the video's cached EDL becomes the restored one, and the video (whose
+ * status may move from done back to review), Home and the version list are refetched, as a save does.
+ * Errors are KiloApiError: 409 revision_conflict when `baseRevision` is stale, 400 for the current
+ * revision or an edit that no longer validates, 404 for a revision the video doesn't have.
+ */
+export function useRestoreEdl(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation<SaveEdlResponse, Error, RestoreEdlRequest>({
+    mutationFn: (body: RestoreEdlRequest) => getApi().restoreEdl(videoId, body),
+    onSuccess: (res) => {
+      qc.setQueryData<VideoDetail>(keys.video(videoId), (old) => (old ? { ...old, edl: res.edl } : old));
+      void qc.invalidateQueries({ queryKey: keys.video(videoId) });
+      void qc.invalidateQueries({ queryKey: keys.home });
+      void qc.invalidateQueries({ queryKey: keys.edlVersions(videoId) });
     },
   });
 }
